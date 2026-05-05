@@ -1,0 +1,46 @@
+# ─────────────────────────────────────────────────────────────────────────────
+#  Nexus AI — Web Frontend (standalone compose)
+#
+#  This compose file is independent of the existing API + LiteLLM stack
+#  in `backend/docker-compose.yml`. It can be deployed as a separate
+#  Coolify "Application" so the Android app and the public website live
+#  in completely isolated containers / restart cycles.
+#
+#  Usage (local):
+#    docker compose -f docker-compose.web.yml up --build
+#
+#  In Coolify:
+#    1. Create a new "Application" in your "ai nexus app" project.
+#    2. Source       : the repo containing this file.
+#    3. Build pack   : Dockerfile.
+#    4. Dockerfile   : Dockerfile.web
+#    5. Build context: . (project root)
+#    6. Port         : 80
+#    7. Build args   : API_BASE_URL=http://72.60.219.97:3000
+#                      LITELLM_URL=http://72.60.219.97:4000  (optional)
+#    8. Domain       : Coolify will auto-generate a sslip.io URL like
+#                      `nxsweb-xyz.72.60.219.97.sslip.io`.
+# ─────────────────────────────────────────────────────────────────────────────
+
+version: "3.8"
+
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+      args:
+        # Override these at deploy time via Coolify build args. The values
+        # here are sane defaults pointing at the existing public API.
+        API_BASE_URL: "${API_BASE_URL:-http://72.60.219.97:3000}"
+        LITELLM_URL: "${LITELLM_URL:-}"
+    container_name: ainexus-web
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

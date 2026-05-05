@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>AI Expense Analytics</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "primary": "#4725f4",
+                        "background-light": "#f6f5f8",
+                        "background-dark": "#000000",
+                    },
+                    fontFamily: {
+                        "display": ["Manrope", "sans-serif"]
+                    },
+                    borderRadius: { "DEFAULT": "0.5rem", "lg": "1rem", "xl": "1.5rem", "full": "9999px" },
+                },
+            },
+        }
+    </script>
+<style>
+        .glass-card {
+            background: rgba(71, 37, 244, 0.05);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(71, 37, 244, 0.15);
+        }
+        .glow-icon {
+            text-shadow: 0 0 15px rgba(71, 37, 244, 0.6);
+        }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-background-dark font-display text-slate-100 min-h-screen selection:bg-primary/30">
+<div class="relative flex min-h-screen w-full flex-col overflow-x-hidden pb-24">
+<!-- Header -->
+<header class="sticky top-0 z-50 flex items-center bg-background-dark/80 backdrop-blur-md p-4 justify-between border-b border-primary/10">
+<div class="flex size-10 items-center justify-center rounded-full bg-primary/10 text-primary">
+<span class="material-symbols-outlined">arrow_back</span>
+</div>
+<h1 class="text-slate-100 text-lg font-bold tracking-tight">Insights</h1>
+<button class="flex size-10 items-center justify-center rounded-full bg-primary/10 text-primary">
+<span class="material-symbols-outlined">calendar_today</span>
+</button>
+</header>
+<!-- Timeframe Selector -->
+<div class="px-4 py-4">
+<div class="flex h-12 items-center justify-center rounded-xl bg-primary/5 p-1 border border-primary/10">
+<label class="flex cursor-pointer h-full grow items-center justify-center overflow-hidden rounded-lg px-2 text-slate-400 has-[:checked]:bg-primary has-[:checked]:text-white transition-all duration-300">
+<span class="text-sm font-semibold">Today</span>
+<input class="hidden" name="timeframe" type="radio" value="Today"/>
+</label>
+<label class="flex cursor-pointer h-full grow items-center justify-center overflow-hidden rounded-lg px-2 text-slate-400 has-[:checked]:bg-primary has-[:checked]:text-white transition-all duration-300">
+<span class="text-sm font-semibold">7 Days</span>
+<input checked="" class="hidden" name="timeframe" type="radio" value="7 Days"/>
+</label>
+<label class="flex cursor-pointer h-full grow items-center justify-center overflow-hidden rounded-lg px-2 text-slate-400 has-[:checked]:bg-primary has-[:checked]:text-white transition-all duration-300">
+<span class="text-sm font-semibold">Month</span>
+<input class="hidden" name="timeframe" type="radio" value="Month"/>
+</label>
+<label class="flex cursor-pointer h-full grow items-center justify-center overflow-hidden rounded-lg px-2 text-slate-400 has-[:checked]:bg-primary has-[:checked]:text-white transition-all duration-300">
+<span class="text-sm font-semibold">6 Months</span>
+<input class="hidden" name="timeframe" type="radio" value="6 Months"/>
+</label>
+</div>
+</div>
+<!-- Hero Analytics Chart Section -->
+<section class="px-4 py-4">
+<div class="flex flex-col gap-1 mb-6">
+<p class="text-slate-400 text-sm font-medium uppercase tracking-wider">Total Spending</p>
+<div class="flex items-baseline gap-2">
+<h2 class="text-slate-100 text-4xl font-extrabold tracking-tight">$3,482.90</h2>
+<span class="text-emerald-400 text-sm font-bold flex items-center">
+<span class="material-symbols-outlined text-sm">trending_up</span> 14.2%
+                    </span>
+</div>
+</div>
+<!-- Gradient Area Chart -->
+<div class="relative h-48 w-full group">
+<svg class="w-full h-full" preserveaspectratio="none" viewbox="0 0 400 150">
+<defs>
+<lineargradient id="chartGradient" x1="0%" x2="0%" y1="0%" y2="100%">
+<stop offset="0%" stop-color="#4725f4" stop-opacity="0.6"></stop>
+<stop offset="100%" stop-color="#4725f4" stop-opacity="0"></stop>
+</lineargradient>
+</defs>
+<path d="M0,120 Q50,110 80,40 T160,80 T240,30 T320,70 T400,20 L400,150 L0,150 Z" fill="url(#chartGradient)"></path>
+<path d="M0,120 Q50,110 80,40 T160,80 T240,30 T320,70 T400,20" fill="none" stroke="#4725f4" stroke-linecap="round" stroke-width="4"></path>
+<!-- Animated data points simulation -->
+<circle class="animate-pulse" cx="80" cy="40" fill="#4725f4" r="5"></circle>
+<circle cx="240" cy="30" fill="#4725f4" r="5"></circle>
+<circle cx="400" cy="20" fill="#4725f4" r="5"></circle>
+</svg>
+<div class="flex justify-between mt-4 px-2">
+<span class="text-slate-500 text-xs font-bold uppercase">Mon</span>
+<span class="text-slate-500 text-xs font-bold uppercase">Tue</span>
+<span class="text-slate-500 text-xs font-bold uppercase">Wed</span>
+<span class="text-slate-500 text-xs font-bold uppercase">Thu</span>
+<span class="text-slate-500 text-xs font-bold uppercase">Fri</span>
+<span class="text-slate-500 text-xs font-bold uppercase">Sat</span>
+<span class="text-slate-500 text-xs font-bold uppercase">Sun</span>
+</div>
+</div>
+</section>
+<!-- Category Progress Section -->
+<section class="px-4 py-8">
+<h3 class="text-slate-100 text-xl font-bold mb-6">Spending by Category</h3>
+<div class="flex flex-col gap-6">
+<!-- Donut Chart & Legend -->
+<div class="flex items-center gap-8 bg-primary/5 rounded-2xl p-6 border border-primary/10">
+<div class="relative size-32 shrink-0">
+<svg class="size-full transform -rotate-90" viewbox="0 0 36 36">
+<circle cx="18" cy="18" fill="none" r="16" stroke="#222" stroke-width="3"></circle>
+<circle cx="18" cy="18" fill="none" r="16" stroke="#4725f4" stroke-dasharray="70, 100" stroke-width="3"></circle>
+<circle cx="18" cy="18" fill="none" r="16" stroke="#ec4899" stroke-dasharray="25, 100" stroke-dashoffset="-70" stroke-width="3"></circle>
+<circle cx="18" cy="18" fill="none" r="16" stroke="#10b981" stroke-dasharray="5, 100" stroke-dashoffset="-95" stroke-width="3"></circle>
+</svg>
+<div class="absolute inset-0 flex flex-col items-center justify-center">
+<span class="text-slate-100 text-lg font-bold">70%</span>
+<span class="text-slate-500 text-[10px] uppercase font-bold tracking-tight">Food</span>
+</div>
+</div>
+<div class="flex flex-col gap-3 grow">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-2">
+<div class="size-2 rounded-full bg-primary"></div>
+<span class="text-slate-300 text-sm font-medium">Food &amp; Drinks</span>
+</div>
+<span class="text-slate-100 text-sm font-bold">$2,438</span>
+</div>
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-2">
+<div class="size-2 rounded-full bg-pink-500"></div>
+<span class="text-slate-300 text-sm font-medium">Shopping</span>
+</div>
+<span class="text-slate-100 text-sm font-bold">$870</span>
+</div>
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-2">
+<div class="size-2 rounded-full bg-emerald-500"></div>
+<span class="text-slate-300 text-sm font-medium">Others</span>
+</div>
+<span class="text-slate-100 text-sm font-bold">$174</span>
+</div>
+</div>
+</div>
+</div>
+</section>
+<!-- Top Categories Glass Cards -->
+<section class="px-4 py-4 pb-12">
+<h3 class="text-slate-100 text-xl font-bold mb-4">Top Spending Categories</h3>
+<div class="grid grid-cols-2 gap-4">
+<!-- Card 1 -->
+<div class="glass-card p-4 rounded-2xl flex flex-col gap-4">
+<div class="size-10 rounded-xl bg-primary/20 flex items-center justify-center text-primary glow-icon">
+<span class="material-symbols-outlined">restaurant</span>
+</div>
+<div>
+<p class="text-slate-400 text-xs font-medium">Dining</p>
+<p class="text-slate-100 text-lg font-bold">$1,240</p>
+</div>
+<div class="h-1 w-full bg-primary/10 rounded-full overflow-hidden">
+<div class="h-full bg-primary w-[65%]"></div>
+</div>
+</div>
+<!-- Card 2 -->
+<div class="glass-card p-4 rounded-2xl flex flex-col gap-4">
+<div class="size-10 rounded-xl bg-pink-500/20 flex items-center justify-center text-pink-500 glow-icon">
+<span class="material-symbols-outlined">shopping_bag</span>
+</div>
+<div>
+<p class="text-slate-400 text-xs font-medium">Shopping</p>
+<p class="text-slate-100 text-lg font-bold">$870</p>
+</div>
+<div class="h-1 w-full bg-pink-500/10 rounded-full overflow-hidden">
+<div class="h-full bg-pink-500 w-[42%]"></div>
+</div>
+</div>
+<!-- Card 3 -->
+<div class="glass-card p-4 rounded-2xl flex flex-col gap-4">
+<div class="size-10 rounded-xl bg-emerald-500/20 flex items-center justify-center text-emerald-500 glow-icon">
+<span class="material-symbols-outlined">directions_car</span>
+</div>
+<div>
+<p class="text-slate-400 text-xs font-medium">Transport</p>
+<p class="text-slate-100 text-lg font-bold">$420</p>
+</div>
+<div class="h-1 w-full bg-emerald-500/10 rounded-full overflow-hidden">
+<div class="h-full bg-emerald-500 w-[28%]"></div>
+</div>
+</div>
+<!-- Card 4 -->
+<div class="glass-card p-4 rounded-2xl flex flex-col gap-4">
+<div class="size-10 rounded-xl bg-amber-500/20 flex items-center justify-center text-amber-500 glow-icon">
+<span class="material-symbols-outlined">home</span>
+</div>
+<div>
+<p class="text-slate-400 text-xs font-medium">Rent</p>
+<p class="text-slate-100 text-lg font-bold">$2,800</p>
+</div>
+<div class="h-1 w-full bg-amber-500/10 rounded-full overflow-hidden">
+<div class="h-full bg-amber-500 w-[90%]"></div>
+</div>
+</div>
+</div>
+</section>
+<!-- Bottom Navbar -->
+<nav class="fixed bottom-0 left-0 right-0 z-50 bg-background-dark/95 backdrop-blur-xl border-t border-primary/10 px-6 pb-6 pt-3 flex justify-between items-center">
+<a class="flex flex-col items-center gap-1 text-slate-500 hover:text-primary transition-colors" href="#">
+<span class="material-symbols-outlined text-[28px]">home</span>
+<span class="text-[10px] font-bold uppercase tracking-widest">Home</span>
+</a>
+<a class="flex flex-col items-center gap-1 text-primary transition-colors" href="#">
+<span class="material-symbols-outlined text-[28px] fill-current">monitoring</span>
+<span class="text-[10px] font-bold uppercase tracking-widest">Insights</span>
+</a>
+<div class="flex flex-col items-center -mt-10">
+<div class="size-14 rounded-full bg-primary flex items-center justify-center text-white shadow-[0_0_20px_rgba(71,37,244,0.4)] border-4 border-background-dark">
+<span class="material-symbols-outlined text-[32px]">add</span>
+</div>
+<span class="text-[10px] font-bold uppercase tracking-widest mt-2 text-slate-500">Discover</span>
+</div>
+<a class="flex flex-col items-center gap-1 text-slate-500 hover:text-primary transition-colors" href="#">
+<span class="material-symbols-outlined text-[28px]">auto_awesome</span>
+<span class="text-[10px] font-bold uppercase tracking-widest">AI Coach</span>
+</a>
+<a class="flex flex-col items-center gap-1 text-slate-500 hover:text-primary transition-colors" href="#">
+<span class="material-symbols-outlined text-[28px]">settings</span>
+<span class="text-[10px] font-bold uppercase tracking-widest">Settings</span>
+</a>
+</nav>
+</div>
+</body></html>

@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@200..800&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "primary": "#4725f4",
+                        "background-light": "#f6f5f8",
+                        "background-dark": "#000000",
+                    },
+                    fontFamily: {
+                        "display": ["Manrope", "sans-serif"]
+                    },
+                    borderRadius: {"DEFAULT": "0.5rem", "lg": "1rem", "xl": "1.5rem", "full": "9999px"},
+                },
+            },
+        }
+    </script>
+<style>
+        .glass-card {
+            background: rgba(255, 255, 255, 0.03);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+        .glass-nav {
+            background: rgba(0, 0, 0, 0.8);
+            backdrop-filter: blur(20px);
+        }
+        .no-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        .no-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+    </style>
+<style>
+        body {
+            min-height: max(884px, 100dvh);
+        }
+    </style>
+</head>
+<body class="bg-background-light dark:bg-background-dark font-display text-slate-900 dark:text-slate-100 min-h-screen flex flex-col">
+<!-- Header / Top Bar -->
+<header class="sticky top-0 z-50 glass-nav border-b border-white/5 px-4 py-4 flex items-center justify-between">
+<div class="flex items-center gap-3">
+<button class="flex items-center justify-center size-10 rounded-full hover:bg-white/10 transition-colors">
+<span class="material-symbols-outlined text-slate-900 dark:text-slate-100">arrow_back</span>
+</button>
+<h1 class="text-xl font-bold tracking-tight">Saved Words</h1>
+</div>
+<button class="flex items-center justify-center size-10 rounded-full bg-primary/10">
+<span class="material-symbols-outlined text-primary">more_vert</span>
+</button>
+</header>
+<main class="flex-1 overflow-y-auto pb-24">
+<!-- Search Bar -->
+<div class="px-4 py-6">
+<label class="relative block group">
+<div class="absolute -inset-0.5 bg-primary/20 rounded-xl blur opacity-30 group-focus-within:opacity-60 transition duration-500"></div>
+<span class="absolute inset-y-0 left-0 flex items-center pl-4 relative z-10">
+<span class="material-symbols-outlined text-slate-500 group-focus-within:text-primary transition-colors">search</span>
+</span>
+<input class="relative z-10 w-full h-14 pl-12 pr-4 bg-zinc-900 border border-white/10 focus:border-primary/50 focus:ring-0 rounded-xl text-slate-100 placeholder:text-slate-600 transition-all" placeholder="Search saved words..." type="text"/>
+</label>
+</div>
+<!-- Category Chips -->
+<div class="flex gap-2 px-4 pb-6 overflow-x-auto no-scrollbar">
+<button class="whitespace-nowrap px-5 py-2 rounded-full bg-primary text-white text-sm font-semibold">All Words</button>
+<button class="whitespace-nowrap px-5 py-2 rounded-full bg-slate-200 dark:bg-zinc-900 text-slate-600 dark:text-slate-400 text-sm font-medium hover:bg-primary/10 transition-colors">Nouns</button>
+<button class="whitespace-nowrap px-5 py-2 rounded-full bg-slate-200 dark:bg-zinc-900 text-slate-600 dark:text-slate-400 text-sm font-medium hover:bg-primary/10 transition-colors">Verbs</button>
+<button class="whitespace-nowrap px-5 py-2 rounded-full bg-slate-200 dark:bg-zinc-900 text-slate-600 dark:text-slate-400 text-sm font-medium hover:bg-primary/10 transition-colors">Adjectives</button>
+</div>
+<!-- Word List -->
+<div class="px-4 space-y-4">
+<!-- Word Card: Ephemeral -->
+<div class="glass-card rounded-xl p-5 relative overflow-hidden group">
+<div class="absolute top-0 right-0 w-32 h-32 bg-primary/10 blur-3xl -mr-16 -mt-16"></div>
+<div class="flex justify-between items-start relative z-10">
+<div>
+<h3 class="text-2xl font-bold text-primary mb-1">Ephemeral</h3>
+<p class="text-sm font-medium text-slate-500 dark:text-slate-500 mb-2">/əˈfem(ə)rəl/</p>
+</div>
+<button class="text-primary">
+<span class="material-symbols-outlined fill-1">bookmark</span>
+</button>
+</div>
+<p class="text-slate-700 dark:text-slate-300 leading-relaxed mb-4">Lasting for a very short time; fleeting or transitory.</p>
+<div class="flex items-center justify-between">
+<span class="text-xs font-bold uppercase tracking-wider text-primary/60">Adjective</span>
+<button class="flex items-center gap-2 text-sm font-bold text-primary hover:gap-3 transition-all">
+                        View Details <span class="material-symbols-outlined text-sm">arrow_forward</span>
+</button>
+</div>
+</div>
+<!-- Word Card: Serendipity -->
+<div class="glass-card rounded-xl p-5 relative overflow-hidden group">
+<div class="absolute top-0 right-0 w-32 h-32 bg-primary/10 blur-3xl -mr-16 -mt-16"></div>
+<div class="flex justify-between items-start relative z-10">
+<div>
+<h3 class="text-2xl font-bold text-primary mb-1">Serendipity</h3>
+<p class="text-sm font-medium text-slate-500 dark:text-slate-500 mb-2">/ˌserənˈdipədē/</p>
+</div>
+<button class="text-primary">
+<span class="material-symbols-outlined fill-1">bookmark</span>
+</button>
+</div>
+<p class="text-slate-700 dark:text-slate-300 leading-relaxed mb-4">The occurrence of events by chance in a happy or beneficial way.</p>
+<div class="flex items-center justify-between">
+<span class="text-xs font-bold uppercase tracking-wider text-primary/60">Noun</span>
+<button class="flex items-center gap-2 text-sm font-bold text-primary hover:gap-3 transition-all">
+                        View Details <span class="material-symbols-outlined text-sm">arrow_forward</span>
+</button>
+</div>
+</div>
+<!-- Word Card: Eloquent -->
+<div class="glass-card rounded-xl p-5 relative overflow-hidden group">
+<div class="absolute top-0 right-0 w-32 h-32 bg-primary/10 blur-3xl -mr-16 -mt-16"></div>
+<div class="flex justify-between items-start relative z-10">
+<div>
+<h3 class="text-2xl font-bold text-primary mb-1">Eloquent</h3>
+<p class="text-sm font-medium text-slate-500 dark:text-slate-500 mb-2">/ˈeləkwənt/</p>
+</div>
+<button class="text-primary">
+<span class="material-symbols-outlined fill-1">bookmark</span>
+</button>
+</div>
+<p class="text-slate-700 dark:text-slate-300 leading-relaxed mb-4">Fluent or persuasive in speaking or writing.</p>
+<div class="flex items-center justify-between">
+<span class="text-xs font-bold uppercase tracking-wider text-primary/60">Adjective</span>
+<button class="flex items-center gap-2 text-sm font-bold text-primary hover:gap-3 transition-all">
+                        View Details <span class="material-symbols-outlined text-sm">arrow_forward</span>
+</button>
+</div>
+</div>
+<!-- Word Card: Mellifluous -->
+<div class="glass-card rounded-xl p-5 relative overflow-hidden group">
+<div class="absolute top-0 right-0 w-32 h-32 bg-primary/10 blur-3xl -mr-16 -mt-16"></div>
+<div class="flex justify-between items-start relative z-10">
+<div>
+<h3 class="text-2xl font-bold text-primary mb-1">Mellifluous</h3>
+<p class="text-sm font-medium text-slate-500 dark:text-slate-500 mb-2">/məˈliflo͞oəs/</p>
+</div>
+<button class="text-primary">
+<span class="material-symbols-outlined fill-1">bookmark</span>
+</button>
+</div>
+<p class="text-slate-700 dark:text-slate-300 leading-relaxed mb-4">Sweet or musical; pleasant to hear.</p>
+<div class="flex items-center justify-between">
+<span class="text-xs font-bold uppercase tracking-wider text-primary/60">Adjective</span>
+<button class="flex items-center gap-2 text-sm font-bold text-primary hover:gap-3 transition-all">
+                        View Details <span class="material-symbols-outlined text-sm">arrow_forward</span>
+</button>
+</div>
+</div>
+</div>
+</main>
+<!-- Bottom Navigation Bar -->
+<nav class="fixed bottom-0 left-0 right-0 glass-nav border-t border-white/5 px-4 pb-6 pt-3 z-50">
+<div class="flex justify-around items-center max-w-lg mx-auto">
+<a class="flex flex-col items-center gap-1 text-slate-500 hover:text-primary transition-colors" href="#">
+<span class="material-symbols-outlined">home</span>
+<p class="text-[10px] font-bold uppercase tracking-widest">Home</p>
+</a>
+<a class="flex flex-col items-center gap-1 text-primary" href="#">
+<span class="material-symbols-outlined fill-1">bookmark</span>
+<p class="text-[10px] font-bold uppercase tracking-widest">Saved</p>
+</a>
+<div class="relative -top-8 flex flex-col items-center">
+<button class="size-14 rounded-full bg-primary text-white shadow-lg shadow-primary/40 flex items-center justify-center">
+<span class="material-symbols-outlined text-3xl">auto_awesome</span>
+</button>
+</div>
+<a class="flex flex-col items-center gap-1 text-slate-500 hover:text-primary transition-colors" href="#">
+<span class="material-symbols-outlined">school</span>
+<p class="text-[10px] font-bold uppercase tracking-widest">Learn</p>
+</a>
+<a class="flex flex-col items-center gap-1 text-slate-500 hover:text-primary transition-colors" href="#">
+<span class="material-symbols-outlined">person</span>
+<p class="text-[10px] font-bold uppercase tracking-widest">Profile</p>
+</a>
+</div>
+</nav>
+</body></html>

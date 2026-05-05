@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <!-- Base path placeholder (rewritten by `flutter build web`). -->
+  <base href="$FLUTTER_BASE_HREF">
+
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=Edge">
+  <meta name="viewport"
+        content="width=device-width, initial-scale=1, maximum-scale=5, viewport-fit=cover">
+
+  <!-- SEO / sharing -->
+  <meta name="description"
+        content="Nexus AI — your AI-powered finance companion. Track expenses, read curated news, get AI tutoring and rephrasing, and sync files to the cloud.">
+  <meta name="theme-color" media="(prefers-color-scheme: light)" content="#FFFFFF">
+  <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#000000">
+  <meta name="color-scheme" content="dark light">
+
+  <!-- Open Graph -->
+  <meta property="og:title" content="Nexus AI">
+  <meta property="og:description"
+        content="AI finance companion: expenses, news, tutor, cloud — all in one app.">
+  <meta property="og:type" content="website">
+  <meta property="og:image" content="icons/Icon-512.png">
+
+  <!-- iOS / standalone meta tags -->
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Nexus AI">
+  <meta name="application-name" content="Nexus AI">
+  <link rel="apple-touch-icon" href="icons/Icon-192.png">
+
+  <!-- Favicon -->
+  <link rel="icon" type="image/png" href="favicon.png"/>
+
+  <!-- Preload Plus Jakarta Sans (used everywhere via google_fonts at runtime) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="preload" as="style"
+        href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap">
+
+  <title>Nexus AI</title>
+  <link rel="manifest" href="manifest.json">
+
+  <style>
+    /* Splash that shows while Flutter bootstraps. The colours mirror the
+       dark theme (palette.bg) so users don't see a flash-of-white. */
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      background: #000000;
+      overflow: hidden;
+    }
+    @media (prefers-color-scheme: light) {
+      html, body { background: #FFFFFF; }
+    }
+    #nx-splash {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      gap: 20px;
+      z-index: 1;
+      transition: opacity 320ms ease-out;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      color: #F1F5F9;
+    }
+    @media (prefers-color-scheme: light) {
+      #nx-splash { color: #0F172A; }
+    }
+    #nx-splash.hidden { opacity: 0; pointer-events: none; }
+    #nx-splash .ring {
+      width: 56px;
+      height: 56px;
+      border: 3px solid rgba(13, 89, 242, 0.25);
+      border-top-color: #0D59F2;
+      border-radius: 50%;
+      animation: nx-spin 900ms linear infinite;
+    }
+    #nx-splash .label {
+      font-size: 13px;
+      letter-spacing: 0.04em;
+      opacity: 0.7;
+    }
+    @keyframes nx-spin {
+      to { transform: rotate(360deg); }
+    }
+  </style>
+</head>
+<body>
+  <div id="nx-splash" role="status" aria-live="polite">
+    <div class="ring" aria-hidden="true"></div>
+    <div class="label">Nexus AI is starting…</div>
+  </div>
+
+  <script>
+    // Hide the splash as soon as Flutter has rendered the first frame.
+    window.addEventListener('flutter-first-frame', function () {
+      var s = document.getElementById('nx-splash');
+      if (!s) return;
+      s.classList.add('hidden');
+      setTimeout(function () { s.remove(); }, 400);
+    });
+  </script>
+
+  <!--
+    Custom flutter_bootstrap.js could be added here for SSR-style hydration
+    or progressive enhancement. The default loader produced by
+    `flutter build web` is sufficient for our needs.
+  -->
+  <script src="flutter_bootstrap.js" async></script>
+</body>
+</html>

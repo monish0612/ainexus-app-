@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@200;300;400;500;600;700;800&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "primary": "#4725f4",
+                        "background-light": "#f6f5f8",
+                        "background-dark": "#000000",
+                    },
+                    fontFamily: {
+                        "display": ["Manrope", "sans-serif"]
+                    },
+                    borderRadius: {"DEFAULT": "0.5rem", "lg": "1rem", "xl": "1.5rem", "full": "9999px"},
+                },
+            },
+        }
+    </script>
+<style>
+        .glass-card {
+            background: rgba(255, 255, 255, 0.03);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        .gradient-card {
+            background: linear-gradient(135deg, #4725f4 0%, #7c3aed 100%);
+            box-shadow: 0 10px 30px -10px rgba(71, 37, 244, 0.5);
+        }
+        .glow-active {
+            text-shadow: 0 0 10px rgba(71, 37, 244, 0.8);
+        }
+        .fab-glow {
+            box-shadow: 0 0 20px 2px rgba(71, 37, 244, 0.6);
+        }
+        body {
+            font-family: 'Manrope', sans-serif;
+        }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+</head>
+<body class="bg-background-dark text-slate-100 font-display selection:bg-primary/30 min-h-screen flex flex-col">
+<!-- Top Navigation Bar -->
+<header class="sticky top-0 z-50 flex items-center justify-between px-6 py-4 bg-background-dark/80 backdrop-blur-md">
+<div class="flex items-center gap-3">
+<div class="size-10 rounded-full border-2 border-primary/50 p-0.5 overflow-hidden">
+<img alt="User Profile Avatar" class="w-full h-full object-cover rounded-full" data-alt="Professional user profile headshot" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBoCUYluLD09MwPwkFt2NpeE5yvPihiwe_DD7ajERFKXC_9ePMsVo3wRK2lh8fcJ1flWxP5g5hu_mGXFc_0NsF1R4Bs4fe_WOWkIuJ3IbDHb6VVotMk0JolN0rFxtNOMvWWNkEnV5wYLpEqE6NydxACetLbP-XBpNfLnLYoXe8-fEwQ6bzbmYi2My8N0y0POX0x-IsD2_R9uSrtozT0lnpBM8lh4KmS0g_HUIoB61eNUumH1GIG19EY79GU7dsmO79ijPCYscu6u5g"/>
+</div>
+<div>
+<p class="text-xs text-slate-400 font-medium">Welcome back,</p>
+<h1 class="text-sm font-bold tracking-tight">Alex Rivera</h1>
+</div>
+</div>
+<button class="relative p-2 rounded-full glass-card hover:bg-white/10 transition-colors">
+<span class="material-symbols-outlined text-slate-100">notifications</span>
+<span class="absolute top-2 right-2 size-2 bg-red-500 rounded-full border border-black"></span>
+</button>
+</header>
+<main class="flex-1 px-6 pb-24 overflow-y-auto space-y-8 mt-2">
+<!-- Total Balance Gradient Card -->
+<section class="relative">
+<div class="gradient-card rounded-xl p-6 flex flex-col justify-between min-h-[180px]">
+<div class="flex justify-between items-start">
+<div>
+<p class="text-white/70 text-sm font-medium">Total Balance</p>
+<h2 class="text-3xl font-extrabold text-white mt-1 tracking-tight">$12,450.80</h2>
+</div>
+<span class="material-symbols-outlined text-white/50">contactless</span>
+</div>
+<div class="flex justify-between items-end mt-8">
+<div class="flex gap-4">
+<div>
+<p class="text-white/60 text-[10px] uppercase tracking-widest font-bold">Income</p>
+<p class="text-white font-semibold text-sm">+$4,200</p>
+</div>
+<div>
+<p class="text-white/60 text-[10px] uppercase tracking-widest font-bold">Outcome</p>
+<p class="text-white font-semibold text-sm">-$1,150</p>
+</div>
+</div>
+<button class="bg-white/20 hover:bg-white/30 backdrop-blur-md text-white text-xs px-4 py-2 rounded-full font-bold transition-all">
+                        Analytics
+                    </button>
+</div>
+</div>
+</section>
+<!-- Monthly Budget Circular Progress -->
+<!-- Spending by Category Donut Chart Section -->
+<section class="glass-card rounded-xl p-6 flex flex-col items-center gap-6">
+<div class="w-full flex justify-between items-center">
+<h3 class="text-lg font-bold">Spending Analysis</h3>
+<span class="text-xs font-bold text-primary bg-primary/10 px-3 py-1 rounded-full">This Month</span>
+</div>
+<div class="relative flex items-center justify-center">
+<!-- Glowing SVG Donut Chart -->
+<svg class="size-48 transform -rotate-90 filter drop-shadow-[0_0_8px_rgba(71,37,244,0.3)]" viewbox="0 0 100 100">
+<defs>
+<lineargradient id="grad-food" x1="0%" x2="100%" y1="0%" y2="100%">
+<stop offset="0%" style="stop-color:#4725f4;stop-opacity:1"></stop>
+<stop offset="100%" style="stop-color:#7c3aed;stop-opacity:1"></stop>
+</lineargradient>
+<lineargradient id="grad-transport" x1="0%" x2="100%" y1="0%" y2="100%">
+<stop offset="0%" style="stop-color:#0ea5e9;stop-opacity:1"></stop>
+<stop offset="100%" style="stop-color:#2dd4bf;stop-opacity:1"></stop>
+</lineargradient>
+<lineargradient id="grad-shopping" x1="0%" x2="100%" y1="0%" y2="100%">
+<stop offset="0%" style="stop-color:#f43f5e;stop-opacity:1"></stop>
+<stop offset="100%" style="stop-color:#fb7185;stop-opacity:1"></stop>
+</lineargradient>
+<lineargradient id="grad-others" x1="0%" x2="100%" y1="0%" y2="100%">
+<stop offset="0%" style="stop-color:#eab308;stop-opacity:1"></stop>
+<stop offset="100%" style="stop-color:#fde047;stop-opacity:1"></stop>
+</lineargradient>
+</defs>
+<!-- Background Track -->
+<circle class="text-white/5" cx="50" cy="50" fill="transparent" r="40" stroke="currentColor" stroke-width="12"></circle>
+<!-- Food Segment (40%) -->
+<circle class="drop-shadow-[0_0_5px_rgba(71,37,244,0.5)]" cx="50" cy="50" fill="transparent" r="40" stroke="url(#grad-food)" stroke-dasharray="251.2" stroke-dashoffset="100.48" stroke-linecap="round" stroke-width="12"></circle>
+<!-- Transport Segment (25%) -->
+<circle class="drop-shadow-[0_0_5px_rgba(14,165,233,0.5)]" cx="50" cy="50" fill="transparent" r="40" stroke="url(#grad-transport)" stroke-dasharray="251.2" stroke-dashoffset="188.4" stroke-linecap="round" stroke-width="12" transform="rotate(144 50 50)"></circle>
+<!-- Shopping Segment (20%) -->
+<circle class="drop-shadow-[0_0_5px_rgba(244,63,94,0.5)]" cx="50" cy="50" fill="transparent" r="40" stroke="url(#grad-shopping)" stroke-dasharray="251.2" stroke-dashoffset="200.96" stroke-linecap="round" stroke-width="12" transform="rotate(234 50 50)"></circle>
+<!-- Others Segment (15%) -->
+<circle class="drop-shadow-[0_0_5px_rgba(234,179,8,0.5)]" cx="50" cy="50" fill="transparent" r="40" stroke="url(#grad-others)" stroke-dasharray="251.2" stroke-dashoffset="213.52" stroke-linecap="round" stroke-width="12" transform="rotate(306 50 50)"></circle>
+</svg>
+<!-- Center Content -->
+<div class="absolute flex flex-col items-center justify-center">
+<p class="text-3xl font-extrabold text-white glow-active">$1,200</p>
+<p class="text-[10px] text-slate-400 uppercase tracking-widest font-bold">Total Spent</p>
+</div>
+</div>
+<!-- Legend Grid -->
+<div class="w-full grid grid-cols-2 gap-4 mt-2">
+<div class="flex items-center gap-2">
+<div class="size-2.5 rounded-full bg-gradient-to-br from-[#4725f4] to-[#7c3aed] shadow-[0_0_8px_rgba(71,37,244,0.6)]"></div>
+<div class="flex-1">
+<p class="text-xs font-bold">Food</p>
+<p class="text-[10px] text-slate-400">$480 (40%)</p>
+</div>
+</div>
+<div class="flex items-center gap-2">
+<div class="size-2.5 rounded-full bg-gradient-to-br from-[#0ea5e9] to-[#2dd4bf] shadow-[0_0_8px_rgba(14,165,233,0.6)]"></div>
+<div class="flex-1">
+<p class="text-xs font-bold">Transport</p>
+<p class="text-[10px] text-slate-400">$300 (25%)</p>
+</div>
+</div>
+<div class="flex items-center gap-2">
+<div class="size-2.5 rounded-full bg-gradient-to-br from-[#f43f5e] to-[#fb7185] shadow-[0_0_8px_rgba(244,63,94,0.6)]"></div>
+<div class="flex-1">
+<p class="text-xs font-bold">Shopping</p>
+<p class="text-[10px] text-slate-400">$240 (20%)</p>
+</div>
+</div>
+<div class="flex items-center gap-2">
+<div class="size-2.5 rounded-full bg-gradient-to-br from-[#eab308] to-[#fde047] shadow-[0_0_8px_rgba(234,179,8,0.6)]"></div>
+<div class="flex-1">
+<p class="text-xs font-bold">Others</p>
+<p class="text-[10px] text-slate-400">$180 (15%)</p>
+</div>
+</div>
+</div>
+</section>
+<!-- Activity Tracking Bar Charts -->
+<section class="space-y-4">
+<div class="flex items-center justify-between px-1">
+<h3 class="text-lg font-bold">Activity Tracking</h3>
+<button class="text-primary text-xs font-bold flex items-center gap-1">
+                    Details <span class="material-symbols-outlined text-sm">chevron_right</span>
+</button>
+</div>
+<div class="grid grid-cols-2 gap-4">
+<!-- Today Chart -->
+<div class="glass-card rounded-xl p-4 flex flex-col gap-4">
+<div class="flex items-center justify-between">
+<p class="text-xs font-bold text-slate-400">Today</p>
+<span class="material-symbols-outlined text-primary text-sm">trending_up</span>
+</div>
+<div class="flex items-end justify-between h-20 gap-1.5 pt-2">
+<div class="flex-1 bg-primary/20 rounded-full h-[30%]"></div>
+<div class="flex-1 bg-primary/20 rounded-full h-[60%]"></div>
+<div class="flex-1 bg-primary rounded-full h-[100%] shadow-[0_0_10px_rgba(71,37,244,0.4)]"></div>
+<div class="flex-1 bg-primary/20 rounded-full h-[45%]"></div>
+<div class="flex-1 bg-primary/20 rounded-full h-[75%]"></div>
+</div>
+<p class="text-sm font-bold">$142.50</p>
+</div>
+<!-- Yesterday Chart -->
+<div class="glass-card rounded-xl p-4 flex flex-col gap-4">
+<div class="flex items-center justify-between">
+<p class="text-xs font-bold text-slate-400">Yesterday</p>
+<span class="material-symbols-outlined text-slate-500 text-sm">trending_flat</span>
+</div>
+<div class="flex items-end justify-between h-20 gap-1.5 pt-2">
+<div class="flex-1 bg-slate-800 rounded-full h-[80%]"></div>
+<div class="flex-1 bg-slate-800 rounded-full h-[40%]"></div>
+<div class="flex-1 bg-slate-700 rounded-full h-[20%]"></div>
+<div class="flex-1 bg-slate-800 rounded-full h-[90%]"></div>
+<div class="flex-1 bg-slate-800 rounded-full h-[55%]"></div>
+</div>
+<p class="text-sm font-bold">$210.00</p>
+</div>
+</div>
+</section>
+<!-- AI Insights Quick View -->
+<section class="glass-card rounded-xl p-4 border-l-4 border-primary">
+<div class="flex items-start gap-3">
+<div class="size-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+<span class="material-symbols-outlined text-primary text-sm">magic_button</span>
+</div>
+<div>
+<h4 class="text-sm font-bold">Smart Tip</h4>
+<p class="text-xs text-slate-400 mt-1 leading-relaxed">You spent 15% more on Dining Out this week. Reducing this could save you $40 monthly.</p>
+</div>
+</div>
+</section>
+</main>
+<!-- Floating Action Button -->
+<button class="fixed bottom-24 right-6 size-16 bg-primary rounded-full flex items-center justify-center text-white fab-glow hover:scale-105 active:scale-95 transition-transform z-50">
+<span class="material-symbols-outlined text-3xl font-bold">add</span>
+</button>
+<!-- Bottom Navigation Bar -->
+<nav class="fixed bottom-0 left-0 right-0 bg-background-dark/80 backdrop-blur-xl border-t border-white/5 px-4 pb-6 pt-3 z-50">
+<div class="max-w-md mx-auto flex items-center justify-between">
+<a class="flex flex-col items-center gap-1 group" href="#">
+<div class="text-primary flex h-8 items-center justify-center transition-all glow-active">
+<span class="material-symbols-outlined !fill-1 !wght-700">house</span>
+</div>
+<p class="text-primary text-[10px] font-bold leading-normal tracking-wide">Home</p>
+</a>
+<a class="flex flex-col items-center gap-1 text-slate-500 hover:text-slate-300 transition-colors" href="#">
+<div class="flex h-8 items-center justify-center">
+<span class="material-symbols-outlined">pie_chart</span>
+</div>
+<p class="text-[10px] font-medium leading-normal tracking-wide">Insights</p>
+</a>
+<a class="flex flex-col items-center gap-1 text-slate-500 hover:text-slate-300 transition-colors" href="#">
+<div class="flex h-8 items-center justify-center">
+<span class="material-symbols-outlined">explore</span>
+</div>
+<p class="text-[10px] font-medium leading-normal tracking-wide">Discover</p>
+</a>
+<a class="flex flex-col items-center gap-1 text-slate-500 hover:text-slate-300 transition-colors" href="#">
+<div class="flex h-8 items-center justify-center">
+<span class="material-symbols-outlined">auto_awesome</span>
+</div>
+<p class="text-[10px] font-medium leading-normal tracking-wide">AI Coach</p>
+</a>
+<a class="flex flex-col items-center gap-1 text-slate-500 hover:text-slate-300 transition-colors" href="#">
+<div class="flex h-8 items-center justify-center">
+<span class="material-symbols-outlined">settings</span>
+</div>
+<p class="text-[10px] font-medium leading-normal tracking-wide">Settings</p>
+</a>
+</div>
+</nav>
+</body></html>

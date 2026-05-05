@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;500;600;700;800&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "primary": "#4725f4",
+                        "background-light": "#f6f5f8",
+                        "background-dark": "#000000",
+                    },
+                    fontFamily: {
+                        "display": ["Manrope"]
+                    },
+                    borderRadius: {"DEFAULT": "0.5rem", "lg": "1rem", "xl": "1.5rem", "full": "9999px"},
+                },
+            },
+        }
+    </script>
+<title>Recent Activity - Dashboard</title>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-background-light dark:bg-background-dark font-display text-slate-900 dark:text-slate-100 antialiased">
+<div class="relative flex h-screen w-full max-w-md mx-auto flex-col bg-background-light dark:bg-background-dark overflow-hidden border-x border-slate-200 dark:border-slate-800">
+<header class="sticky top-0 z-10 bg-background-light/80 dark:bg-background-dark/80 backdrop-blur-md">
+<div class="flex items-center p-4 justify-between">
+<div class="flex size-10 shrink-0 items-center">
+<div class="bg-center bg-no-repeat aspect-square bg-cover rounded-full size-8 border border-slate-200 dark:border-slate-700" data-alt="User profile avatar photo" style='background-image: url("https://lh3.googleusercontent.com/aida-public/AB6AXuCGSn1Jy9VPYH9gSLvl2_xDHIH63Bzh_KLoxPkTFiwuWDHco1lErIxnMDU89gUFBIsy95BfYIRyo5hgqhplMjAOx5sT8N7T95SOKPMKS11EHwVoKHsdTNUsgChOzN_-pId2Pwooi3yJ_e1C_YoeXdNJD-UjjQw0IYdy1eC88_ACDaE4klG7GzJYT0TME1GvhIPzsNOieAZe61ONpUkLoL3q8IIOmOKVoVHHaVN70GBYCydE3bT-34HDZRJ-Na4aLMq5XsGT1ZRYixQ");'></div>
+</div>
+<h2 class="text-slate-900 dark:text-white text-lg font-bold leading-tight tracking-tight flex-1 text-center">Dashboard</h2>
+<div class="flex w-10 items-center justify-end">
+<button class="flex cursor-pointer items-center justify-center rounded-full size-10 hover:bg-slate-100 dark:hover:bg-slate-900 text-slate-900 dark:text-white transition-colors">
+<span class="material-symbols-outlined">settings</span>
+</button>
+</div>
+</div>
+<div class="flex border-b border-slate-200 dark:border-slate-800 px-4">
+<a class="flex flex-1 flex-col items-center justify-center text-slate-500 dark:text-slate-400 pb-3 pt-2 hover:bg-slate-50 dark:hover:bg-slate-900/50 transition-colors" href="#">
+<p class="text-sm font-medium">Home</p>
+</a>
+<a class="flex flex-1 flex-col items-center justify-center border-b-4 border-primary text-slate-900 dark:text-white pb-3 pt-2" href="#">
+<p class="text-sm font-bold">Activity</p>
+</a>
+</div>
+</header>
+<main class="flex-1 overflow-y-auto">
+<div class="flex flex-col">
+<div class="p-4 border-b border-slate-200 dark:border-slate-800 bg-primary/5">
+<div class="flex gap-4">
+<div class="flex size-10 shrink-0 items-center justify-center rounded-full bg-primary text-white">
+<span class="material-symbols-outlined text-[20px]">smart_toy</span>
+</div>
+<div class="flex flex-1 flex-col">
+<div class="flex items-center gap-2">
+<p class="text-slate-900 dark:text-white text-sm font-bold">AI Assistant</p>
+<span class="bg-primary/20 text-primary text-[10px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider">Update</span>
+</div>
+<p class="text-slate-700 dark:text-slate-300 text-sm mt-1 leading-relaxed">
+                                You are <span class="text-emerald-500 font-bold">$120</span> below your food budget this week. Keep it up!
+                            </p>
+<div class="mt-3 h-1 w-full bg-slate-200 dark:bg-slate-800 rounded-full overflow-hidden">
+<div class="h-full bg-gradient-to-r from-primary to-emerald-400 w-[65%]"></div>
+</div>
+</div>
+</div>
+</div>
+<div class="px-4 py-3 bg-slate-50 dark:bg-slate-900/30">
+<p class="text-xs font-bold text-slate-500 dark:text-slate-500 uppercase tracking-widest">Recent Transactions</p>
+</div>
+<div class="divide-y divide-slate-200 dark:divide-slate-800">
+<div class="flex gap-4 px-4 py-4 hover:bg-slate-50 dark:hover:bg-slate-900/50 transition-colors">
+<div class="text-slate-900 dark:text-white flex items-center justify-center rounded-full bg-slate-100 dark:bg-slate-800 shrink-0 size-12">
+<span class="material-symbols-outlined">restaurant</span>
+</div>
+<div class="flex flex-1 flex-col justify-center">
+<div class="flex justify-between items-start">
+<p class="text-slate-900 dark:text-white text-base font-bold">Olive Garden</p>
+<p class="text-slate-900 dark:text-white text-base font-bold">$84.50</p>
+</div>
+<p class="text-slate-500 dark:text-slate-400 text-xs mt-0.5">Dining • Today, 7:12 PM</p>
+</div>
+</div>
+<div class="flex gap-4 px-4 py-4 hover:bg-slate-50 dark:hover:bg-slate-900/50 transition-colors">
+<div class="text-slate-900 dark:text-white flex items-center justify-center rounded-full bg-slate-100 dark:bg-slate-800 shrink-0 size-12">
+<span class="material-symbols-outlined">local_gas_station</span>
+</div>
+<div class="flex flex-1 flex-col justify-center">
+<div class="flex justify-between items-start">
+<p class="text-slate-900 dark:text-white text-base font-bold">Gas Station</p>
+<p class="text-slate-900 dark:text-white text-base font-bold">$45.00</p>
+</div>
+<p class="text-slate-500 dark:text-slate-400 text-xs mt-0.5">Transport • Yesterday, 8:45 AM</p>
+</div>
+</div>
+<div class="p-4 bg-primary/5 border-y border-primary/10">
+<div class="flex gap-4">
+<div class="flex size-10 shrink-0 items-center justify-center rounded-full bg-slate-800 text-white">
+<span class="material-symbols-outlined text-[20px]">insights</span>
+</div>
+<div class="flex flex-1 flex-col">
+<p class="text-slate-900 dark:text-white text-sm font-bold">Spending Insight</p>
+<p class="text-slate-700 dark:text-slate-300 text-sm mt-1">Your weekend entertainment spending is 15% lower than last month.</p>
+<div class="mt-2 flex gap-1">
+<div class="h-1 flex-1 bg-primary/40 rounded-full"></div>
+<div class="h-1 flex-1 bg-primary/40 rounded-full"></div>
+<div class="h-1 flex-1 bg-primary rounded-full shadow-[0_0_8px_rgba(71,37,244,0.5)]"></div>
+</div>
+</div>
+</div>
+</div>
+<div class="flex gap-4 px-4 py-4 hover:bg-slate-50 dark:hover:bg-slate-900/50 transition-colors">
+<div class="text-slate-900 dark:text-white flex items-center justify-center rounded-full bg-slate-100 dark:bg-slate-800 shrink-0 size-12">
+<span class="material-symbols-outlined">shopping_bag</span>
+</div>
+<div class="flex flex-1 flex-col justify-center">
+<div class="flex justify-between items-start">
+<p class="text-slate-900 dark:text-white text-base font-bold">Apple Store</p>
+<p class="text-slate-900 dark:text-white text-base font-bold">$1,299.00</p>
+</div>
+<p class="text-slate-500 dark:text-slate-400 text-xs mt-0.5">Electronics • Oct 24, 2:15 PM</p>
+</div>
+</div>
+<div class="flex gap-4 px-4 py-4 hover:bg-slate-50 dark:hover:bg-slate-900/50 transition-colors">
+<div class="text-slate-900 dark:text-white flex items-center justify-center rounded-full bg-slate-100 dark:bg-slate-800 shrink-0 size-12">
+<span class="material-symbols-outlined">fitness_center</span>
+</div>
+<div class="flex flex-1 flex-col justify-center">
+<div class="flex justify-between items-start">
+<p class="text-slate-900 dark:text-white text-base font-bold">Gold's Gym</p>
+<p class="text-slate-900 dark:text-white text-base font-bold">$55.00</p>
+</div>
+<p class="text-slate-500 dark:text-slate-400 text-xs mt-0.5">Health • Oct 23, 6:00 AM</p>
+</div>
+</div>
+</div>
+<div class="flex justify-center p-8">
+<div class="size-2 rounded-full bg-slate-800"></div>
+</div>
+</div>
+</main>
+<footer class="sticky bottom-0 z-10 border-t border-slate-200 dark:border-slate-800 bg-background-light dark:bg-background-dark/95 backdrop-blur-md">
+<div class="flex gap-1 px-4 pb-6 pt-3">
+<a class="flex flex-1 flex-col items-center justify-center gap-1 text-primary" href="#">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1">home</span>
+<p class="text-[10px] font-bold">Home</p>
+</a>
+<a class="flex flex-1 flex-col items-center justify-center gap-1 text-slate-500 dark:text-slate-500" href="#">
+<span class="material-symbols-outlined">search</span>
+<p class="text-[10px] font-medium">Search</p>
+</a>
+<a class="flex flex-1 flex-col items-center justify-center gap-1 text-slate-500 dark:text-slate-500" href="#">
+<span class="material-symbols-outlined">notifications</span>
+<p class="text-[10px] font-medium">Alerts</p>
+</a>
+<a class="flex flex-1 flex-col items-center justify-center gap-1 text-slate-500 dark:text-slate-500" href="#">
+<span class="material-symbols-outlined">mail</span>
+<p class="text-[10px] font-medium">Inbox</p>
+</a>
+</div>
+</footer>
+<button class="absolute bottom-24 right-6 size-14 bg-primary text-white rounded-full shadow-lg shadow-primary/30 flex items-center justify-center">
+<span class="material-symbols-outlined text-2xl">add</span>
+</button>
+</div>
+</body></html>

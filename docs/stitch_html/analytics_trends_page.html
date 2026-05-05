@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@200;300;400;500;600;700;800&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "primary": "#4725f4",
+                        "background-light": "#f6f5f8",
+                        "background-dark": "#000000",
+                    },
+                    fontFamily: {
+                        "display": ["Manrope"]
+                    },
+                    borderRadius: {
+                        "DEFAULT": "0.5rem",
+                        "lg": "1rem",
+                        "xl": "1.5rem",
+                        "full": "9999px"
+                    },
+                },
+            },
+        }
+    </script>
+<style>
+        body {
+            font-family: 'Manrope', sans-serif;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .glass {
+            background: rgba(255, 255, 255, 0.03);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        .glow-card {
+            position: relative;
+            overflow: hidden;
+        }
+        .glow-card::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(circle at center, rgba(71, 37, 244, 0.15) 0%, transparent 70%);
+            pointer-events: none;
+        }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-background-dark text-slate-100 font-display">
+<div class="relative flex min-h-screen w-full max-w-md mx-auto flex-col bg-background-dark overflow-x-hidden border-x border-slate-800/50">
+<!-- Top Header -->
+<header class="sticky top-0 z-20 bg-black/80 backdrop-blur-md border-b border-slate-800/50">
+<div class="flex items-center p-4 justify-between">
+<div class="flex size-10 shrink-0 items-center overflow-hidden rounded-full ring-1 ring-slate-800">
+<img class="h-full w-full object-cover" data-alt="User profile avatar close up" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDncFEDSrHds-N6xWVqhpY2wTHSi3E8efrQ0RsrwuBugAIHDy2w-TKTw5mJesFcYzsTTMns5Y53s60wJGFcyFL7gm8FqCSX0wZy5FZNN4tmPKV8ASQM005wLW6dUD5aBpEnHPxdTbyorDfuf60PUacLK_czeA1YODXXKzZhtHes_du4NGG5b_Li_TQM4Nz5vZUWFt-tqZVUGOjUO1OIaNGjRb2YfxEo9QFTpa8UfYKrbsgVWGMQHEgmmOb8szZGZxK_u1OCStFgpZU"/>
+</div>
+<h1 class="text-slate-100 text-lg font-extrabold tracking-tight flex-1 text-center">Trends</h1>
+<div class="flex w-10 items-center justify-end">
+<button class="p-2 text-slate-100 rounded-full hover:bg-slate-900 transition-colors">
+<span class="material-symbols-outlined text-2xl">auto_awesome</span>
+</button>
+</div>
+</div>
+<!-- Tabs -->
+<div class="flex px-4 gap-0 justify-around">
+<a class="flex-1 flex flex-col items-center justify-center text-slate-500 hover:text-slate-300 transition-colors py-3" href="#">
+<p class="text-sm font-bold tracking-wide">Overview</p>
+<div class="h-1 w-12 rounded-full mt-2 bg-transparent"></div>
+</a>
+<a class="flex-1 flex flex-col items-center justify-center text-slate-100 py-3" href="#">
+<p class="text-sm font-bold tracking-wide">Trends</p>
+<div class="h-1 w-16 rounded-full mt-2 bg-primary shadow-[0_0_12px_rgba(71,37,244,0.6)]"></div>
+</a>
+</div>
+</header>
+<!-- Main Content -->
+<main class="flex-1 pb-24">
+<!-- Spending Forecast Card -->
+<section class="p-4">
+<div class="glow-card glass rounded-xl p-6 relative">
+<div class="flex justify-between items-start mb-4">
+<div>
+<span class="text-xs font-bold text-primary tracking-widest uppercase mb-1 block">AI Forecast</span>
+<h2 class="text-slate-100 text-2xl font-bold leading-tight">Spending Forecast</h2>
+</div>
+<div class="bg-primary/20 p-2 rounded-lg">
+<span class="material-symbols-outlined text-primary">analytics</span>
+</div>
+</div>
+<div class="space-y-4">
+<div class="flex items-baseline gap-2">
+<span class="text-4xl font-extrabold text-slate-100 tracking-tighter">$2,450</span>
+<span class="text-slate-400 text-sm font-medium">projected by end of month</span>
+</div>
+<!-- Mini Chart Representation -->
+<div class="h-16 w-full flex items-end gap-1 px-1">
+<div class="flex-1 bg-primary/20 rounded-t-sm h-[40%]"></div>
+<div class="flex-1 bg-primary/20 rounded-t-sm h-[55%]"></div>
+<div class="flex-1 bg-primary/20 rounded-t-sm h-[45%]"></div>
+<div class="flex-1 bg-primary/20 rounded-t-sm h-[65%]"></div>
+<div class="flex-1 bg-primary/20 rounded-t-sm h-[50%]"></div>
+<div class="flex-1 bg-primary/40 rounded-t-sm h-[75%]"></div>
+<div class="flex-1 bg-primary/60 rounded-t-sm h-[85%]"></div>
+<div class="flex-1 bg-primary rounded-t-sm h-full shadow-[0_0_15px_rgba(71,37,244,0.4)]"></div>
+<div class="flex-1 bg-slate-800 rounded-t-sm h-[90%] border-t border-dashed border-primary/50"></div>
+<div class="flex-1 bg-slate-800 rounded-t-sm h-[85%] border-t border-dashed border-primary/50"></div>
+<div class="flex-1 bg-slate-800 rounded-t-sm h-[80%] border-t border-dashed border-primary/50"></div>
+</div>
+<p class="text-slate-400 text-sm leading-relaxed">
+                            Based on your activity, you're <span class="text-emerald-400 font-bold">5% below</span> typical mid-month spending. You have approximately <span class="text-slate-100 font-semibold">$800</span> left in your budget.
+                        </p>
+</div>
+<button class="mt-6 w-full py-3 px-4 bg-primary text-slate-100 rounded-xl font-bold text-sm tracking-wide hover:opacity-90 transition-opacity">
+                        Full Breakdown
+                    </button>
+</div>
+</section>
+<!-- Insights & Anomalies -->
+<section class="mt-4">
+<div class="px-4 flex items-center justify-between mb-3">
+<h2 class="text-slate-100 text-xl font-bold tracking-tight">Insights &amp; Anomalies</h2>
+<span class="px-2 py-0.5 bg-slate-800 rounded text-[10px] font-bold text-slate-400 uppercase tracking-widest">Live</span>
+</div>
+<div class="space-y-3 px-4">
+<!-- Anomaly Card 1 -->
+<div class="glass p-4 rounded-xl flex gap-4 items-start border-l-4 border-l-amber-500/50">
+<div class="size-10 rounded-full bg-amber-500/10 flex items-center justify-center shrink-0">
+<span class="material-symbols-outlined text-amber-500">warning</span>
+</div>
+<div class="flex-1">
+<div class="flex items-center gap-2 mb-1">
+<span class="text-xs font-bold text-slate-500">DINING OUT</span>
+<span class="bg-primary/20 text-primary text-[10px] px-1.5 py-0.5 rounded font-bold">AI SIGNAL</span>
+</div>
+<h3 class="text-slate-100 font-bold mb-1">Unexpected $50 on Dining</h3>
+<p class="text-slate-400 text-sm leading-snug">Spike detected at "Blue Bottle Coffee" - 3x higher than your usual Tuesday morning visit.</p>
+</div>
+</div>
+<!-- Anomaly Card 2 -->
+<div class="glass p-4 rounded-xl flex gap-4 items-start border-l-4 border-l-emerald-500/50">
+<div class="size-10 rounded-full bg-emerald-500/10 flex items-center justify-center shrink-0">
+<span class="material-symbols-outlined text-emerald-500">trending_down</span>
+</div>
+<div class="flex-1">
+<div class="flex items-center gap-2 mb-1">
+<span class="text-xs font-bold text-slate-500">UTILITIES</span>
+<span class="bg-primary/20 text-primary text-[10px] px-1.5 py-0.5 rounded font-bold">AI SIGNAL</span>
+</div>
+<h3 class="text-slate-100 font-bold mb-1">Lower Subscription Costs</h3>
+<p class="text-slate-400 text-sm leading-snug">Good job! Cancelling "CloudStorage Pro" saved you $12 this month.</p>
+</div>
+</div>
+</div>
+</section>
+<!-- Category Shift -->
+<section class="mt-8 px-4">
+<h2 class="text-slate-100 text-xl font-bold tracking-tight mb-4">Category Shift</h2>
+<div class="glass p-5 rounded-xl space-y-5">
+<!-- Chart Row 1 -->
+<div class="space-y-2">
+<div class="flex justify-between items-end">
+<span class="text-sm font-semibold text-slate-200">Entertainment</span>
+<span class="text-sm font-bold text-rose-500">+24% ↑</span>
+</div>
+<div class="h-2 w-full bg-slate-800 rounded-full overflow-hidden">
+<div class="h-full bg-gradient-to-r from-primary to-rose-500" style="width: 85%"></div>
+</div>
+<div class="flex justify-between text-[10px] text-slate-500 font-bold">
+<span>LAST PERIOD: $120</span>
+<span>CURRENT: $154</span>
+</div>
+</div>
+<!-- Chart Row 2 -->
+<div class="space-y-2">
+<div class="flex justify-between items-end">
+<span class="text-sm font-semibold text-slate-200">Transport</span>
+<span class="text-sm font-bold text-emerald-500">-12% ↓</span>
+</div>
+<div class="h-2 w-full bg-slate-800 rounded-full overflow-hidden">
+<div class="h-full bg-gradient-to-r from-primary to-emerald-500" style="width: 45%"></div>
+</div>
+<div class="flex justify-between text-[10px] text-slate-500 font-bold">
+<span>LAST PERIOD: $300</span>
+<span>CURRENT: $264</span>
+</div>
+</div>
+<!-- Chart Row 3 -->
+<div class="space-y-2">
+<div class="flex justify-between items-end">
+<span class="text-sm font-semibold text-slate-200">Shopping</span>
+<span class="text-sm font-bold text-slate-400">Stable</span>
+</div>
+<div class="h-2 w-full bg-slate-800 rounded-full overflow-hidden">
+<div class="h-full bg-primary" style="width: 60%"></div>
+</div>
+<div class="flex justify-between text-[10px] text-slate-500 font-bold">
+<span>LAST PERIOD: $450</span>
+<span>CURRENT: $448</span>
+</div>
+</div>
+</div>
+</section>
+</main>
+<!-- Bottom Tab Bar -->
+<nav class="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-black/80 backdrop-blur-xl border-t border-slate-800/50 flex justify-between items-center px-4 pt-3 pb-6 z-30">
+<a class="flex flex-col items-center gap-1 text-slate-500 hover:text-slate-300 transition-colors" href="#">
+<span class="material-symbols-outlined text-[28px]">home</span>
+<p class="text-[10px] font-bold uppercase tracking-widest">Home</p>
+</a>
+<a class="flex flex-col items-center gap-1 text-primary" href="#">
+<span class="material-symbols-outlined text-[28px] fill-[1]">pie_chart</span>
+<p class="text-[10px] font-bold uppercase tracking-widest">Insights</p>
+</a>
+<a class="flex flex-col items-center gap-1 text-slate-500 hover:text-slate-300 transition-colors" href="#">
+<span class="material-symbols-outlined text-[28px]">explore</span>
+<p class="text-[10px] font-bold uppercase tracking-widest">Discover</p>
+</a>
+<a class="flex flex-col items-center gap-1 text-slate-500 hover:text-slate-300 transition-colors" href="#">
+<span class="material-symbols-outlined text-[28px]">smart_toy</span>
+<p class="text-[10px] font-bold uppercase tracking-widest">AI Coach</p>
+</a>
+<a class="flex flex-col items-center gap-1 text-slate-500 hover:text-slate-300 transition-colors" href="#">
+<span class="material-symbols-outlined text-[28px]">settings</span>
+<p class="text-[10px] font-bold uppercase tracking-widest">Settings</p>
+</a>
+</nav>
+</div>
+</body></html>

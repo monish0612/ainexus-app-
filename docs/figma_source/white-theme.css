@@ -1,0 +1,213 @@
+/*
+ * ══════════════════════════════════════════════════════════════
+ * AMOLED WHITE THEME — Full Application Override
+ * Applied via data-theme="white" on the root container.
+ * CSS !important overrides inline styles per the CSS Cascade spec.
+ * ══════════════════════════════════════════════════════════════
+ */
+
+/* ── Pure-black page / header backgrounds → white ──────────── */
+[data-theme="white"] [style*="background: #000"],
+[data-theme="white"] [style*="background:#000"],
+[data-theme="white"] [style*="background-color: #000"],
+[data-theme="white"] [style*="background: rgb(0, 0, 0)"],
+[data-theme="white"] [style*="background-color: rgb(0, 0, 0)"] {
+  background: #FFFFFF !important;
+}
+
+/* ── Dark card / modal sheet backgrounds → near-white surface ── */
+[data-theme="white"] [style*="background: #06"],
+[data-theme="white"] [style*="background: #07"],
+[data-theme="white"] [style*="background: #08"],
+[data-theme="white"] [style*="background: #09"],
+[data-theme="white"] [style*="background: #0a"],
+[data-theme="white"] [style*="background: #0A"],
+[data-theme="white"] [style*="background: #0b"],
+[data-theme="white"] [style*="background: #0B"],
+[data-theme="white"] [style*="background: #0c"],
+[data-theme="white"] [style*="background: #0C"],
+[data-theme="white"] [style*="background: #0d"],
+[data-theme="white"] [style*="background: #0D"],
+[data-theme="white"] [style*="background: #0e"],
+[data-theme="white"] [style*="background: #0E"],
+[data-theme="white"] [style*="background: #0f"],
+[data-theme="white"] [style*="background: #0F"],
+[data-theme="white"] [style*="background: #10"],
+[data-theme="white"] [style*="background: #11"],
+[data-theme="white"] [style*="background: #12"],
+[data-theme="white"] [style*="background: #13"],
+[data-theme="white"] [style*="background: #14"],
+[data-theme="white"] [style*="background: #15"],
+[data-theme="white"] [style*="background: #16"],
+[data-theme="white"] [style*="background: rgb(6"],
+[data-theme="white"] [style*="background: rgb(8"],
+[data-theme="white"] [style*="background: rgb(10"],
+[data-theme="white"] [style*="background: rgb(12"],
+[data-theme="white"] [style*="background: rgb(14"],
+[data-theme="white"] [style*="background: rgb(16"] {
+  background: #F8FAFC !important;
+}
+
+/* ── Semi-transparent white card backgrounds → subtle dark ──── */
+[data-theme="white"] [style*="background: rgba(255, 255, 255, 0.0"],
+[data-theme="white"] [style*="background: rgba(255,255,255,0.0"] {
+  background: rgba(0, 0, 0, 0.04) !important;
+}
+[data-theme="white"] [style*="background: rgba(255, 255, 255, 0.1"],
+[data-theme="white"] [style*="background: rgba(255,255,255,0.1"] {
+  background: rgba(0, 0, 0, 0.07) !important;
+}
+[data-theme="white"] [style*="background: rgba(255, 255, 255, 0.2"],
+[data-theme="white"] [style*="background: rgba(255,255,255,0.2"] {
+  background: rgba(0, 0, 0, 0.12) !important;
+}
+[data-theme="white"] [style*="background: rgba(255, 255, 255, 0.3"],
+[data-theme="white"] [style*="background: rgba(255,255,255,0.3"] {
+  background: rgba(0, 0, 0, 0.16) !important;
+}
+
+/* ── Preserve modal backdrops (rgba 0,0,0,X) — intentional ──── */
+/* These are NOT overridden — dark overlays are correct in white theme */
+
+/* ── White / near-white text → dark navy ───────────────────── */
+[data-theme="white"] [style*="color: #fff"],
+[data-theme="white"] [style*="color: #FFF"],
+[data-theme="white"] [style*="color: #ffffff"],
+[data-theme="white"] [style*="color: #FFFFFF"],
+[data-theme="white"] [style*="color: #F1F5F9"],
+[data-theme="white"] [style*="color: #f1f5f9"],
+[data-theme="white"] [style*="color: #E2E8F0"],
+[data-theme="white"] [style*="color: #CBD5E1"],
+[data-theme="white"] [style*="color: rgb(255, 255, 255)"],
+[data-theme="white"] [style*="color: rgb(241, 245, 249)"] {
+  color: #0F172A !important;
+}
+
+/* ── Semi-transparent white text → medium-dark gray ─────────── */
+[data-theme="white"] [style*="color: rgba(255, 255, 255"],
+[data-theme="white"] [style*="color: rgba(255,255,255"] {
+  color: #64748B !important;
+}
+
+/* ── White borders → dark opacity borders ───────────────────── */
+[data-theme="white"] [style*="border: 1px solid rgba(255"],
+[data-theme="white"] [style*="border: 1.5px solid rgba(255"],
+[data-theme="white"] [style*="border: 2px solid rgba(255"],
+[data-theme="white"] [style*="border: 1px solid rgba(255, 255, 255"],
+[data-theme="white"] [style*="border: 1.5px solid rgba(255, 255, 255"] {
+  border-color: rgba(0, 0, 0, 0.1) !important;
+}
+[data-theme="white"] [style*="border-bottom: 1px solid rgba(255"],
+[data-theme="white"] [style*="border-bottom: 1px solid rgba(255, 255, 255"] {
+  border-bottom-color: rgba(0, 0, 0, 0.08) !important;
+}
+[data-theme="white"] [style*="border-top: 1px solid rgba(255"],
+[data-theme="white"] [style*="border-top: 1px solid rgba(255, 255, 255"] {
+  border-top-color: rgba(0, 0, 0, 0.08) !important;
+}
+
+/* ── Input text & placeholder ──────────────────────────────── */
+[data-theme="white"] input {
+  color: #0F172A !important;
+}
+[data-theme="white"] input::placeholder {
+  color: rgba(0, 0, 0, 0.32) !important;
+}
+[data-theme="white"] textarea {
+  color: #0F172A !important;
+}
+
+/* ── Scrollbar coloring ────────────────────────────────────── */
+[data-theme="white"] * {
+  scrollbar-color: rgba(0, 0, 0, 0.15) transparent;
+}
+
+/* ── SVG icon strokes within icon wrappers ──────────────────── */
+/* Only affect icons wrapped in rgba(255,255,255) bg containers */
+/* Accent-colored icons (blue, purple, green) keep their color via inline styles */
+
+/* ── Bottom nav tab active dot ──────────────────────────────── */
+[data-theme="white"] .nav-dot {
+  background: #0F172A !important;
+}
+
+/* ── Force background on very dark gradient cards ───────────── */
+/* These are the budget status cards in TrackerTab */
+[data-theme="white"] [style*="background: linear-gradient(135deg, #02"],
+[data-theme="white"] [style*="background: linear-gradient(135deg, #03"],
+[data-theme="white"] [style*="background: linear-gradient(135deg, #1A"],
+[data-theme="white"] [style*="background: linear-gradient(135deg, #2A"],
+[data-theme="white"] [style*="background: linear-gradient(135deg, #3D"] {
+  background: #F8FAFC !important;
+}
+
+/* ── BoxShadow — dark glow shadows look bad on white ──────────
+   We can't remove box-shadow via CSS attribute selectors easily,
+   but the pages explicitly set palette-based shadows. */
+
+/* ── Additional modal/sheet specific overrides ──────────────── */
+
+/* SettingsModal header close/bell button bg */
+[data-theme="white"] [style*="background: rgba(255, 255, 255, 0.04)"],
+[data-theme="white"] [style*="background: rgba(255,255,255,0.04)"],
+[data-theme="white"] [style*="background: rgba(255, 255, 255, 0.05)"],
+[data-theme="white"] [style*="background: rgba(255,255,255,0.05)"],
+[data-theme="white"] [style*="background: rgba(255, 255, 255, 0.06)"],
+[data-theme="white"] [style*="background: rgba(255,255,255,0.06)"],
+[data-theme="white"] [style*="background: rgba(255, 255, 255, 0.07)"],
+[data-theme="white"] [style*="background: rgba(255,255,255,0.07)"],
+[data-theme="white"] [style*="background: rgba(255, 255, 255, 0.08)"],
+[data-theme="white"] [style*="background: rgba(255,255,255,0.08)"],
+[data-theme="white"] [style*="background: rgba(255, 255, 255, 0.09)"],
+[data-theme="white"] [style*="background: rgba(255,255,255,0.09)"] {
+  background: rgba(0, 0, 0, 0.05) !important;
+}
+
+/* Slightly heavier semi-transparent white bg */
+[data-theme="white"] [style*="background: rgba(255, 255, 255, 0.12)"],
+[data-theme="white"] [style*="background: rgba(255,255,255,0.12)"],
+[data-theme="white"] [style*="background: rgba(255, 255, 255, 0.13)"],
+[data-theme="white"] [style*="background: rgba(255,255,255,0.13)"],
+[data-theme="white"] [style*="background: rgba(255, 255, 255, 0.14)"],
+[data-theme="white"] [style*="background: rgba(255,255,255,0.14)"],
+[data-theme="white"] [style*="background: rgba(255, 255, 255, 0.15)"],
+[data-theme="white"] [style*="background: rgba(255,255,255,0.15)"],
+[data-theme="white"] [style*="background: rgba(255, 255, 255, 0.16)"],
+[data-theme="white"] [style*="background: rgba(255,255,255,0.16)"],
+[data-theme="white"] [style*="background: rgba(255, 255, 255, 0.18)"],
+[data-theme="white"] [style*="background: rgba(255,255,255,0.18)"] {
+  background: rgba(0, 0, 0, 0.08) !important;
+}
+
+/* Swipe reveal button bg (rgba 255,255,255,0.4) */
+[data-theme="white"] [style*="background: rgba(255, 255, 255, 0.4)"],
+[data-theme="white"] [style*="background: rgba(255,255,255,0.4)"],
+[data-theme="white"] [style*="background: rgba(255, 255, 255, 0.35)"],
+[data-theme="white"] [style*="background: rgba(255,255,255,0.35)"],
+[data-theme="white"] [style*="background: rgba(255, 255, 255, 0.45)"],
+[data-theme="white"] [style*="background: rgba(255,255,255,0.45)"],
+[data-theme="white"] [style*="background: rgba(255, 255, 255, 0.5)"],
+[data-theme="white"] [style*="background: rgba(255,255,255,0.5)"] {
+  background: rgba(0, 0, 0, 0.18) !important;
+}
+
+/* Sticky search bar / header blur backdrop */
+[data-theme="white"] [style*="background: rgba(0, 0, 0, 0.94)"],
+[data-theme="white"] [style*="background: rgba(0,0,0,0.94)"] {
+  background: rgba(248, 250, 252, 0.97) !important;
+}
+
+/* Recharts tooltip dark bg */
+[data-theme="white"] .recharts-default-tooltip {
+  background: #F8FAFC !important;
+  border-color: rgba(0, 0, 0, 0.1) !important;
+}
+[data-theme="white"] .recharts-tooltip-label,
+[data-theme="white"] .recharts-tooltip-item {
+  color: #0F172A !important;
+}
+
+/* XAxis / YAxis tick text in charts */
+[data-theme="white"] .recharts-cartesian-axis-tick text {
+  fill: #64748B !important;
+}

@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>AI News - Discover</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "primary": "#4725f4",
+                        "background-light": "#f6f5f8",
+                        "background-dark": "#131022",
+                    },
+                    fontFamily: {
+                        "display": ["Manrope"]
+                    },
+                    borderRadius: {"DEFAULT": "0.5rem", "lg": "1rem", "xl": "1.5rem", "full": "9999px"},
+                },
+            },
+        }
+    </script>
+<style>
+        .glass-card {
+            background: rgba(71, 37, 244, 0.05);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .pull-refresh-gradient {
+            background: linear-gradient(180deg, rgba(71, 37, 244, 0.15) 0%, rgba(19, 16, 34, 0) 100%);
+        }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-background-light dark:bg-background-dark font-display text-slate-900 dark:text-slate-100 min-h-screen flex flex-col">
+<!-- Top Status & Refresh Area -->
+<div class="sticky top-0 z-50 bg-background-light/80 dark:bg-background-dark/80 backdrop-blur-md">
+<div class="flex items-center justify-between p-4">
+<span class="material-symbols-outlined text-slate-900 dark:text-slate-100 cursor-pointer">search</span>
+<h1 class="text-lg font-bold tracking-tight">Discover</h1>
+<div class="relative">
+<span class="material-symbols-outlined text-slate-900 dark:text-slate-100 cursor-pointer">notifications</span>
+<span class="absolute top-0 right-0 block h-2 w-2 rounded-full bg-primary"></span>
+</div>
+</div>
+<!-- Pull to refresh indicator (Simulated state) -->
+<div class="pull-refresh-gradient flex flex-col items-center py-4 gap-2">
+<div class="animate-spin text-primary">
+<span class="material-symbols-outlined text-3xl">progress_activity</span>
+</div>
+<p class="text-xs font-medium text-primary/80 uppercase tracking-widest">Updating feed...</p>
+<div class="w-1/3 h-1 bg-slate-200 dark:bg-slate-800 rounded-full mt-1 overflow-hidden">
+<div class="bg-primary h-full w-[45%] rounded-full"></div>
+</div>
+</div>
+</div>
+<!-- Category Chips -->
+<div class="flex gap-3 px-4 py-3 overflow-x-auto no-scrollbar">
+<div class="flex h-10 shrink-0 items-center justify-center gap-x-2 rounded-xl bg-primary px-5 text-white shadow-lg shadow-primary/20">
+<span class="text-sm font-semibold">All News</span>
+</div>
+<div class="flex h-10 shrink-0 items-center justify-center gap-x-2 rounded-xl bg-slate-200 dark:bg-slate-800 px-5 text-slate-600 dark:text-slate-400">
+<span class="text-sm font-semibold">Tech</span>
+</div>
+<div class="flex h-10 shrink-0 items-center justify-center gap-x-2 rounded-xl bg-slate-200 dark:bg-slate-800 px-5 text-slate-600 dark:text-slate-400">
+<span class="text-sm font-semibold">Finance</span>
+</div>
+<div class="flex h-10 shrink-0 items-center justify-center gap-x-2 rounded-xl bg-slate-200 dark:bg-slate-800 px-5 text-slate-600 dark:text-slate-400">
+<span class="text-sm font-semibold">AI Labs</span>
+</div>
+<div class="flex h-10 shrink-0 items-center justify-center gap-x-2 rounded-xl bg-slate-200 dark:bg-slate-800 px-5 text-slate-600 dark:text-slate-400">
+<span class="text-sm font-semibold">Global</span>
+</div>
+</div>
+<!-- News Feed -->
+<main class="flex-1 px-4 py-2 space-y-6 pb-24">
+<!-- Featured Card -->
+<div class="relative group cursor-pointer overflow-hidden rounded-xl h-[400px] flex flex-col justify-end shadow-2xl">
+<div class="absolute inset-0 bg-cover bg-center transition-transform duration-500 group-hover:scale-105" data-alt="Futuristic glowing AI brain architecture representation" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuAePPhj4MnanN9vRFo9Tru3sUa_2hYWgWG6SkBYii1yNshGx3rZjlbl7MJpa-PdC2Yz0eoaqYv5-QQLNbMdBgpqSRtVLB4b8PhtkZEZaOKbbje498S5AJK2YNzVr_O2D5eD_EWS2GdYUjWTFHw24szh0Lx29lIr0KU2Tl8E8UVX2djb0qcY19OmLIh2lGm-d2FBTTDGXT1uj2mmTyo6vFQ_SxAURoMryCvRy0fabH90Y6iighPG7YfhZYINXnNXer8Xw28KtpV4mvI');">
+</div>
+<div class="absolute inset-0 bg-gradient-to-t from-background-dark via-transparent to-transparent opacity-90"></div>
+<div class="relative p-6 space-y-3">
+<div class="flex items-center gap-2">
+<span class="px-3 py-1 bg-primary text-white text-[10px] font-bold uppercase rounded-full">Breaking</span>
+<div class="flex items-center gap-1 glass-card px-3 py-1 rounded-full">
+<span class="material-symbols-outlined text-xs text-primary">auto_awesome</span>
+<span class="text-[10px] font-bold text-white uppercase">Summarized by AI</span>
+</div>
+</div>
+<h2 class="text-2xl font-bold leading-tight text-white">Quantum leap: New AI model decodes complex proteins in seconds</h2>
+<div class="flex items-center justify-between pt-2">
+<span class="text-white/60 text-sm font-medium">4 min read • Tech</span>
+<button class="bg-white text-background-dark p-2 rounded-full flex items-center justify-center shadow-lg">
+<span class="material-symbols-outlined">arrow_forward</span>
+</button>
+</div>
+</div>
+</div>
+<!-- Secondary Card -->
+<div class="relative group cursor-pointer overflow-hidden rounded-xl h-[280px] flex flex-col justify-end shadow-xl">
+<div class="absolute inset-0 bg-cover bg-center transition-transform duration-500 group-hover:scale-105" data-alt="Modern stock market trading dashboard visualization" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuDV_zyjjiLz-s5BFCWIubRgLmWfc7u0PJnZKGbArh9PqaUZtSO6IekQGhfUz5goBxdsNGXRMN4PrS74OHYOJ7e9mfnRWmSfgKgOG2qRz37BjeWZq_eShZfOeyYaL1I0VWPLECIOQ8Q86XKed2QhykzSwBOx3OwdZVd5m6DukoOajyYDFZo_T9KlBp5ARfNz1jV5CJLIv2x0m-uLALFCAVpzHNX2b936XtMOH9a2ROD-D5hy4-0wdMgoARfQghP247iNxGsA5tjxAhM');">
+</div>
+<div class="absolute inset-0 bg-gradient-to-t from-background-dark/90 via-background-dark/20 to-transparent"></div>
+<div class="relative p-5 space-y-2">
+<div class="flex items-center gap-2">
+<span class="px-2 py-0.5 bg-slate-800/80 backdrop-blur-md text-white text-[10px] font-bold uppercase rounded-md">Finance</span>
+<div class="flex items-center gap-1 bg-primary/20 backdrop-blur-md px-2 py-0.5 rounded-md">
+<span class="material-symbols-outlined text-[10px] text-primary">auto_awesome</span>
+<span class="text-[10px] font-bold text-primary uppercase">AI Summary</span>
+</div>
+</div>
+<h3 class="text-lg font-bold leading-snug text-white">Market rally continues as central banks signal potential rate cuts</h3>
+<p class="text-white/60 text-xs font-medium">10 mins ago • Global Markets</p>
+</div>
+</div>
+<!-- Another Card -->
+<div class="relative group cursor-pointer overflow-hidden rounded-xl h-[280px] flex flex-col justify-end shadow-xl">
+<div class="absolute inset-0 bg-cover bg-center transition-transform duration-500 group-hover:scale-105" data-alt="Digital circuit board with neon purple lighting" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuCvGwpimKL9HmgqhfhePHn9Oqj-xytq8HRJj3kjMAbDOXJOcHLzUX4_qILG9XLqp6j74Zk4arRoX_KBdpOYoUPDHFrxQlFfk38WS8pTd-GQAo4Vz1gq6xnHvfZWA9T4iMKFIwNkh3chkGcDWfsf8u1t-xMI4fP-iUYu8uxB8j952gn1LzFn9VxWraN1laN-AwiLY4ZsPkzVN_LcqqKwsBFLdb2k4dN9tAuWgWDAxAUGDX4LV2MKS-qmRyxbflEfjIGbj6nEKrNq1Ag');">
+</div>
+<div class="absolute inset-0 bg-gradient-to-t from-background-dark/90 via-background-dark/20 to-transparent"></div>
+<div class="relative p-5 space-y-2">
+<div class="flex items-center gap-2">
+<span class="px-2 py-0.5 bg-slate-800/80 backdrop-blur-md text-white text-[10px] font-bold uppercase rounded-md">Cybersecurity</span>
+<div class="flex items-center gap-1 bg-primary/20 backdrop-blur-md px-2 py-0.5 rounded-md">
+<span class="material-symbols-outlined text-[10px] text-primary">auto_awesome</span>
+<span class="text-[10px] font-bold text-primary uppercase">AI Summary</span>
+</div>
+</div>
+<h3 class="text-lg font-bold leading-snug text-white">Advanced encryption: How AI is defending against quantum attacks</h3>
+<p class="text-white/60 text-xs font-medium">2 hours ago • Tech Pulse</p>
+</div>
+</div>
+</main>
+<!-- Bottom Navigation Bar -->
+<nav class="fixed bottom-0 left-0 right-0 bg-white/80 dark:bg-background-dark/80 backdrop-blur-xl border-t border-slate-200 dark:border-primary/20 px-6 pb-6 pt-3 z-50">
+<div class="flex items-center justify-between max-w-md mx-auto">
+<a class="flex flex-col items-center gap-1 group" href="#">
+<span class="material-symbols-outlined text-slate-400 group-hover:text-primary transition-colors">home</span>
+<span class="text-[10px] font-bold text-slate-400 group-hover:text-primary uppercase tracking-tighter">Home</span>
+</a>
+<a class="flex flex-col items-center gap-1 group" href="#">
+<span class="material-symbols-outlined text-slate-400 group-hover:text-primary transition-colors">leaderboard</span>
+<span class="text-[10px] font-bold text-slate-400 group-hover:text-primary uppercase tracking-tighter">Analytics</span>
+</a>
+<a class="flex flex-col items-center gap-1" href="#">
+<div class="relative flex items-center justify-center">
+<span class="material-symbols-outlined text-primary fill-[1]">explore</span>
+<div class="absolute -top-1 -right-1 w-1.5 h-1.5 bg-primary rounded-full"></div>
+</div>
+<span class="text-[10px] font-bold text-primary uppercase tracking-tighter">Discover</span>
+</a>
+<a class="flex flex-col items-center gap-1 group" href="#">
+<span class="material-symbols-outlined text-slate-400 group-hover:text-primary transition-colors">settings</span>
+<span class="text-[10px] font-bold text-slate-400 group-hover:text-primary uppercase tracking-tighter">Settings</span>
+</a>
+</div>
+</nav>
+</body></html>

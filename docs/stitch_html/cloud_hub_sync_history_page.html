@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&amp;family=Manrope:wght@300;400;500;600;700;800&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            colors: {
+              "inverse-on-surface": "#555555",
+              "error-dim": "#d7383b",
+              "surface-dim": "#0e0e0e",
+              "inverse-primary": "#006a6a",
+              "on-error-container": "#ffa8a3",
+              "error": "#ff716c",
+              "secondary-container": "#9800d0",
+              "primary-dim": "#00e6e6",
+              "outline": "#757575",
+              "tertiary": "#63baff",
+              "surface-container": "#191919",
+              "on-primary-fixed": "#004343",
+              "surface-container-lowest": "#000000",
+              "on-primary-fixed-variant": "#006262",
+              "surface-tint": "#c1fffe",
+              "secondary-dim": "#b90afc",
+              "surface-container-highest": "#262626",
+              "tertiary-fixed-dim": "#37abf9",
+              "on-error": "#490006",
+              "on-primary-container": "#005d5d",
+              "background": "#0e0e0e",
+              "secondary-fixed-dim": "#eaaeff",
+              "primary-container": "#00ffff",
+              "on-background": "#ffffff",
+              "on-secondary-fixed-variant": "#8300b4",
+              "on-secondary-container": "#fff5fc",
+              "on-surface": "#ffffff",
+              "tertiary-dim": "#2ea5f3",
+              "outline-variant": "#484848",
+              "on-secondary-fixed": "#58007a",
+              "surface-container-low": "#131313",
+              "secondary-fixed": "#f0c1ff",
+              "on-secondary": "#390050",
+              "on-primary": "#006767",
+              "on-tertiary-fixed-variant": "#003d5f",
+              "primary": "#c1fffe",
+              "on-tertiary-fixed": "#001a2c",
+              "error-container": "#9f0519",
+              "surface-variant": "#262626",
+              "surface": "#0e0e0e",
+              "primary-fixed-dim": "#00e6e6",
+              "on-surface-variant": "#ababab",
+              "surface-container-high": "#1f1f1f",
+              "on-tertiary": "#003655",
+              "on-tertiary-container": "#002a44",
+              "inverse-surface": "#f9f9f9",
+              "secondary": "#d575ff",
+              "surface-bright": "#2c2c2c",
+              "tertiary-container": "#3badfc",
+              "primary-fixed": "#00f5f5",
+              "tertiary-fixed": "#5bb8ff"
+            },
+            fontFamily: {
+              "headline": ["Space Grotesk"],
+              "body": ["Manrope"],
+              "label": ["Manrope"]
+            },
+            borderRadius: {"DEFAULT": "0.125rem", "lg": "0.25rem", "xl": "0.5rem", "full": "0.75rem"},
+          },
+        },
+      }
+    </script>
+<style>
+        .glass-panel {
+            background: rgba(38, 38, 38, 0.4);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+        }
+        .glow-cyan {
+            filter: drop-shadow(0 0 8px rgba(0, 255, 255, 0.4));
+        }
+        .glow-purple {
+            filter: drop-shadow(0 0 12px rgba(213, 117, 255, 0.3));
+        }
+        .no-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        .ghost-border {
+            border: 1px solid rgba(72, 72, 72, 0.15);
+        }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-surface-container-lowest text-on-surface font-body selection:bg-primary/30 min-h-screen">
+<!-- Top App Bar -->
+<header class="bg-black/40 backdrop-blur-xl border-b border-white/10 fixed top-0 w-full z-50 flex justify-between items-center px-6 py-4 w-full">
+<div class="flex items-center gap-3">
+<div class="w-8 h-8 rounded-full overflow-hidden border border-primary/20">
+<img alt="User Avatar" class="w-full h-full object-cover" data-alt="Abstract vibrant digital consciousness avatar portrait" src="https://lh3.googleusercontent.com/aida-public/AB6AXuB9272WCUIqTBRy30gQS4GmxoEKRfHktnKHjmEeOYOOoU9veju8MsnG-elLPuIddBWXRnwf6_To2MMt1nTxihzc4-Zme0aNb9hrbL1kjNXR2LoJayEyB3Hrj6rVBzxc18BiXViOJFLtwATSYSEhAWpcDqD-YJDbQHYpU_J9oPC6-R24XfaQs_hH24bjUzFLjfR49Ws39E0T9RKX_ccSwfS_GzMx7pvEsmmf3OGrnQcwOcV2PHkYhNVELBLxlg6kyw-aFZY82CpqxjQ"/>
+</div>
+<span class="font-space-grotesk tracking-tight text-white text-xl font-bold bg-gradient-to-r from-cyan-300 to-cyan-500 bg-clip-text text-transparent">Ethereal Vault</span>
+</div>
+<button class="text-zinc-500 hover:bg-white/5 transition-colors active:scale-95 duration-200 p-2 rounded-full">
+<span class="material-symbols-outlined text-cyan-400">sync</span>
+</button>
+</header>
+<!-- Main Content -->
+<main class="pt-24 pb-32 px-6 max-w-4xl mx-auto">
+<!-- Header Section -->
+<div class="flex justify-between items-end mb-10">
+<div>
+<h1 class="font-headline text-4xl font-bold tracking-tighter text-white">Sync History</h1>
+<p class="text-on-surface-variant text-sm font-label uppercase tracking-widest mt-2">Activity Transmission Log</p>
+</div>
+<button class="px-4 py-2 rounded-full glass-panel ghost-border text-on-surface-variant text-xs font-bold uppercase tracking-widest hover:text-white hover:bg-white/10 transition-all duration-300">
+                Clear All
+            </button>
+</div>
+<!-- Timeline Section -->
+<div class="space-y-4">
+<!-- Activity Item: Success -->
+<div class="group relative glass-panel ghost-border rounded-xl p-5 hover:bg-surface-container-high transition-all duration-500 flex items-center gap-5">
+<div class="flex-none w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center text-primary glow-cyan">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">check_circle</span>
+</div>
+<div class="flex-grow min-w-0">
+<div class="flex justify-between items-start">
+<h3 class="font-headline text-lg text-white truncate group-hover:text-primary transition-colors">Project_Deck.pdf</h3>
+<span class="text-[10px] font-label text-on-surface-variant uppercase tracking-widest bg-surface-container-low px-2 py-1 rounded">2 mins ago</span>
+</div>
+<div class="flex items-center gap-3 mt-1">
+<span class="text-xs font-medium text-primary">Synced</span>
+<div class="h-1 w-1 rounded-full bg-outline-variant"></div>
+<div class="flex items-center gap-1.5 text-on-surface-variant text-xs">
+<span>Local</span>
+<span class="material-symbols-outlined text-[14px]">arrow_forward</span>
+<span>Vault</span>
+</div>
+</div>
+</div>
+</div>
+<!-- Activity Item: Uploaded -->
+<div class="group relative glass-panel ghost-border rounded-xl p-5 hover:bg-surface-container-high transition-all duration-500 flex items-center gap-5">
+<div class="flex-none w-12 h-12 rounded-full bg-secondary/10 flex items-center justify-center text-secondary glow-purple">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">cloud_upload</span>
+</div>
+<div class="flex-grow min-w-0">
+<div class="flex justify-between items-start">
+<h3 class="font-headline text-lg text-white truncate group-hover:text-secondary transition-colors">Neuro_Mapping.json</h3>
+<span class="text-[10px] font-label text-on-surface-variant uppercase tracking-widest bg-surface-container-low px-2 py-1 rounded">10:45 AM</span>
+</div>
+<div class="flex items-center gap-3 mt-1">
+<span class="text-xs font-medium text-secondary">Uploaded</span>
+<div class="h-1 w-1 rounded-full bg-outline-variant"></div>
+<div class="flex items-center gap-1.5 text-on-surface-variant text-xs">
+<span>Local</span>
+<span class="material-symbols-outlined text-[14px]">arrow_forward</span>
+<span>Drive</span>
+</div>
+</div>
+</div>
+</div>
+<!-- Date Separator -->
+<div class="py-6 flex items-center gap-4">
+<div class="h-[1px] flex-grow bg-gradient-to-r from-transparent to-outline-variant/30"></div>
+<span class="text-[10px] font-label text-on-surface-variant uppercase tracking-[0.2em]">Yesterday</span>
+<div class="h-[1px] flex-grow bg-gradient-to-l from-transparent to-outline-variant/30"></div>
+</div>
+<!-- Activity Item: Failed -->
+<div class="group relative glass-panel ghost-border rounded-xl p-5 hover:bg-surface-container-high transition-all duration-500 flex items-center gap-5">
+<div class="flex-none w-12 h-12 rounded-full bg-error/10 flex items-center justify-center text-error">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">error</span>
+</div>
+<div class="flex-grow min-w-0">
+<div class="flex justify-between items-start">
+<h3 class="font-headline text-lg text-white truncate group-hover:text-error transition-colors">Quantum_Compute_Final.rar</h3>
+<span class="text-[10px] font-label text-on-surface-variant uppercase tracking-widest bg-surface-container-low px-2 py-1 rounded">6:12 PM</span>
+</div>
+<div class="flex items-center gap-3 mt-1">
+<span class="text-xs font-medium text-error">Failed</span>
+<div class="h-1 w-1 rounded-full bg-outline-variant"></div>
+<div class="flex items-center gap-1.5 text-on-surface-variant text-xs">
+<span>Local</span>
+<span class="material-symbols-outlined text-[14px]">arrow_forward</span>
+<span>Cloud</span>
+</div>
+</div>
+</div>
+<button class="material-symbols-outlined text-zinc-500 hover:text-white transition-colors">refresh</button>
+</div>
+<!-- Activity Item: Success -->
+<div class="group relative glass-panel ghost-border rounded-xl p-5 hover:bg-surface-container-high transition-all duration-500 flex items-center gap-5">
+<div class="flex-none w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center text-primary glow-cyan">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">cloud_done</span>
+</div>
+<div class="flex-grow min-w-0">
+<div class="flex justify-between items-start">
+<h3 class="font-headline text-lg text-white truncate group-hover:text-primary transition-colors">Archive_Batch_009.zip</h3>
+<span class="text-[10px] font-label text-on-surface-variant uppercase tracking-widest bg-surface-container-low px-2 py-1 rounded">2:30 PM</span>
+</div>
+<div class="flex items-center gap-3 mt-1">
+<span class="text-xs font-medium text-primary">Synced</span>
+<div class="h-1 w-1 rounded-full bg-outline-variant"></div>
+<div class="flex items-center gap-1.5 text-on-surface-variant text-xs">
+<span>Vault</span>
+<span class="material-symbols-outlined text-[14px]">arrow_forward</span>
+<span>Local</span>
+</div>
+</div>
+</div>
+</div>
+<!-- Activity Item: Success -->
+<div class="group relative glass-panel ghost-border rounded-xl p-5 hover:bg-surface-container-high transition-all duration-500 flex items-center gap-5">
+<div class="flex-none w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center text-primary glow-cyan">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">check_circle</span>
+</div>
+<div class="flex-grow min-w-0">
+<div class="flex justify-between items-start">
+<h3 class="font-headline text-lg text-white truncate group-hover:text-primary transition-colors">System_Core_v2.log</h3>
+<span class="text-[10px] font-label text-on-surface-variant uppercase tracking-widest bg-surface-container-low px-2 py-1 rounded">11:00 AM</span>
+</div>
+<div class="flex items-center gap-3 mt-1">
+<span class="text-xs font-medium text-primary">Synced</span>
+<div class="h-1 w-1 rounded-full bg-outline-variant"></div>
+<div class="flex items-center gap-1.5 text-on-surface-variant text-xs">
+<span>Local</span>
+<span class="material-symbols-outlined text-[14px]">arrow_forward</span>
+<span>Vault</span>
+</div>
+</div>
+</div>
+</div>
+</div>
+</main>
+<!-- Bottom Navigation Bar -->
+<nav class="bg-zinc-950/90 backdrop-blur-md fixed bottom-0 w-full z-50 rounded-t-3xl flex justify-around items-center pt-3 pb-8 px-4 w-full shadow-[0_-10px_30px_rgba(213,117,255,0.05)]">
+<div class="flex flex-col items-center justify-center text-zinc-600 hover:text-cyan-200 transition-all active:scale-90 duration-300">
+<span class="material-symbols-outlined mb-1">home_max</span>
+<span class="font-manrope text-[10px] uppercase tracking-widest">Home</span>
+</div>
+<div class="flex flex-col items-center justify-center text-zinc-600 hover:text-cyan-200 transition-all active:scale-90 duration-300">
+<span class="material-symbols-outlined mb-1">analytics</span>
+<span class="font-manrope text-[10px] uppercase tracking-widest">Insights</span>
+</div>
+<div class="flex flex-col items-center justify-center text-zinc-600 hover:text-cyan-200 transition-all active:scale-90 duration-300">
+<span class="material-symbols-outlined mb-1">explore</span>
+<span class="font-manrope text-[10px] uppercase tracking-widest">Discover</span>
+</div>
+<div class="flex flex-col items-center justify-center text-cyan-400 drop-shadow-[0_0_8px_rgba(0,255,255,0.6)] hover:text-cyan-200 transition-all active:scale-90 duration-300">
+<span class="material-symbols-outlined mb-1" style="font-variation-settings: 'FILL' 1;">cloud_queue</span>
+<span class="font-manrope text-[10px] uppercase tracking-widest">Cloud</span>
+</div>
+<div class="flex flex-col items-center justify-center text-zinc-600 hover:text-cyan-200 transition-all active:scale-90 duration-300">
+<span class="material-symbols-outlined mb-1">psychology</span>
+<span class="font-manrope text-[10px] uppercase tracking-widest">AI Coach</span>
+</div>
+</nav>
+<!-- Ambient Glow Background -->
+<div class="fixed top-[-20%] left-[-10%] w-[60%] h-[60%] bg-secondary/5 rounded-full blur-[120px] pointer-events-none -z-10"></div>
+<div class="fixed bottom-[-10%] right-[-10%] w-[50%] h-[50%] bg-primary/5 rounded-full blur-[120px] pointer-events-none -z-10"></div>
+</body></html>

@@ -1,0 +1,104 @@
+# Nexus AI — Caddy 2 production configuration
+#
+# Serves the compiled Flutter web bundle (placed at /srv by the Dockerfile)
+# with all the headers required for a modern PWA + Drift's sqlite3.wasm.
+#
+# Behind Coolify, set the application's "Internal Port" to 80. Coolify's
+# proxy will terminate TLS for you and forward HTTP(S) traffic here.
+
+{
+	# Globals
+	admin off
+	auto_https off
+	servers {
+		# Trust Coolify's reverse-proxy headers (X-Forwarded-For, etc).
+		trusted_proxies static 0.0.0.0/0 ::/0
+	}
+}
+
+:80 {
+	root * /srv
+	encode zstd gzip
+
+	# ── Health endpoint for container orchestration ─────────────────────────
+	@healthz path /healthz
+	respond @healthz "ok" 200
+
+	# ── Long cache for content-hashed Flutter assets ────────────────────────
+	# Anything under /assets/, /canvaskit/, /icons/, /fonts/, plus the
+	# generated *.dart.js / .json bundles, is fingerprinted by `flutter
+	# build web` and safe to cache forever.
+	@hashed {
+		path /assets/* /canvaskit/* /icons/* /fonts/*
+		path *.js *.wasm *.json *.png *.svg *.woff2 *.ttf
+	}
+	header @hashed Cache-Control "public, max-age=31536000, immutable"
+
+	# ── Short cache for index.html / manifest / service-worker ─────────────
+	# These files change every release; we want browsers to revalidate.
+	@noCacheRoot {
+		path /index.html
+		path /manifest.json
+		path /flutter_service_worker.js
+		path /version.json
+		path /
+	}
+	header @noCacheRoot Cache-Control "no-cache, no-store, must-revalidate"
+
+	# ── Drift WASM requires COOP/COEP for OPFS shared-memory persistence ───
+	# These headers enable SharedArrayBuffer + Atomics, which sqlite3.wasm
+	# uses to talk to the Origin-Private FileSystem worker. Without them,
+	# Drift falls back to a slower IndexedDB implementation but still works.
+	header {
+		# Cross-Origin isolation for sqlite3 OPFS implementation.
+		Cross-Origin-Embedder-Policy "require-corp"
+		Cross-Origin-Opener-Policy   "same-origin"
+		Cross-Origin-Resource-Policy "same-origin"
+
+		# Standard hardening.
+		X-Content-Type-Options       "nosniff"
+		X-Frame-Options              "SAMEORIGIN"
+		Referrer-Policy              "strict-origin-when-cross-origin"
+		Permissions-Policy           "camera=(self), microphone=(self), geolocation=(), interest-cohort=()"
+
+		# Lightweight CSP — relaxed enough for Flutter Web (it injects inline
+		# styles and uses CanvasKit from gstatic.com, plus google_fonts).
+		# Update `connect-src` to include your API origin in production.
+		Content-Security-Policy "default-src 'self'; \
+			script-src 'self' 'wasm-unsafe-eval' 'unsafe-inline' https://www.gstatic.com; \
+			style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; \
+			font-src 'self' https://fonts.gstatic.com data:; \
+			img-src 'self' data: blob: https:; \
+			connect-src 'self' https: http: ws: wss:; \
+			worker-src 'self' blob:; \
+			child-src 'self' blob:; \
+			object-src 'none'; \
+			base-uri 'self'; \
+			frame-ancestors 'self'"
+
+		# Drop the `Server: Caddy` banner.
+		-Server
+	}
+
+	# ── sqlite3.wasm needs application/wasm Content-Type ────────────────────
+	# Caddy already infers this from the .wasm extension, but be explicit.
+	@wasm path *.wasm
+	header @wasm Content-Type "application/wasm"
+
+	# ── SPA fallback ─────────────────────────────────────────────────────────
+	# Any path that doesn't match a real file falls through to /index.html
+	# so GoRouter can handle deep links like /#/login, /#/landing, etc.
+	try_files {path} {path}/ /index.html
+
+	file_server {
+		# Don't expose directory listings.
+		hide .git .htaccess
+	}
+
+	# ── Logging ──────────────────────────────────────────────────────────────
+	log {
+		output stdout
+		format console
+		level INFO
+	}
+}

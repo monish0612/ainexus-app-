@@ -1,0 +1,88 @@
+# syntax=docker/dockerfile:1.7
+# ─────────────────────────────────────────────────────────────────────────────
+#  Nexus AI — Flutter Web Production Image (multi-stage)
+#
+#  Stage 1: build the Flutter web bundle from source.
+#  Stage 2: download Drift's web assets (sqlite3.wasm + drift_worker.js)
+#           that match the versions in pubspec.lock.
+#  Stage 3: serve the bundle with Caddy 2 (gzip + zstd, SPA fallback, security
+#           headers required by Drift WASM such as COOP/COEP).
+#
+#  Build:
+#    docker build -f Dockerfile.web \
+#      --build-arg API_BASE_URL=http://72.60.219.97:3000 \
+#      -t ainexus-web .
+#
+#  In Coolify, set the Dockerfile to `Dockerfile.web` and (optionally) add a
+#  build argument `API_BASE_URL` pointing at your API public URL.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Stage 1: Flutter SDK build ───────────────────────────────────────────────
+FROM ghcr.io/cirruslabs/flutter:3.41.3 AS flutter_build
+
+# Build-time API base URL. If unset we fall back to the production constant
+# baked into the source. Coolify can pass `API_BASE_URL` as a build argument.
+ARG API_BASE_URL=""
+ARG LITELLM_URL=""
+ARG FLUTTER_BUILD_MODE=release
+
+# Speed up cold builds by caching pub before the full source copy.
+WORKDIR /app
+COPY pubspec.yaml pubspec.lock ./
+RUN flutter pub get --enforce-lockfile || flutter pub get
+
+# Now bring in the rest of the project.
+COPY . .
+
+# Re-resolve in case anything changed (idempotent if cached).
+RUN flutter pub get
+
+# Compile the web bundle with optional --dart-define overrides.
+RUN if [ -n "$API_BASE_URL" ] && [ -n "$LITELLM_URL" ]; then \
+      flutter build web --release \
+        --dart-define=API_BASE_URL="$API_BASE_URL" \
+        --dart-define=LITELLM_URL="$LITELLM_URL" \
+        --base-href=/ ; \
+    elif [ -n "$API_BASE_URL" ]; then \
+      flutter build web --release \
+        --dart-define=API_BASE_URL="$API_BASE_URL" \
+        --base-href=/ ; \
+    else \
+      flutter build web --release --base-href=/ ; \
+    fi
+
+# ── Stage 2: download matching Drift web assets ──────────────────────────────
+# The drift package on the web needs sqlite3.wasm + drift_worker.dart.js
+# alongside the Flutter bundle. Versions are pinned to match pubspec.lock
+# (drift 2.28.x and sqlite3 2.9.x at the time of writing).
+FROM curlimages/curl:8.10.1 AS drift_assets
+
+ARG SQLITE3_WASM_VERSION=2.9.4
+ARG DRIFT_WORKER_VERSION=2.28.2
+
+WORKDIR /assets
+RUN curl -fsSL -o sqlite3.wasm \
+      "https://github.com/simolus3/sqlite3.dart/releases/download/sqlite3-${SQLITE3_WASM_VERSION}/sqlite3.wasm" && \
+    curl -fsSL -o drift_worker.dart.js \
+      "https://github.com/simolus3/drift/releases/download/drift-${DRIFT_WORKER_VERSION}/drift_worker.dart.js"
+
+# ── Stage 3: serve with Caddy ────────────────────────────────────────────────
+FROM caddy:2.8-alpine
+
+# Copy the Flutter build output and the Drift web assets into Caddy's webroot.
+COPY --from=flutter_build /app/build/web /srv
+COPY --from=drift_assets  /assets/sqlite3.wasm        /srv/sqlite3.wasm
+COPY --from=drift_assets  /assets/drift_worker.dart.js /srv/drift_worker.dart.js
+
+# Caddy configuration with SPA fallback + COOP/COEP headers (so Drift's WASM
+# OPFS implementation can use shared-array buffers efficiently).
+# Stored in /deploy/ (not /web/) so it doesn't end up inside the public webroot.
+COPY deploy/Caddyfile /etc/caddy/Caddyfile
+
+EXPOSE 80
+
+# Lightweight HTTP healthcheck — Caddy serves /healthz from the Caddyfile.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD wget -qO- http://127.0.0.1/healthz || exit 1
+
+CMD ["caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]

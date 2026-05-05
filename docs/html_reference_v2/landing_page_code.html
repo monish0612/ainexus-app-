@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Apex AI - Splash Screen</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "primary": "#0d59f2",
+                        "accent-purple": "#a855f7",
+                        "background-light": "#f5f6f8",
+                        "background-dark": "#000000",
+                    },
+                    fontFamily: {
+                        "display": ["Space Grotesk", "sans-serif"]
+                    },
+                    borderRadius: {"DEFAULT": "0.5rem", "lg": "1rem", "xl": "1.5rem", "full": "9999px"},
+                },
+            },
+        }
+    </script>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-black font-display overflow-hidden select-none">
+<div class="relative flex min-h-screen w-full flex-col items-center justify-center bg-black">
+<div class="absolute inset-0 overflow-hidden pointer-events-none">
+<div class="absolute -top-[20%] -left-[10%] w-[60%] h-[60%] bg-primary/10 blur-[120px] rounded-full"></div>
+<div class="absolute -bottom-[20%] -right-[10%] w-[60%] h-[60%] bg-accent-purple/10 blur-[120px] rounded-full"></div>
+</div>
+<div class="relative z-10 flex flex-col items-center gap-12 w-full max-w-md px-8">
+<div class="relative group">
+<div class="absolute inset-0 bg-gradient-to-tr from-primary to-accent-purple blur-2xl opacity-40 group-hover:opacity-60 transition-opacity duration-500"></div>
+<div class="relative w-32 h-32 md:w-40 md:h-40 flex items-center justify-center rounded-3xl bg-black border border-white/10 overflow-hidden shadow-2xl">
+<div class="absolute inset-0 bg-gradient-to-tr from-primary/20 via-transparent to-accent-purple/20"></div>
+<span class="material-symbols-outlined text-7xl md:text-8xl bg-gradient-to-br from-primary via-white to-accent-purple bg-clip-text text-transparent" style="font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 48;">
+                        bolt
+                    </span>
+</div>
+</div>
+<div class="text-center space-y-2">
+<h1 class="text-5xl md:text-6xl font-bold tracking-tighter bg-gradient-to-b from-white to-slate-400 bg-clip-text text-transparent">
+                    APEX AI
+                </h1>
+<p class="text-slate-500 text-sm font-medium tracking-[0.3em] uppercase">
+                    Neural Engine V2.0
+                </p>
+</div>
+<div class="w-full space-y-6 pt-12">
+<div class="flex flex-col gap-3">
+<div class="flex justify-between items-end px-1">
+<div class="flex items-center gap-2">
+<span class="flex h-1.5 w-1.5 rounded-full bg-primary shadow-[0_0_8px_#0d59f2]"></span>
+<p class="text-slate-300 text-xs font-medium tracking-wide uppercase">Initializing AI Systems...</p>
+</div>
+<p class="text-primary text-xs font-bold tabular-nums">78%</p>
+</div>
+<div class="h-1.5 w-full bg-slate-900/50 rounded-full overflow-hidden p-[1px] border border-white/5">
+<div class="h-full rounded-full bg-gradient-to-r from-primary to-accent-purple shadow-[0_0_15px_rgba(13,89,242,0.5)]" style="width: 78%;"></div>
+</div>
+</div>
+<div class="grid grid-cols-2 gap-4">
+<div class="bg-white/5 border border-white/10 rounded-xl p-3 flex items-center gap-3">
+<span class="material-symbols-outlined text-primary text-lg">memory</span>
+<div class="flex flex-col">
+<span class="text-[10px] text-slate-500 uppercase tracking-wider">Cores</span>
+<span class="text-xs text-slate-200 font-semibold">Active (128)</span>
+</div>
+</div>
+<div class="bg-white/5 border border-white/10 rounded-xl p-3 flex items-center gap-3">
+<span class="material-symbols-outlined text-accent-purple text-lg">hub</span>
+<div class="flex flex-col">
+<span class="text-[10px] text-slate-500 uppercase tracking-wider">Neural</span>
+<span class="text-xs text-slate-200 font-semibold">Syncing</span>
+</div>
+</div>
+</div>
+</div>
+</div>
+<div class="absolute bottom-8 w-full px-8 text-center">
+<p class="text-[10px] text-slate-600 font-medium tracking-widest uppercase mb-4">Secure Biometric Verification Pending</p>
+<div class="flex justify-center gap-6">
+<span class="material-symbols-outlined text-slate-700 text-lg hover:text-primary transition-colors cursor-pointer">fingerprint</span>
+<span class="material-symbols-outlined text-slate-700 text-lg hover:text-primary transition-colors cursor-pointer">face_6</span>
+<span class="material-symbols-outlined text-slate-700 text-lg hover:text-primary transition-colors cursor-pointer">key_visualizer</span>
+</div>
+</div>
+</div>
+<div class="fixed top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-primary/30 to-transparent"></div>
+<div class="fixed bottom-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-accent-purple/30 to-transparent"></div>
+</body></html>

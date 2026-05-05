@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&amp;family=Manrope:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            colors: {
+              "on-secondary-container": "#fff5fc",
+              "primary": "#c1fffe",
+              "error": "#ff716c",
+              "primary-fixed-dim": "#00e6e6",
+              "surface": "#0e0e0e",
+              "on-primary": "#006767",
+              "on-primary-fixed": "#004343",
+              "surface-variant": "#262626",
+              "surface-container-highest": "#262626",
+              "surface-dim": "#0e0e0e",
+              "on-secondary-fixed-variant": "#8300b4",
+              "tertiary-fixed-dim": "#37abf9",
+              "outline": "#757575",
+              "primary-container": "#00ffff",
+              "error-dim": "#d7383b",
+              "on-background": "#ffffff",
+              "secondary-container": "#9800d0",
+              "on-tertiary-fixed": "#001a2c",
+              "tertiary": "#63baff",
+              "on-primary-fixed-variant": "#006262",
+              "on-tertiary": "#003655",
+              "on-error": "#490006",
+              "on-error-container": "#ffa8a3",
+              "surface-container-high": "#1f1f1f",
+              "primary-dim": "#00e6e6",
+              "secondary-fixed-dim": "#eaaeff",
+              "tertiary-dim": "#2ea5f3",
+              "primary-fixed": "#00f5f5",
+              "on-primary-container": "#005d5d",
+              "surface-container-low": "#131313",
+              "error-container": "#9f0519",
+              "tertiary-container": "#3badfc",
+              "surface-bright": "#2c2c2c",
+              "on-surface-variant": "#ababab",
+              "outline-variant": "#484848",
+              "on-tertiary-container": "#002a44",
+              "inverse-primary": "#006a6a",
+              "on-secondary-fixed": "#58007a",
+              "on-surface": "#ffffff",
+              "surface-container": "#191919",
+              "inverse-surface": "#f9f9f9",
+              "tertiary-fixed": "#5bb8ff",
+              "on-tertiary-fixed-variant": "#003d5f",
+              "secondary": "#d575ff",
+              "secondary-dim": "#b90afc",
+              "surface-container-lowest": "#000000",
+              "secondary-fixed": "#f0c1ff",
+              "inverse-on-surface": "#555555",
+              "surface-tint": "#c1fffe",
+              "background": "#0e0e0e",
+              "on-secondary": "#390050"
+            },
+            fontFamily: {
+              "headline": ["Space Grotesk"],
+              "body": ["Manrope"],
+              "label": ["Manrope"]
+            },
+            borderRadius: {"DEFAULT": "0.125rem", "lg": "0.25rem", "xl": "0.5rem", "full": "0.75rem"},
+          },
+        },
+      }
+    </script>
+<style>
+        body {
+            background-color: #000000;
+            color: #ffffff;
+            font-family: 'Manrope', sans-serif;
+        }
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        .glass-panel {
+            background: rgba(38, 38, 38, 0.4);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+        }
+        .nebula-glow {
+            background: radial-gradient(circle at center, rgba(193, 255, 254, 0.15) 0%, transparent 70%);
+        }
+        body {
+          min-height: max(884px, 100dvh);
+        }
+    </style>
+</head>
+<body class="bg-surface-container-lowest min-h-screen pb-40">
+<!-- TopAppBar -->
+<header class="bg-black/40 backdrop-blur-xl text-white fixed top-0 w-full z-50 border-b border-white/10 shadow-[0_0_20px_rgba(0,255,255,0.1)] flex justify-between items-center px-6 py-4">
+<div class="flex items-center gap-3">
+<div class="w-8 h-8 rounded-full bg-gradient-to-tr from-secondary to-primary p-[1px]">
+<div class="w-full h-full rounded-full bg-black flex items-center justify-center overflow-hidden">
+<img alt="User Consciousness" class="w-full h-full object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAxlQqrwtMDG7IqWCP5Vil9K5Q9sylFJkzqRmCLGID19bKityRA_YQnraRAevjmvDINtPtylK-BpIloNhHZxPBJPNOWJXXsn2bovKG2ZSyQ2fKK424sN2LOjUOuHrv5qLxSrNEvL8eOsMBUnUIHPYDACM2e8dov0YL9aWF3j67LrFjXfH4999MYhJr9uV3vybH-UYCWRw0_rT9-LOborSMMW-gaWDNN8uORRLiDn8K7cfYzRQuVAUrIbiShjYTid9MrhRDvC7ojAkk"/>
+</div>
+</div>
+<h1 class="font-headline tracking-tight text-xl font-bold bg-gradient-to-r from-cyan-300 to-cyan-500 bg-clip-text text-transparent">Ethereal Vault</h1>
+</div>
+<div class="flex items-center gap-4">
+<span class="material-symbols-outlined text-cyan-400 hover:bg-white/5 transition-colors p-2 rounded-full cursor-pointer active:scale-95 duration-200">sync</span>
+</div>
+</header>
+<main class="pt-24 px-6 max-w-5xl mx-auto space-y-10">
+<!-- Storage Nebula Module -->
+<section class="relative overflow-hidden rounded-3xl p-8 bg-surface-container-low border border-outline-variant/10">
+<div class="absolute -right-20 -top-20 w-64 h-64 bg-secondary/20 blur-[100px] rounded-full"></div>
+<div class="absolute -left-10 -bottom-10 w-48 h-48 bg-primary/10 blur-[80px] rounded-full"></div>
+<div class="relative z-10 flex flex-col md:flex-row md:items-end justify-between gap-6">
+<div class="space-y-2">
+<p class="font-label text-xs uppercase tracking-[0.2em] text-on-surface-variant">System Capacity</p>
+<div class="flex items-baseline gap-2">
+<span class="font-headline text-5xl font-bold tracking-tighter text-white">15.4</span>
+<span class="font-headline text-xl text-primary font-medium">GB</span>
+<span class="mx-2 text-outline-variant font-light">/</span>
+<span class="font-headline text-xl text-on-surface-variant font-light">100 GB</span>
+</div>
+</div>
+<div class="flex items-center gap-3 bg-surface-container-highest/40 px-4 py-2 rounded-full border border-outline-variant/20">
+<div class="w-2 h-2 rounded-full bg-tertiary shadow-[0_0_8px_#63baff]"></div>
+<p class="font-label text-[10px] uppercase tracking-widest text-on-surface">Google Drive Connected</p>
+</div>
+</div>
+<!-- Glowing Progress Bar -->
+<div class="relative mt-8 h-1.5 w-full bg-surface-container-highest rounded-full overflow-hidden">
+<div class="absolute top-0 left-0 h-full w-[15.4%] bg-gradient-to-r from-primary-dim to-secondary rounded-full shadow-[0_0_15px_rgba(0,255,255,0.4)]"></div>
+</div>
+</section>
+<!-- X-Style Navigation Tabs - Modified to fill width with 2 tabs -->
+<nav class="flex border-b border-outline-variant/10">
+<button class="relative flex-1 px-8 py-4 font-headline text-sm font-medium tracking-wide text-primary transition-all text-center">
+                Files
+                <div class="absolute bottom-0 left-0 w-full h-[2px] bg-primary shadow-[0_-4px_10px_#c1fffe]"></div>
+</button>
+<button class="flex-1 px-8 py-4 font-headline text-sm font-medium tracking-wide text-on-surface-variant hover:text-on-surface transition-all text-center">
+                History
+            </button>
+</nav>
+<!-- Bento Grid Files -->
+<div class="grid grid-cols-1 gap-6 md:grid-cols-2">
+<!-- Large Featured Card (AI Insights) -->
+<!-- Small Square Card -->
+<div class="glass-panel rounded-3xl p-6 border border-outline-variant/5 hover:border-outline-variant/20 transition-all flex flex-col justify-between">
+<div class="flex justify-between">
+<div class="p-3 bg-primary/10 rounded-2xl">
+<span class="material-symbols-outlined text-primary">folder_open</span>
+</div>
+</div>
+<div>
+<h3 class="font-headline text-lg font-semibold">Core_V_Zero</h3>
+<p class="font-label text-[10px] text-outline uppercase tracking-widest">480 Files • 2.1 GB</p>
+</div>
+</div>
+<!-- List Item Style Card -->
+<div class="md:col-span-3 glass-panel rounded-3xl p-4 border border-outline-variant/5 hover:bg-surface-container-high transition-all flex items-center justify-between">
+<div class="flex items-center gap-4">
+<div class="w-12 h-12 rounded-2xl bg-tertiary/10 flex items-center justify-center">
+<span class="material-symbols-outlined text-tertiary">description</span>
+</div>
+<div>
+<h4 class="font-headline font-medium">Quantum_Encryption_Key.pdf</h4>
+<p class="font-label text-[10px] text-outline uppercase tracking-widest">Modified 2 hours ago</p>
+</div>
+</div>
+<div class="flex items-center gap-6 pr-4">
+<span class="text-xs font-label text-on-surface-variant">1.2 MB</span>
+<span class="material-symbols-outlined text-secondary" style="font-variation-settings: 'FILL' 1;">star</span>
+</div>
+</div>
+</div>
+<!-- Sync History Log Section -->
+<section class="space-y-6">
+<div class="flex items-center justify-between">
+<h2 class="font-headline text-xl font-bold tracking-tight text-white flex items-center gap-2">
+<span class="material-symbols-outlined text-primary">history</span>
+                    Sync History
+                </h2>
+<button class="text-[10px] font-label uppercase tracking-widest text-primary border border-primary/20 px-3 py-1 rounded-full hover:bg-primary/10 transition-colors">Clear All</button>
+</div>
+<div class="space-y-3">
+<!-- History Item: Synced -->
+<div class="glass-panel rounded-2xl p-4 border border-outline-variant/5 flex items-center gap-4 hover:border-outline-variant/20 transition-all">
+<div class="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
+<span class="material-symbols-outlined text-primary text-xl">check_circle</span>
+</div>
+<div class="flex-1 min-w-0">
+<h4 class="font-headline font-medium text-sm truncate">Project_Deck.pdf</h4>
+<div class="flex items-center gap-2 mt-0.5">
+<span class="text-[10px] font-label text-primary uppercase tracking-widest">Synced</span>
+<span class="text-[10px] text-outline-variant">•</span>
+<span class="text-[10px] font-label text-outline-variant uppercase tracking-widest">Local → Drive</span>
+</div>
+</div>
+<span class="text-[10px] font-label text-outline-variant uppercase tracking-widest whitespace-nowrap">2 mins ago</span>
+</div>
+<!-- History Item: Uploaded -->
+<div class="glass-panel rounded-2xl p-4 border border-outline-variant/5 flex items-center gap-4 hover:border-outline-variant/20 transition-all">
+<div class="w-10 h-10 rounded-full bg-secondary/10 flex items-center justify-center">
+<span class="material-symbols-outlined text-secondary text-xl">cloud_upload</span>
+</div>
+<div class="flex-1 min-w-0">
+<h4 class="font-headline font-medium text-sm truncate">Neuro_Mapping_Data.json</h4>
+<div class="flex items-center gap-2 mt-0.5">
+<span class="text-[10px] font-label text-secondary uppercase tracking-widest">Uploaded</span>
+<span class="text-[10px] text-outline-variant">•</span>
+<span class="text-[10px] font-label text-outline-variant uppercase tracking-widest">Local → Vault</span>
+</div>
+</div>
+<span class="text-[10px] font-label text-outline-variant uppercase tracking-widest whitespace-nowrap">Today, 10:45 AM</span>
+</div>
+<!-- History Item: Failed -->
+<div class="glass-panel rounded-2xl p-4 border border-outline-variant/5 flex items-center gap-4 hover:border-outline-variant/20 transition-all">
+<div class="w-10 h-10 rounded-full bg-error/10 flex items-center justify-center">
+<span class="material-symbols-outlined text-error text-xl">warning</span>
+</div>
+<div class="flex-1 min-w-0">
+<h4 class="font-headline font-medium text-sm truncate">Unencrypted_Stream.raw</h4>
+<div class="flex items-center gap-2 mt-0.5">
+<span class="text-[10px] font-label text-error uppercase tracking-widest">Failed</span>
+<span class="text-[10px] text-outline-variant">•</span>
+<span class="text-[10px] font-label text-outline-variant uppercase tracking-widest">Sync Interrupted</span>
+</div>
+</div>
+<span class="text-[10px] font-label text-outline-variant uppercase tracking-widest whitespace-nowrap">3 hours ago</span>
+</div>
+</div>
+</section>
+</main>
+<!-- Floating Action Button -->
+<button class="fixed bottom-28 right-6 md:bottom-12 md:right-12 z-50 group">
+<div class="absolute inset-0 bg-primary-container blur-xl opacity-20 group-hover:opacity-40 transition-opacity"></div>
+<div class="relative flex items-center gap-3 bg-gradient-to-r from-primary-dim to-primary-container text-on-primary-fixed px-6 py-4 rounded-full shadow-2xl active:scale-95 duration-200">
+<span class="material-symbols-outlined font-bold">add</span>
+<span class="font-headline font-bold uppercase tracking-widest text-xs">Upload New</span>
+</div>
+</button>
+<!-- BottomNavBar - Cloud tab remains active -->
+<nav class="bg-zinc-950/90 backdrop-blur-md fixed bottom-0 w-full z-50 rounded-t-3xl shadow-[0_-10px_30px_rgba(213,117,255,0.05)] flex justify-around items-center pt-3 pb-8 px-4">
+<div class="flex flex-col items-center justify-center text-zinc-600 hover:text-cyan-200 transition-all active:scale-90 duration-300 cursor-pointer">
+<span class="material-symbols-outlined">home_max</span>
+<span class="font-manrope text-[10px] uppercase tracking-widest mt-1">Home</span>
+</div>
+<div class="flex flex-col items-center justify-center text-zinc-600 hover:text-cyan-200 transition-all active:scale-90 duration-300 cursor-pointer">
+<span class="material-symbols-outlined">analytics</span>
+<span class="font-manrope text-[10px] uppercase tracking-widest mt-1">Insights</span>
+</div>
+<div class="flex flex-col items-center justify-center text-zinc-600 hover:text-cyan-200 transition-all active:scale-90 duration-300 cursor-pointer">
+<span class="material-symbols-outlined">explore</span>
+<span class="font-manrope text-[10px] uppercase tracking-widest mt-1">Discover</span>
+</div>
+<div class="flex flex-col items-center justify-center text-cyan-400 drop-shadow-[0_0_8px_rgba(0,255,255,0.6)] active:scale-90 duration-300 cursor-pointer">
+<span class="material-symbols-outlined">cloud_queue</span>
+<span class="font-manrope text-[10px] uppercase tracking-widest mt-1">Cloud</span>
+</div>
+</nav>
+<!-- Ambient Decorative Background Elements -->
+<div class="fixed top-1/4 -left-20 w-96 h-96 bg-primary/5 blur-[120px] rounded-full -z-10 pointer-events-none"></div>
+<div class="fixed bottom-1/4 -right-20 w-96 h-96 bg-secondary/5 blur-[120px] rounded-full -z-10 pointer-events-none"></div>
+</body></html>

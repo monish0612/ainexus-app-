@@ -1,0 +1,171 @@
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@200;300;400;500;600;700;800&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "primary": "#4725f4",
+                        "background-light": "#f6f5f8",
+                        "background-dark": "#000000",
+                    },
+                    fontFamily: {
+                        "display": ["Manrope"]
+                    },
+                    borderRadius: {"DEFAULT": "0.5rem", "lg": "1rem", "xl": "1.5rem", "full": "9999px"},
+                },
+            },
+        }
+    </script>
+<style>
+        body {
+            font-family: 'Manrope', sans-serif;
+            background-color: #000000;
+        }
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.03);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        .ai-glow {
+            border: 1px solid rgba(71, 37, 244, 0.5);
+            box-shadow: 0 0 20px rgba(71, 37, 244, 0.15);
+        }
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 0px;
+        }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-background-dark text-slate-100 antialiased selection:bg-primary/30">
+<div class="fixed top-0 left-0 w-full h-1 z-50 bg-slate-900">
+<div class="h-full bg-gradient-to-r from-primary via-purple-500 to-pink-500 w-[65%]"></div>
+</div>
+<header class="sticky top-0 z-40 bg-background-dark/80 backdrop-blur-md border-b border-white/5 px-4 py-3 flex items-center justify-between">
+<button class="w-10 h-10 flex items-center justify-center rounded-full hover:bg-white/10 transition-colors">
+<span class="material-symbols-outlined text-slate-100">arrow_back</span>
+</button>
+<div class="flex-1 px-4">
+<h1 class="text-sm font-bold truncate text-slate-100">Quantum Computing Revolution</h1>
+</div>
+<div class="flex gap-2">
+<button class="w-10 h-10 flex items-center justify-center rounded-full hover:bg-white/10 transition-colors">
+<span class="material-symbols-outlined text-slate-100">text_fields</span>
+</button>
+<button class="w-10 h-10 flex items-center justify-center rounded-full hover:bg-white/10 transition-colors">
+<span class="material-symbols-outlined text-slate-100">more_vert</span>
+</button>
+</div>
+</header>
+<main class="max-w-2xl mx-auto px-4 pb-32">
+<div class="py-8">
+<div class="flex items-center gap-2 mb-4">
+<span class="px-2 py-1 bg-primary/20 text-primary text-[10px] font-bold uppercase tracking-widest rounded">Technology</span>
+<span class="text-slate-500 text-xs font-medium">8 min read • Updated 2h ago</span>
+</div>
+<h1 class="text-4xl font-extrabold leading-tight tracking-tight text-white mb-6">
+                The Dawn of Practical Quantum Computing: A New Era
+            </h1>
+<div class="ai-glow glass-panel rounded-xl p-6 mb-8 relative overflow-hidden">
+<div class="absolute top-0 right-0 p-3 opacity-20">
+<span class="material-symbols-outlined text-primary text-4xl">auto_awesome</span>
+</div>
+<div class="flex items-center gap-2 mb-4">
+<span class="material-symbols-outlined text-primary text-sm">auto_awesome</span>
+<h3 class="text-xs font-bold uppercase tracking-widest text-primary">AI Quick Summary</h3>
+</div>
+<ul class="space-y-3">
+<li class="flex items-start gap-3">
+<span class="material-symbols-outlined text-primary text-sm mt-1">check_circle</span>
+<p class="text-slate-200 text-sm leading-relaxed">Researchers achieve 99.9% fidelity in silicon-based quantum processors, marking a major stability milestone.</p>
+</li>
+<li class="flex items-start gap-3">
+<span class="material-symbols-outlined text-primary text-sm mt-1">check_circle</span>
+<p class="text-slate-200 text-sm leading-relaxed">Practical applications in drug discovery could reduce R&amp;D timelines from years to weeks.</p>
+</li>
+<li class="flex items-start gap-3">
+<span class="material-symbols-outlined text-primary text-sm mt-1">check_circle</span>
+<p class="text-slate-200 text-sm leading-relaxed">Infrastructure costs remain high, but accessibility via cloud-based quantum units is expanding.</p>
+</li>
+</ul>
+</div>
+<div class="flex items-center justify-between gap-3 mb-10">
+<button class="flex-1 flex items-center justify-center gap-2 bg-primary py-3 rounded-lg font-bold text-sm text-white hover:brightness-110 transition-all">
+<span class="material-symbols-outlined text-sm">share</span> Share
+                </button>
+<button class="flex-1 flex items-center justify-center gap-2 glass-panel py-3 rounded-lg font-bold text-sm text-slate-200 hover:bg-white/10 transition-all">
+<span class="material-symbols-outlined text-sm">favorite</span> Favorite
+                </button>
+<button class="flex-1 flex items-center justify-center gap-2 glass-panel py-3 rounded-lg font-bold text-sm text-slate-200 hover:bg-white/10 transition-all">
+<span class="material-symbols-outlined text-sm">task_alt</span> Done
+                </button>
+</div>
+<div class="prose prose-invert prose-slate max-w-none">
+<div class="relative w-full aspect-video rounded-xl overflow-hidden mb-8 glass-panel">
+<img class="w-full h-full object-cover opacity-80" data-alt="Abstract visualization of a quantum processor core" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAw3IUkIrzegVbsJA3ng0PLB483DMdIM0X9mTPDlZC_r3T0DMmqAC33EztWo77UHJWHNCiFkL3tvk6Zq3s5sO9illglNjvCUKsXKP4z8qOH1pXZCi_hXAEehnYJ3PqAjvGpeM6WRNupeZVWMdNefvtzDLrX7jzPM8mk1S64xxY7EqtTsqLlmuwCCgOhYmOhJRXzGZdkE7WFwPO9m81-awzmp-KP3TXPajvqara0vUMupyZF6J_VuYT4Nmy14ZeRM3SdN38yDXiKi98"/>
+<div class="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent"></div>
+<p class="absolute bottom-3 left-4 text-[10px] text-slate-400 font-medium">Fig 1.1: Silicon Quantum Processor Architecture</p>
+</div>
+<p class="text-lg leading-relaxed text-slate-300 mb-6 font-medium">
+                    For decades, quantum computing has been the "holy grail" of computer science—a theoretical marvel that promised to solve problems currently impossible for even the fastest supercomputers. Today, that theory is rapidly transitioning into a tangible reality.
+                </p>
+<p class="text-base leading-relaxed text-slate-400 mb-6">
+                    The latest breakthrough comes from a collaborative effort between leading research institutions. By leveraging silicon-based technologies, the same material used in traditional chips, they have successfully managed to stabilize qubits for longer periods than ever before. This stability is crucial for error correction, the single biggest hurdle in the field.
+                </p>
+<blockquote class="border-l-4 border-primary pl-6 py-2 my-10 italic">
+<p class="text-xl text-slate-100 font-light">"We are no longer asking if quantum computing is possible, but rather how quickly we can scale it to meaningful industrial applications."</p>
+<cite class="text-xs text-primary font-bold mt-2 block not-italic uppercase tracking-widest">— Dr. Elena Vance, Lead Researcher</cite>
+</blockquote>
+<h2 class="text-2xl font-bold text-white mb-4">The Road Ahead</h2>
+<p class="text-base leading-relaxed text-slate-400 mb-8">
+                    While the hardware continues to evolve, the software ecosystem is also maturing. Programming languages specifically designed for quantum logic are becoming more standardized, allowing developers to experiment with algorithms that could optimize logistics, revolutionize finance, and decode complex biological systems.
+                </p>
+<div class="grid grid-cols-2 gap-4 mb-8">
+<div class="glass-panel p-4 rounded-xl">
+<p class="text-2xl font-extrabold text-primary mb-1">99.9%</p>
+<p class="text-[10px] uppercase font-bold text-slate-500 tracking-wider">Gate Fidelity</p>
+</div>
+<div class="glass-panel p-4 rounded-xl">
+<p class="text-2xl font-extrabold text-primary mb-1">1,121</p>
+<p class="text-[10px] uppercase font-bold text-slate-500 tracking-wider">Stable Qubits</p>
+</div>
+</div>
+</div>
+</div>
+</main>
+<nav class="fixed bottom-0 left-0 w-full z-50 bg-background-dark/90 backdrop-blur-xl border-t border-white/5 pb-safe">
+<div class="flex justify-around items-center px-4 py-3">
+<a class="flex flex-col items-center gap-1 group" href="#">
+<span class="material-symbols-outlined text-slate-500 group-hover:text-primary transition-colors">home</span>
+<span class="text-[10px] font-bold text-slate-500 group-hover:text-primary uppercase tracking-tighter">Home</span>
+</a>
+<a class="flex flex-col items-center gap-1 group" href="#">
+<span class="material-symbols-outlined text-slate-500 group-hover:text-primary transition-colors">explore</span>
+<span class="text-[10px] font-bold text-slate-500 group-hover:text-primary uppercase tracking-tighter">Explore</span>
+</a>
+<div class="relative -mt-8">
+<button class="w-14 h-14 bg-primary rounded-full flex items-center justify-center shadow-lg shadow-primary/40 border-4 border-black">
+<span class="material-symbols-outlined text-white text-3xl">bolt</span>
+</button>
+</div>
+<a class="flex flex-col items-center gap-1 group" href="#">
+<span class="material-symbols-outlined text-primary">bookmark</span>
+<span class="text-[10px] font-bold text-primary uppercase tracking-tighter">Saved</span>
+</a>
+<a class="flex flex-col items-center gap-1 group" href="#">
+<span class="material-symbols-outlined text-slate-500 group-hover:text-primary transition-colors">person</span>
+<span class="text-[10px] font-bold text-slate-500 group-hover:text-primary uppercase tracking-tighter">Profile</span>
+</a>
+</div>
+</nav>
+</body></html>

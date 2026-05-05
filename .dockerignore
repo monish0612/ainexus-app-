@@ -1,0 +1,63 @@
+# ─── Build / cache artefacts ──────────────────────────────────────────────────
+.dart_tool/
+.flutter-plugins-dependencies
+.pub/
+.pub-cache/
+build/
+.idea/
+.vscode/
+*.iml
+*.ipr
+*.iws
+
+# ─── Platform-specific source we don't need for the WEB build ─────────────────
+# Keep `lib/`, `web/`, `pubspec.*`, `assets/` — drop the rest to make the build
+# context small and the Docker layer cache effective.
+android/build/
+android/.gradle/
+android/app/build/
+android/app/debug/
+android/app/profile/
+android/app/release/
+ios/
+macos/
+linux/
+windows/
+
+# ─── Backend (lives in backend/docker-compose.yml, not part of web build) ─────
+backend/data/
+backend/node_modules/
+backend/api/node_modules/
+
+# ─── Editor / OS noise ────────────────────────────────────────────────────────
+*.log
+*.swp
+.DS_Store
+.history/
+
+# ─── Git metadata (Coolify ignores this anyway) ───────────────────────────────
+.git/
+.gitignore
+.gitattributes
+
+# ─── Test artefacts ───────────────────────────────────────────────────────────
+test/
+coverage/
+
+# ─── Documentation we don't need in the image ─────────────────────────────────
+docs/figma_source/
+docs/html_reference/
+docs/html_reference_v2/
+docs/stitch_html/
+docs/designs/
+docs/designs_v2/
+docs/stitch_screens/
+
+# ─── Existing Dockerfiles for the backend ─────────────────────────────────────
+# (Dockerfile.web is copied via `COPY . .` in the same stage, but the
+# backend Dockerfiles aren't needed for the web image.)
+backend/Dockerfile
+backend/api/Dockerfile
+
+# ─── This compose file references itself; don't recurse it into the build ────
+docker-compose.web.yml

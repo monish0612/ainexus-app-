@@ -1,0 +1,161 @@
+# Nexus AI — Cursor IDE Rules (Figma Prototype Conversion)
+
+## Project Context
+You are converting a fully working React/TypeScript prototype (from Figma Make) into a Flutter Android app. The React source code in docs/figma_source/ is the DEFINITIVE SPEC. Match every feature, animation, color, and layout exactly.
+
+## Source of Truth
+- **React source files** in docs/figma_source/ = your implementation spec
+- **PNG screenshots** in docs/stitch_screens/ = visual reference for pixel accuracy
+- **palette.ts** = EXACT color system (do not deviate)
+- **expense.ts** = EXACT data types and categories
+- **settingsContext.tsx** = EXACT settings/state structure
+
+## Architecture
+- **Clean Architecture**: presentation → domain → data
+- **State Management**: Riverpod 2.5+ with StateNotifier pattern
+- **Navigation**: GoRouter with ShellRoute for 4-tab bottom nav (NOT 5 tabs)
+- **Database**: Drift (SQLite) for offline-first local storage
+- **Network**: Dio with auth/retry/logging interceptors
+- **LLM**: LiteLLM Gateway on VPS — Flutter calls backend API, backend calls LiteLLM
+- **Sync**: Custom SyncEngine — writes go local first, queue syncs when online
+
+## CRITICAL — App Structure (Read This First)
+This app has **4 bottom nav tabs** (NOT 5). Settings is a **bottom sheet modal**, NOT a tab.
+
+```
+Bottom Nav (4 tabs):
+  Tab 1: Expense (Wallet icon) — with Tracker + Insights sub-tabs
+  Tab 2: News (Newspaper icon) — with For You + Saved sub-tabs
+  Tab 3: Tutor/AI Coach (GraduationCap icon) — with Rephrase + Coach + Dictionary sub-tabs
+  Tab 4: Cloud (Cloud icon) — with Files + History sub-tabs
+
+Settings: DraggableScrollableSheet (bottom sheet), opened from header avatar
+```
+
+## Design System (from palette.ts — USE THESE EXACT VALUES)
+
+### AMOLED Dark Theme
+```
+bg: #000000, bg1: #060608
+bg2: rgba(255,255,255,0.05), bg3: rgba(255,255,255,0.08), bg4: rgba(255,255,255,0.12)
+text: #F1F5F9, text2: #94A3B8
+text3: rgba(255,255,255,0.42), text4: rgba(255,255,255,0.28), text5: rgba(255,255,255,0.18)
+border: rgba(255,255,255,0.08), border2: rgba(255,255,255,0.05)
+headerBg: #000000, navBg: rgba(0,0,0,0.97)
+```
+
+### White Theme
+```
+bg: #FFFFFF, bg1: #F8FAFC
+bg2:
+ rgba(0,0,0,0.04), bg3: rgba(0,0,0,0.06), bg4: rgba(0,0,0,0.09)
+text: #0F172A, text2: #475569
+text3: rgba(0,0,0,0.55), text4: rgba(0,0,0,0.38), text5: rgba(0,0,0,0.25)
+border: rgba(0,0,0,0.09), border2: rgba(0,0,0,0.06)
+headerBg: #FFFFFF, navBg: rgba(255,255,255,0.97)
+```
+
+### Category Colors (from expense.ts)
+```
+Food: #FF6B6B, Grocery: #51CF66, Transport: #339AF0, Entertainment: #CC5DE8
+Shopping: #FF922B, Bills: #FCC419, Health: #F06595, Others: #868E96
+```
+
+### Category Emoji Icons
+```
+Food: 🍽️, Grocery: 🛒, Transport: 🚗, Entertainment: 🎬
+Shopping: 🛍️, Bills: 📄, Health: 💊, Others: 📦
+```
+
+### Accent Color
+```
+Blue: #0D59F2 (settings, buttons, profile ring)
+```
+
+## Font
+- **Plus Jakarta Sans** (NOT Manrope, NOT Space Grotesk)
+- Weights: 400 (Regular), 500 (Medium), 600 (SemiBold), 700 (Bold)
+- Bundle as TTF asset or use google_fonts package
+
+## Currency
+- **INR (₹)** with en-IN locale formatting (NOT USD)
+- Use: `NumberFormat.currency(symbol: '₹', locale: 'en_IN', decimalDigits: 0)`
+
+## Header Pattern (52px — same across all screens)
+```
+Height: 52px
+Left: Emoji avatar (CircleAvatar) → tapping opens Settings bottom sheet
+Center: Screen title (Plus Jakarta Sans, semibold)
+Right: Action icon (varies per screen)
+Border-bottom: 1px solid palette.border
+Background: palette.headerBg
+```
+
+## Bottom Nav Pattern (from BottomNav.tsx)
+```
+Height: 56px
+Background: palette.navBg with backdrop blur (white theme only)
+Border-top: 1px solid palette.border
+4 icons: Wallet, Newspaper, GraduationCap, Cloud
+Active: white (dark) / #0F172A (light), strokeWidth 2.4
+Inactive: rgba(255,255,255,0.38) (dark) / rgba(0,0,0,0.35) (light), strokeWidth 1.8
+Active indicator: 4px round dot below icon, spring animation (damping: 28, stiffness: 340)
+Tap animation: scale 0.82
+```
+
+## Code Style Rules
+
+### Dart/Flutter
+- Always use `const` constructors where possible
+- Always use `final` for variables that don't change
+- Use trailing commas on all argument lists
+- Use single quotes for strings
+- Never use `print()` — use the `logger` package
+- Split widgets into separate files when they exceed ~100 lines
+- Use `ConsumerWidget` or `ConsumerStatefulWidget` for Riverpod
+
+### State Management
+- One controller per screen (StateNotifier<FeatureState>)
+- State classes are immutable with copyWith
+- Use `ref.watch()` in build methods, `ref.read()` in callbacks
+- Settings state: Riverpod StateNotifier (convert from settingsContext.tsx)
+
+### Theming
+- NEVER hardcode colors — always use the palette/theme system
+- Create `AppColors` as a `ThemeExtension` so both themes auto-switch
+- Access via: `Theme.of(context).extension<AppColors>()!`
+
+### Database (Drift)
+- Tables: expenses, categories, banks, news_articles, cloud_files, saved_words, sync_queue
+- Use `.watch()` streams for reactive UI updates
+- Write operations must also insert into SyncQueue
+
+### Charts (fl_chart)
+- Replace recharts AreaChart → fl_chart LineChart with gradient fill
+- Replace recharts BarChart → fl_chart BarChart
+- Replace recharts PieChart → fl_chart PieChart
+- Match colors exactly from the React source
+
+### Animations
+- Replace framer-motion `motion.div` → Flutter `AnimatedContainer` or `AnimationController`
+- Replace `whileTap={{ scale: 0.82 }}` → `GestureDetector` + `Transform.scale`
+- Replace `AnimatePresence` → `AnimatedSwitcher` or custom transitions
+- Replace `layoutId` spring animation → `Hero` widget or custom
+
+### LLM Integration
+- AI Categorize: POST /api/v1/ai/categorize (keyword rules locally + LLM fallback via backend)
+- AI Rephrase: POST /api/v1/ai/rephrase (7 platform outputs)
+- AI Coach Correct: POST /api/v1/ai/correct (5 platform × 3 tone matrix)
+- AI Dictionary: POST /api/v1/ai/define (word definitions)
+- ALL go through backend API → LiteLLM → Provider. Never direct.
+
+## Don't
+- Don't use 5 tabs — it's 4 tabs + settings as bottom sheet
+- Don't use Manrope font — use Plus Jakarta Sans
+- Don't use USD — use INR (₹)
+- Don't use purple #4725F4 as primary — the accent is blue #0D59F2
+- Don't put Settings as a tab — it's a DraggableScrollableSheet modal
+- Don't hardcode colors — use palette system
+- Don't call LLM providers directly from Flutter
+- Don't use Navigator.push — use GoRouter
+- Don't skip the SyncQueue when writing data

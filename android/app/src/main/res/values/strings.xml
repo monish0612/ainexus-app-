@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="shortcut_expense">Expense Tracker</string>
+    <string name="shortcut_expense_long">Open Expense Tracker</string>
+    <string name="shortcut_news">News</string>
+    <string name="shortcut_news_long">Browse News Feed</string>
+    <string name="shortcut_dictionary">Dictionary</string>
+    <string name="shortcut_dictionary_long">Look Up Words</string>
+    <string name="shortcut_rephraser">Rephraser</string>
+    <string name="shortcut_rephraser_long">Rephrase Text</string>
+    <string name="shortcut_grammarly">Grammarly</string>
+    <string name="shortcut_grammarly_long">Grammar Coach</string>
+    <string name="shortcut_search">Search</string>
+    <string name="shortcut_search_long">Search &amp; Summarize URLs</string>
+    <string name="shortcut_cloud">Cloud Upload</string>
+    <string name="shortcut_cloud_long">Upload to Google Drive</string>
+
+    <!-- Search Widget -->
+    <string name="widget_search_label">Nexus AI Search</string>
+    <string name="widget_search_desc">Search the web or summarize URLs with AI</string>
+    <string name="widget_search_hint">Search with Nexus AI\u2026</string>
+
+    <!-- Expense Widget -->
+    <string name="widget_expense_label">Nexus AI Expenses</string>
+    <string name="widget_expense_desc">Today\'s expense summary at a glance</string>
+</resources>

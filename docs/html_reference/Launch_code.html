@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;700;800&amp;family=Space+Grotesk:wght@300;500;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "primary": "#4725f4",
+                        "background-light": "#f6f5f8",
+                        "background-dark": "#000000",
+                    },
+                    fontFamily: {
+                        "display": ["Manrope", "sans-serif"],
+                        "modern": ["Space Grotesk", "sans-serif"]
+                    },
+                    borderRadius: {"DEFAULT": "0.5rem", "lg": "1rem", "xl": "1.5rem", "full": "9999px"},
+                },
+            },
+        }
+    </script>
+<style>
+        .orb-glow {
+            box-shadow: 0 0 80px 20px rgba(71, 37, 244, 0.4);
+        }
+        .text-glow {
+            text-shadow: 0 0 15px rgba(71, 37, 244, 0.5);
+        }
+        .gradient-button {
+            background: linear-gradient(135deg, #4725f4 0%, #a855f7 100%);
+        }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-background-dark font-display text-slate-100 antialiased overflow-hidden">
+<div class="relative flex h-screen w-full flex-col items-center justify-between py-12 px-6">
+<!-- Decorative Background Elements -->
+<div class="absolute inset-0 z-0 overflow-hidden">
+<div class="absolute -top-24 -left-24 w-96 h-96 bg-primary/10 rounded-full blur-[120px]"></div>
+<div class="absolute top-1/2 -right-24 w-80 h-80 bg-purple-600/10 rounded-full blur-[100px]"></div>
+</div>
+<!-- Top Navigation (Subtle) -->
+<div class="z-10 w-full flex justify-between items-center opacity-60">
+<span class="text-xs tracking-widest uppercase font-medium">System Online</span>
+<span class="material-symbols-outlined text-xl">signal_cellular_alt</span>
+</div>
+<!-- Center Piece: AI Orb and Branding -->
+<div class="z-10 flex flex-col items-center justify-center flex-1 w-full max-w-md">
+<!-- Glowing Orb -->
+<div class="relative w-48 h-48 mb-12 flex items-center justify-center">
+<div class="absolute inset-0 rounded-full bg-gradient-to-tr from-primary via-purple-500 to-blue-400 opacity-20 blur-3xl animate-pulse"></div>
+<div class="relative w-32 h-32 rounded-full orb-glow bg-gradient-to-br from-primary via-[#7c3aed] to-[#3b82f6] p-[2px]">
+<div class="w-full h-full rounded-full bg-black flex items-center justify-center overflow-hidden">
+<div class="w-24 h-24 rounded-full bg-gradient-to-t from-primary/40 to-transparent blur-xl"></div>
+<span class="material-symbols-outlined text-5xl text-white absolute">blur_on</span>
+</div>
+</div>
+</div>
+<!-- App Name -->
+<div class="text-center">
+<h1 class="font-modern text-5xl md:text-6xl font-bold tracking-tighter text-white text-glow mb-4">
+                    AI <span class="bg-clip-text text-transparent bg-gradient-to-r from-primary to-purple-400">NEXUS</span>
+</h1>
+<p class="text-slate-400 text-lg font-light tracking-wide max-w-[280px] mx-auto leading-relaxed">
+                    Harnessing the power of the next generation.
+                </p>
+</div>
+</div>
+<!-- Bottom Action Area -->
+<div class="z-10 w-full max-w-sm flex flex-col items-center gap-8">
+<button class="gradient-button w-full h-16 rounded-xl flex items-center justify-center gap-3 text-white font-bold text-lg shadow-2xl shadow-primary/30 active:scale-95 transition-transform">
+<span>Get Started</span>
+<span class="material-symbols-outlined">arrow_forward</span>
+</button>
+<!-- Indicators -->
+<div class="flex gap-2">
+<div class="w-8 h-1 rounded-full bg-primary"></div>
+<div class="w-2 h-1 rounded-full bg-slate-800"></div>
+<div class="w-2 h-1 rounded-full bg-slate-800"></div>
+</div>
+</div>
+<!-- Footer Visual -->
+<div class="absolute bottom-0 w-full h-px bg-gradient-to-r from-transparent via-primary/50 to-transparent"></div>
+</div>
+<!-- Hidden HeaderImage Component structure as requested for logic/reuse -->
+<div class="hidden">
+<div class="relative flex h-auto min-h-screen w-full flex-col bg-background-dark dark group/design-root overflow-x-hidden">
+<div class="@container">
+<div class="@[480px]:px-4 @[480px]:py-3">
+<div class="w-full bg-center bg-no-repeat bg-cover flex flex-col justify-end overflow-hidden bg-background-dark @[480px]:rounded-xl min-h-80" data-alt="Futuristic glowing AI core floating in dark space" style='background-image: url("https://lh3.googleusercontent.com/aida-public/AB6AXuDFO-O_Sz2iJYYomFfL4h6qQ-1aJG4LhV7spMM_Jbm29N7htKhwe3S8msHmIuxCdQWQCBO_8LC6UOPFh8mPteyAmQi3HowQHcxRMy0F-nwLA8yz56YCd7pzUPu7w5plFPM-TH1Yg4AuELRbV44BgKCPS4Jo79epVLrWNKqUlufEfIOAup0jXXISrMIxT6j0odQbNTLHscm2R2h2RfAwiOXPYxZaIXuFbzTULtpv7SJAcZVkOzO3JImagC63TaEiphtP8gizJDvq0vg");'>
+</div>
+</div>
+</div>
+<h1 class="text-slate-100 tracking-light text-[32px] font-bold leading-tight px-4 text-center pb-3 pt-6">AI NEXUS</h1>
+<p class="text-slate-100 text-base font-normal leading-normal pb-3 pt-1 px-4 text-center">Your premium AI companion</p>
+<div class="flex px-4 py-3 justify-center">
+<button class="flex min-w-[84px] max-w-[480px] cursor-pointer items-center justify-center overflow-hidden rounded-xl h-12 px-5 flex-1 bg-primary text-white text-base font-bold leading-normal tracking-[0.015em]">
+<span class="truncate">Get Started</span>
+</button>
+</div>
+</div>
+</div>
+</body></html>

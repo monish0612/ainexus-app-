@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>AI Coach Hub</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;500;600;700;800&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "primary": "#4725f4",
+                        "accent-blue": "#00f2ff",
+                        "background-light": "#f6f5f8",
+                        "background-dark": "#000000",
+                    },
+                    fontFamily: {
+                        "display": ["Manrope", "sans-serif"]
+                    },
+                    borderRadius: {
+                        "DEFAULT": "0.5rem",
+                        "lg": "1rem",
+                        "xl": "1.5rem",
+                        "full": "9999px"
+                    },
+                },
+            },
+        }
+    </script>
+<style>
+        .glow-blue {
+            box-shadow: 0 0 15px rgba(71, 37, 244, 0.4);
+        }
+        .glow-accent {
+            box-shadow: 0 0 20px rgba(0, 242, 255, 0.3);
+        }
+        .glass-card {
+            background: rgba(255, 255, 255, 0.03);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        body {
+            min-height: max(884px, 100dvh);
+        }
+    </style>
+</head>
+<body class="bg-background-light dark:bg-background-dark font-display text-slate-900 dark:text-slate-100 min-h-screen flex flex-col">
+<!-- Header -->
+<header class="sticky top-0 z-10 bg-background-dark/80 backdrop-blur-md">
+<div class="flex items-center justify-between px-4 pt-6 mb-4">
+<span class="material-symbols-outlined text-2xl cursor-pointer">menu</span>
+<h1 class="text-xl font-bold tracking-tight">AI Coach Hub</h1>
+<div class="relative">
+<span class="material-symbols-outlined text-2xl cursor-pointer">notifications</span>
+<span class="absolute top-0 right-0 w-2 h-2 bg-primary rounded-full"></span>
+</div>
+</div>
+<!-- X-Style Minimalist Navigation Tabs -->
+<nav class="flex border-b border-white/10">
+<button class="flex-1 flex flex-col items-center group relative pt-2 pb-3">
+<span class="text-sm font-medium text-slate-100 mb-2">Coach</span>
+<div class="h-[4px] w-12 bg-primary rounded-full absolute bottom-0"></div>
+</button>
+<button class="flex-1 flex flex-col items-center group relative pt-2 pb-3">
+<span class="text-sm font-light text-slate-500 mb-2 group-hover:text-slate-300 transition-colors">LexiAI</span>
+<div class="h-[4px] w-12 bg-transparent rounded-full absolute bottom-0"></div>
+</button>
+<button class="flex-1 flex flex-col items-center group relative pt-2 pb-3">
+<span class="text-sm font-light text-slate-500 mb-2 group-hover:text-slate-300 transition-colors">Saved</span>
+<div class="h-[4px] w-12 bg-transparent rounded-full absolute bottom-0"></div>
+</button>
+</nav>
+</header>
+<!-- Main Content -->
+<main class="flex-1 px-4 py-6 space-y-8 overflow-y-auto">
+<!-- Input Section -->
+<section class="space-y-4">
+<div class="relative">
+<textarea class="w-full bg-white/5 border border-white/10 rounded-xl p-4 min-h-[120px] text-lg placeholder:text-slate-600 focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all" placeholder="Paste text or speak..."></textarea>
+<div class="absolute bottom-4 right-4 flex items-center gap-3">
+<span class="text-xs text-slate-500 font-medium">0/500</span>
+</div>
+</div>
+<div class="flex justify-center">
+<button class="group relative flex flex-col items-center gap-2">
+<div class="w-16 h-16 bg-primary rounded-full flex items-center justify-center text-white glow-accent hover:scale-105 transition-transform">
+<span class="material-symbols-outlined text-3xl font-light">mic</span>
+</div>
+<span class="text-xs font-semibold text-primary uppercase tracking-widest">Record Voice</span>
+</button>
+</div>
+</section>
+<!-- Corrections & Variations Card -->
+<section class="space-y-4">
+<div class="flex items-center justify-between">
+<h3 class="text-sm font-bold text-slate-400 uppercase tracking-wider">Corrections &amp; Variations</h3>
+<span class="material-symbols-outlined text-slate-500 text-sm">info</span>
+</div>
+<div class="glass-card rounded-xl p-5 space-y-6">
+<!-- Grammatically Corrected -->
+<div>
+<div class="flex items-center gap-2 mb-3">
+<span class="material-symbols-outlined text-emerald-400 text-lg">check_circle</span>
+<span class="text-xs font-bold text-emerald-400 uppercase tracking-tighter">Perfected</span>
+</div>
+<p class="text-lg leading-relaxed text-slate-200">
+                        "I'm looking forward to our meeting tomorrow to discuss the final project details."
+                    </p>
+<div class="mt-2 flex items-center gap-1">
+<span class="text-[10px] bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded">Formal</span>
+<span class="text-[10px] bg-blue-500/20 text-blue-400 px-2 py-0.5 rounded">Clear</span>
+</div>
+</div>
+<hr class="border-white/5"/>
+<!-- Platform Variations -->
+<div class="space-y-4">
+<p class="text-xs font-bold text-slate-500 uppercase">Contextual Adaptation</p>
+<div class="flex flex-wrap gap-2">
+<button class="flex items-center gap-2 bg-white/5 hover:bg-white/10 border border-white/10 px-4 py-2 rounded-lg transition-colors group">
+<span class="material-symbols-outlined text-blue-400 text-sm group-hover:scale-110 transition-transform">videocam</span>
+<span class="text-sm font-medium">Zoom</span>
+</button>
+<button class="flex items-center gap-2 bg-white/5 hover:bg-white/10 border border-white/10 px-4 py-2 rounded-lg transition-colors group">
+<span class="material-symbols-outlined text-purple-400 text-sm group-hover:scale-110 transition-transform">tag</span>
+<span class="text-sm font-medium">Slack</span>
+</button>
+<button class="flex items-center gap-2 bg-white/5 hover:bg-white/10 border border-white/10 px-4 py-2 rounded-lg transition-colors group">
+<span class="material-symbols-outlined text-green-400 text-sm group-hover:scale-110 transition-transform">chat</span>
+<span class="text-sm font-medium">WhatsApp</span>
+</button>
+</div>
+<div class="bg-white/5 rounded-lg p-4 border-l-2 border-primary">
+<p class="text-sm italic text-slate-400">
+                            "Hey! Looking forward to chatting about the project tomorrow! 🚀"
+                        </p>
+<p class="mt-2 text-[10px] text-slate-500">— Slack Variation (Casual &amp; Engaging)</p>
+</div>
+</div>
+</div>
+</section>
+<!-- Suggested Improvements -->
+<section class="pb-24">
+<div class="glass-card rounded-xl p-4 flex items-center gap-4 border-l-4 border-accent-blue">
+<div class="bg-accent-blue/20 p-2 rounded-lg">
+<span class="material-symbols-outlined text-accent-blue">lightbulb</span>
+</div>
+<div>
+<p class="text-sm font-bold">Pro-tip</p>
+<p class="text-xs text-slate-400">Try using more active verbs to sound more confident in meetings.</p>
+</div>
+</div>
+</section>
+</main>
+<!-- Bottom Tab Bar -->
+<nav class="fixed bottom-0 left-0 right-0 bg-background-dark/95 backdrop-blur-xl border-t border-white/10 px-2 pb-6 pt-2 flex items-center justify-around z-20">
+<a class="flex flex-col items-center gap-1 px-3 py-1 text-slate-500" href="#">
+<span class="material-symbols-outlined">home</span>
+<span class="text-[10px] font-bold">Home</span>
+</a>
+<a class="flex flex-col items-center gap-1 px-3 py-1 text-slate-500" href="#">
+<span class="material-symbols-outlined">analytics</span>
+<span class="text-[10px] font-bold">Insights</span>
+</a>
+<a class="flex flex-col items-center gap-1 px-3 py-1 text-slate-500" href="#">
+<span class="material-symbols-outlined">explore</span>
+<span class="text-[10px] font-bold">Discover</span>
+</a>
+<a class="flex flex-col items-center gap-1 px-3 py-1 text-primary relative" href="#">
+<div class="absolute -top-4 w-12 h-1 bg-primary rounded-full glow-blue"></div>
+<span class="material-symbols-outlined text-primary fill-1">smart_toy</span>
+<span class="text-[10px] font-bold">AI Coach</span>
+</a>
+<a class="flex flex-col items-center gap-1 px-3 py-1 text-slate-500" href="#">
+<span class="material-symbols-outlined">settings</span>
+<span class="text-[10px] font-bold">Settings</span>
+</a>
+</nav>
+</body></html>
