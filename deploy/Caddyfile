@@ -63,20 +63,9 @@
 		# JS chunks, loads CanvasKit/Skwasm WASM from gstatic.com, and pulls
 		# fonts from Google Fonts. We list both `*-src` and `*-src-elem` so
 		# strict browsers (which fall back to `default-src` for `*-src-elem`)
-		# don't block resources.
-		Content-Security-Policy "default-src 'self' https: data: blob:; \
-			script-src 'self' 'wasm-unsafe-eval' 'unsafe-inline' https:; \
-			script-src-elem 'self' 'unsafe-inline' https:; \
-			style-src 'self' 'unsafe-inline' https:; \
-			style-src-elem 'self' 'unsafe-inline' https:; \
-			font-src 'self' https: data:; \
-			img-src 'self' data: blob: https:; \
-			connect-src 'self' https: http: ws: wss: data: blob:; \
-			worker-src 'self' blob:; \
-			child-src 'self' blob:; \
-			object-src 'none'; \
-			base-uri 'self'; \
-			frame-ancestors 'self'"
+		# don't block resources. Kept on a single line because Caddy ships
+		# the literal value (no line-continuation processing in `header`).
+		Content-Security-Policy "default-src 'self' https: data: blob:; script-src 'self' 'wasm-unsafe-eval' 'unsafe-inline' https:; script-src-elem 'self' 'unsafe-inline' https:; style-src 'self' 'unsafe-inline' https:; style-src-elem 'self' 'unsafe-inline' https:; font-src 'self' https: data:; img-src 'self' data: blob: https:; connect-src 'self' https: http: ws: wss: data: blob:; worker-src 'self' blob:; child-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'self'"
 
 		# Drop the `Server: Caddy` banner.
 		-Server
