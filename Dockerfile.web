@@ -79,10 +79,10 @@ COPY --from=drift_assets  /assets/drift_worker.js /srv/drift_worker.js
 # Stored in /deploy/ (not /web/) so it doesn't end up inside the public webroot.
 COPY deploy/Caddyfile /etc/caddy/Caddyfile
 
-EXPOSE 80
+EXPOSE 3000
 
 # Lightweight HTTP healthcheck — Caddy serves /healthz from the Caddyfile.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD wget -qO- http://127.0.0.1/healthz || exit 1
+  CMD wget -qO- http://127.0.0.1:3000/healthz || exit 1
 
 CMD ["caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]

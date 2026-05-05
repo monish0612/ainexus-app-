@@ -3,8 +3,9 @@
 # Serves the compiled Flutter web bundle (placed at /srv by the Dockerfile)
 # with all the headers required for a modern PWA + Drift's sqlite3.wasm.
 #
-# Behind Coolify, set the application's "Internal Port" to 80. Coolify's
-# proxy will terminate TLS for you and forward HTTP(S) traffic here.
+# Behind Coolify, the application's "Internal Port" (Ports Exposes) is 3000
+# (Coolify's default). Coolify's proxy terminates TLS and forwards HTTP(S)
+# traffic here over the `coolify` Docker network.
 
 {
 	# Globals
@@ -16,7 +17,7 @@
 	}
 }
 
-:80 {
+:3000 {
 	root * /srv
 	encode zstd gzip
 
