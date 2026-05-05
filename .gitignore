@@ -63,3 +63,9 @@ ios/Runner/GoogleService-Info.plist
 .env
 .env.*
 !.env.example
+
+# Local-only secrets (e.g. Google Drive service account JSON used for
+# Android release builds). Never committed.
+secrets/
+*.sa.json
+google-services.json
