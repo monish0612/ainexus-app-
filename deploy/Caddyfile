@@ -46,31 +46,32 @@
 	}
 	header @noCacheRoot Cache-Control "no-cache, no-store, must-revalidate"
 
-	# ── Drift WASM requires COOP/COEP for OPFS shared-memory persistence ───
-	# These headers enable SharedArrayBuffer + Atomics, which sqlite3.wasm
-	# uses to talk to the Origin-Private FileSystem worker. Without them,
-	# Drift falls back to a slower IndexedDB implementation but still works.
+	# ── Security headers ────────────────────────────────────────────────────
+	# We do NOT set Cross-Origin-Embedder-Policy: require-corp because Flutter
+	# Web loads CanvasKit from https://www.gstatic.com which does not send
+	# Cross-Origin-Resource-Policy. Without COEP we lose SharedArrayBuffer,
+	# so Drift's sqlite3.wasm transparently falls back from OPFS to IndexedDB
+	# — still fully functional, just slightly slower on bulk writes.
 	header {
-		# Cross-Origin isolation for sqlite3 OPFS implementation.
-		Cross-Origin-Embedder-Policy "require-corp"
-		Cross-Origin-Opener-Policy   "same-origin"
-		Cross-Origin-Resource-Policy "same-origin"
-
 		# Standard hardening.
 		X-Content-Type-Options       "nosniff"
 		X-Frame-Options              "SAMEORIGIN"
 		Referrer-Policy              "strict-origin-when-cross-origin"
 		Permissions-Policy           "camera=(self), microphone=(self), geolocation=(), interest-cohort=()"
 
-		# Lightweight CSP — relaxed enough for Flutter Web (it injects inline
-		# styles and uses CanvasKit from gstatic.com, plus google_fonts).
-		# Update `connect-src` to include your API origin in production.
-		Content-Security-Policy "default-src 'self'; \
-			script-src 'self' 'wasm-unsafe-eval' 'unsafe-inline' https://www.gstatic.com; \
-			style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; \
-			font-src 'self' https://fonts.gstatic.com data:; \
+		# Permissive CSP tailored to Flutter Web. Flutter dynamically imports
+		# JS chunks, loads CanvasKit/Skwasm WASM from gstatic.com, and pulls
+		# fonts from Google Fonts. We list both `*-src` and `*-src-elem` so
+		# strict browsers (which fall back to `default-src` for `*-src-elem`)
+		# don't block resources.
+		Content-Security-Policy "default-src 'self' https: data: blob:; \
+			script-src 'self' 'wasm-unsafe-eval' 'unsafe-inline' https:; \
+			script-src-elem 'self' 'unsafe-inline' https:; \
+			style-src 'self' 'unsafe-inline' https:; \
+			style-src-elem 'self' 'unsafe-inline' https:; \
+			font-src 'self' https: data:; \
 			img-src 'self' data: blob: https:; \
-			connect-src 'self' https: http: ws: wss:; \
+			connect-src 'self' https: http: ws: wss: data: blob:; \
 			worker-src 'self' blob:; \
 			child-src 'self' blob:; \
 			object-src 'none'; \
