@@ -52,7 +52,7 @@ RUN if [ -n "$API_BASE_URL" ] && [ -n "$LITELLM_URL" ]; then \
     fi
 
 # ── Stage 2: download matching Drift web assets ──────────────────────────────
-# The drift package on the web needs sqlite3.wasm + drift_worker.dart.js
+# The drift package on the web needs sqlite3.wasm + drift_worker.js
 # alongside the Flutter bundle. Versions are pinned to match pubspec.lock
 # (drift 2.28.x and sqlite3 2.9.x at the time of writing).
 FROM curlimages/curl:8.10.1 AS drift_assets
@@ -63,16 +63,16 @@ ARG DRIFT_WORKER_VERSION=2.28.2
 WORKDIR /assets
 RUN curl -fsSL -o sqlite3.wasm \
       "https://github.com/simolus3/sqlite3.dart/releases/download/sqlite3-${SQLITE3_WASM_VERSION}/sqlite3.wasm" && \
-    curl -fsSL -o drift_worker.dart.js \
-      "https://github.com/simolus3/drift/releases/download/drift-${DRIFT_WORKER_VERSION}/drift_worker.dart.js"
+    curl -fsSL -o drift_worker.js \
+      "https://github.com/simolus3/drift/releases/download/drift-${DRIFT_WORKER_VERSION}/drift_worker.js"
 
 # ── Stage 3: serve with Caddy ────────────────────────────────────────────────
 FROM caddy:2.8-alpine
 
 # Copy the Flutter build output and the Drift web assets into Caddy's webroot.
 COPY --from=flutter_build /app/build/web /srv
-COPY --from=drift_assets  /assets/sqlite3.wasm        /srv/sqlite3.wasm
-COPY --from=drift_assets  /assets/drift_worker.dart.js /srv/drift_worker.dart.js
+COPY --from=drift_assets  /assets/sqlite3.wasm    /srv/sqlite3.wasm
+COPY --from=drift_assets  /assets/drift_worker.js /srv/drift_worker.js
 
 # Caddy configuration with SPA fallback + COOP/COEP headers (so Drift's WASM
 # OPFS implementation can use shared-array buffers efficiently).

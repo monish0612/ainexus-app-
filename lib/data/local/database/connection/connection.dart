@@ -6,7 +6,7 @@ import 'package:drift/drift.dart';
 ///     behaviour to the original Android implementation, WAL mode, same
 ///     file path — zero migration risk for installed users).
 ///   - On web (dart.library.js_interop): `connection_web.dart` opens a
-///     `WasmDatabase` backed by sqlite3.wasm + drift_worker.dart.js,
+///     `WasmDatabase` backed by sqlite3.wasm + drift_worker.js,
 ///     persisting to OPFS (preferred) or IndexedDB (fallback).
 ///
 /// All callers should depend on `openAppConnection()` /

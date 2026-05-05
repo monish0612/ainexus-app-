@@ -12,16 +12,16 @@ import 'package:flutter/foundation.dart';
 ///   4. `unsafeIndexedDb` — direct IndexedDB (legacy fallback)
 ///   5. `inMemory`     — last-resort, no persistence
 ///
-/// The supporting assets `web/sqlite3.wasm` and `web/drift_worker.dart.js`
-/// must be present (downloaded into the `web/` folder at build time —
-/// see `tool/web/fetch_drift_assets.ps1` and the Dockerfile.web).
+/// The supporting assets `sqlite3.wasm` and `drift_worker.js` are copied
+/// into Caddy's webroot by `Dockerfile.web` at build time so they sit at
+/// the site origin (e.g. `https://app.example.com/sqlite3.wasm`).
 QueryExecutor openAppConnection() {
   return DatabaseConnection.delayed(
     Future(() async {
       final result = await WasmDatabase.open(
         databaseName: 'ai_nexus',
         sqlite3Uri: Uri.parse('sqlite3.wasm'),
-        driftWorkerUri: Uri.parse('drift_worker.dart.js'),
+        driftWorkerUri: Uri.parse('drift_worker.js'),
       );
 
       if (result.missingFeatures.isNotEmpty) {
