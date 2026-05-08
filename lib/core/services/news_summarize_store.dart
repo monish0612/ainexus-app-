@@ -4,14 +4,13 @@ import 'dart:ui' as ui;
 
 import 'package:dio/dio.dart';
 import 'package:flutter/widgets.dart';
-import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import '../../data/repositories/news_repository.dart';
 import '../../data/services/news_summarize_service.dart';
 import '../../domain/entities/news_entities.dart';
 import '../platform/platform_capabilities.dart';
-import 'news_summarize_fg_task.dart';
+import 'background_task_coordinator.dart';
 import 'telegram_logger.dart';
 
 /// Status of a single article inside an active summarize session.
@@ -111,11 +110,10 @@ class NewsSummarizeStore extends ChangeNotifier with WidgetsBindingObserver {
   /// and re-attach the summary reader".
   static const String kReopenPayload = 'news_summary';
 
-  /// Throttle window for foreground-service notification updates. The OS
-  /// caps notification refresh frequency anyway, but throttling client-side
-  /// avoids burning CPU on string formatting + binder calls when 4 batches
-  /// finish in the same animation frame.
-  static const Duration _kNotifThrottle = Duration(milliseconds: 800);
+  /// Coordinator slot id used while a session is active. The shared
+  /// [BackgroundTaskCoordinator] owns the actual FG service; this store
+  /// just registers/releases the slot and updates the label.
+  static const String _kCoordSlotId = 'news_summarize';
 
   // ── Session state ────────────────────────────────────────────────────────
 
@@ -146,8 +144,7 @@ class NewsSummarizeStore extends ChangeNotifier with WidgetsBindingObserver {
 
   bool _appInBackground = false;
   bool _observerBound = false;
-  bool _foregroundServiceActive = false;
-  DateTime _lastNotifAt = DateTime.fromMillisecondsSinceEpoch(0);
+  bool _slotAcquired = false;
 
   /// Set by [requestReaderReopen] when a notification tap arrives faster
   /// than the News screen can mount to listen for it. The News screen
@@ -284,7 +281,7 @@ class NewsSummarizeStore extends ChangeNotifier with WidgetsBindingObserver {
     _retryQueue.add(<Article>[article]);
     _sessionActive = true;
     notifyListeners();
-    if (!_foregroundServiceActive) {
+    if (!_slotAcquired) {
       unawaited(_startForegroundService());
     }
     _drainQueue(_sessionId);
@@ -303,7 +300,7 @@ class NewsSummarizeStore extends ChangeNotifier with WidgetsBindingObserver {
     TLog.d(
       'NewsSummarize',
       'reader detached — session continues '
-      '(active=$_sessionActive, fg=$_foregroundServiceActive)',
+      '(active=$_sessionActive, fg=$_slotAcquired)',
     );
   }
 
@@ -649,74 +646,42 @@ class NewsSummarizeStore extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   // ── Foreground service / notification ────────────────────────────────────
+  //
+  // Foreground-service ownership is delegated to
+  // [BackgroundTaskCoordinator] so that this feature plays nicely with
+  // every other long-running AI task (online search, URL summarize,
+  // follow-up Q&A, expense OCR + smart-parse). The coordinator handles
+  // start/stop and throttled label updates; we just acquire/release a
+  // single named slot.
 
   Future<void> _startForegroundService() async {
     if (!PlatformCapabilities.canUseForegroundTask) return;
-    if (_foregroundServiceActive) return;
-    try {
-      final already = await FlutterForegroundTask.isRunningService;
-      if (already) {
-        _foregroundServiceActive = true;
-        await _maybeUpdateForegroundNotificationNow();
-        return;
-      }
-      final p = progress;
-      final result = await FlutterForegroundTask.startService(
-        serviceTypes: const [ForegroundServiceTypes.dataSync],
-        notificationTitle: '\u2728 Summarizing your For You pile',
-        notificationText: _buildNotificationBody(p),
-        callback: newsSummarizeStartCallback,
-      );
-      if (result is ServiceRequestSuccess) {
-        _foregroundServiceActive = true;
-        _lastNotifAt = DateTime.now();
-        TLog.i('NewsSummarize',
-            'foreground service started (total=${p.total})');
-      } else if (result is ServiceRequestFailure) {
-        TLog.w('NewsSummarize',
-            'foreground service failed to start: ${result.error}');
-      }
-    } catch (e, st) {
-      TLog.w('NewsSummarize', 'startService threw: $e', error: e, st: st);
-    }
+    if (_slotAcquired) return;
+    _slotAcquired = true;
+    final p = progress;
+    await BackgroundTaskCoordinator.instance.acquire(
+      _kCoordSlotId,
+      label: '\u2728 Summarizing news \u00B7 ${_buildNotificationBody(p)}',
+    );
+    TLog.i('NewsSummarize',
+        'coord slot acquired (total=${p.total})');
   }
 
   Future<void> _stopForegroundService() async {
     if (!PlatformCapabilities.canUseForegroundTask) return;
-    if (!_foregroundServiceActive) return;
-    _foregroundServiceActive = false;
-    try {
-      final running = await FlutterForegroundTask.isRunningService;
-      if (running) {
-        await FlutterForegroundTask.stopService();
-        TLog.d('NewsSummarize', 'foreground service stopped');
-      }
-    } catch (e) {
-      TLog.w('NewsSummarize', 'stopService threw: $e', error: e);
-    }
+    if (!_slotAcquired) return;
+    _slotAcquired = false;
+    await BackgroundTaskCoordinator.instance.release(_kCoordSlotId);
+    TLog.d('NewsSummarize', 'coord slot released');
   }
 
   void _maybeUpdateForegroundNotification() {
-    if (!_foregroundServiceActive) return;
-    final now = DateTime.now();
-    if (now.difference(_lastNotifAt) < _kNotifThrottle) return;
-    _lastNotifAt = now;
-    unawaited(_maybeUpdateForegroundNotificationNow());
-  }
-
-  Future<void> _maybeUpdateForegroundNotificationNow() async {
-    if (!PlatformCapabilities.canUseForegroundTask) return;
-    if (!_foregroundServiceActive) return;
-    try {
-      final p = progress;
-      await FlutterForegroundTask.updateService(
-        notificationTitle: '\u2728 Summarizing your For You pile',
-        notificationText: _buildNotificationBody(p),
-      );
-    } catch (e) {
-      // Silent: a stale update racing with a stopService is harmless.
-      TLog.d('NewsSummarize', 'updateService skipped: $e');
-    }
+    if (!_slotAcquired) return;
+    final p = progress;
+    BackgroundTaskCoordinator.instance.updateLabel(
+      _kCoordSlotId,
+      '\u2728 Summarizing news \u00B7 ${_buildNotificationBody(p)}',
+    );
   }
 
   String _buildNotificationBody(SummaryProgress p) {

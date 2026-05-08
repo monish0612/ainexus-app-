@@ -15,6 +15,7 @@ import '../../../../core/platform/io_stub.dart';
 import '../../../../core/platform/local_file_image.dart';
 import '../../../../core/platform/ocr_stub.dart';
 import '../../../../core/platform/platform_capabilities.dart';
+import '../../../../core/services/background_task_coordinator.dart';
 import '../../../../core/services/hold_to_speak_service.dart';
 import '../../../../core/services/telegram_logger.dart';
 import '../../../../core/theme/app_colors.dart';
@@ -212,6 +213,46 @@ class _AddExpenseSheetState extends State<_AddExpenseSheet>
 
   Timer? _debounce;
 
+  /// Stable per-modal-instance id used as the FG-service slot. Combined
+  /// with the modal's hashCode so two simultaneous modal openings (e.g.
+  /// share-intent stack) never collide on the same slot.
+  late final String _scanSlotId =
+      'expense_scan:${identityHashCode(this).toUnsigned(32)}';
+  late final String _voiceSlotId =
+      'expense_voice:${identityHashCode(this).toUnsigned(32)}';
+  bool _scanSlotHeld = false;
+  bool _voiceSlotHeld = false;
+
+  void _acquireScanSlot(String label) {
+    if (!PlatformCapabilities.canUseForegroundTask) return;
+    _scanSlotHeld = true;
+    unawaited(BackgroundTaskCoordinator.instance.acquire(
+      _scanSlotId,
+      label: label,
+    ));
+  }
+
+  void _releaseScanSlot() {
+    if (!_scanSlotHeld) return;
+    _scanSlotHeld = false;
+    unawaited(BackgroundTaskCoordinator.instance.release(_scanSlotId));
+  }
+
+  void _acquireVoiceSlot(String label) {
+    if (!PlatformCapabilities.canUseForegroundTask) return;
+    _voiceSlotHeld = true;
+    unawaited(BackgroundTaskCoordinator.instance.acquire(
+      _voiceSlotId,
+      label: label,
+    ));
+  }
+
+  void _releaseVoiceSlot() {
+    if (!_voiceSlotHeld) return;
+    _voiceSlotHeld = false;
+    unawaited(BackgroundTaskCoordinator.instance.release(_voiceSlotId));
+  }
+
   @override
   void initState() {
     super.initState();
@@ -275,6 +316,10 @@ class _AddExpenseSheetState extends State<_AddExpenseSheet>
 
   Future<void> _processSharedImage(String path) async {
     if (!PlatformCapabilities.canUseMlKitOcr) return;
+    // Promote the OCR + smart-parse pipeline to a foreground service so
+    // the work survives screen-off / app minimisation. The slot is held
+    // until the pipeline finishes (or the modal is disposed).
+    _acquireScanSlot('\uD83D\uDCC4 Scanning shared image\u2026');
     setState(() {
       _isPdf = false;
       _capturedImage = File(path);
@@ -307,6 +352,12 @@ class _AddExpenseSheetState extends State<_AddExpenseSheet>
 
   @override
   void dispose() {
+    // Drop any FG-service slots this modal instance still holds. We let
+    // any in-flight LLM HTTP call complete naturally (the user dismissed
+    // the modal but the work is fire-and-forget at this point), but the
+    // OS-level wakelock is no longer justified.
+    _releaseScanSlot();
+    _releaseVoiceSlot();
     _voice.removeListener(_onVoiceUpdate);
     _voice.dispose();
     _voiceTextNotifier.dispose();
@@ -398,6 +449,12 @@ class _AddExpenseSheetState extends State<_AddExpenseSheet>
       return;
     }
 
+    // Voice smart-parse fires an LLM call (potentially up to 20 s on
+    // slow networks). Promote it to a foreground service so the request
+    // survives screen-off / app minimisation if the user pockets the
+    // phone right after release.
+    _acquireVoiceSlot('\uD83C\uDF99\uFE0F Parsing voice expense\u2026');
+
     final sw = Stopwatch()..start();
     SmartParseResult? result;
     try {
@@ -417,6 +474,7 @@ class _AddExpenseSheetState extends State<_AddExpenseSheet>
           error: e);
     }
     sw.stop();
+    _releaseVoiceSlot();
 
     if (!mounted) return;
 
@@ -475,6 +533,9 @@ class _AddExpenseSheetState extends State<_AddExpenseSheet>
     );
     if (picked == null || !mounted) return;
 
+    // Promote the OCR + smart-parse pipeline to a foreground service so
+    // the work survives screen-off / app minimisation while scanning.
+    _acquireScanSlot('\uD83D\uDCF8 Scanning bill\u2026');
     setState(() {
       _isPdf = false;
       _capturedImage = File(picked.path);
@@ -506,25 +567,82 @@ class _AddExpenseSheetState extends State<_AddExpenseSheet>
 
   Future<void> _pickPdf() async {
     if (!PlatformCapabilities.canUseMlKitOcr) return;
-    final sw = Stopwatch()..start();
+    final overall = Stopwatch()..start();
+
+    // ── Step 1: Open the system file picker ────────────────────────────────
     FilePickerResult? result;
     try {
+      TLog.d('AddExpense', '📄 Opening PDF picker…');
+      // `withData: true` + `withReadStream: true` together aren't supported by
+      // file_picker, so we ask for bytes (works for every SAF / cloud
+      // provider) and also keep the cached `path` when the platform supplies
+      // one. The resolver below picks whichever is usable.
       result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
         allowedExtensions: ['pdf'],
-        withData: false,
+        withData: true,
       );
-    } catch (e) {
-      TLog.e('AddExpense', 'PDF picker failed', error: e);
+    } catch (e, st) {
+      TLog.e('AddExpense', 'PDF picker threw', error: e, st: st);
+      _showPdfError('Could not open the file picker. Please try again.');
       return;
     }
 
-    if (result == null || result.files.isEmpty || !mounted) return;
-    final pdfPath = result.files.first.path;
-    if (pdfPath == null || !mounted) return;
+    if (result == null) {
+      TLog.d('AddExpense', '📄 PDF picker cancelled by user');
+      return;
+    }
+    if (result.files.isEmpty) {
+      TLog.w('AddExpense', '📄 PDF picker returned an empty file list');
+      _showPdfError('No file was selected.');
+      return;
+    }
+    if (!mounted) return;
 
-    TLog.i('AddExpense', '📄 PDF picked: ${result.files.first.name} (${result.files.first.size} bytes)');
+    final picked = result.files.first;
+    TLog.i(
+      'AddExpense',
+      '📄 PDF picked: ${picked.name} (${picked.size} bytes, '
+      'hasPath=${picked.path != null}, hasBytes=${picked.bytes != null}, '
+      'hasStream=${picked.readStream != null})',
+    );
 
+    // ── Step 2: Resolve to a usable bytes/path source ──────────────────────
+    Uint8List? workingBytes;
+    String? workingPath;
+    try {
+      final resolved = await _resolvePdfSource(picked);
+      workingBytes = resolved.bytes;
+      workingPath = resolved.path;
+    } catch (e, st) {
+      TLog.e('AddExpense', 'PDF source resolution failed', error: e, st: st);
+      _showPdfError(
+        'Could not read the selected PDF. Try downloading it locally first, '
+        'then pick it again.',
+      );
+      return;
+    }
+
+    if (workingBytes == null && workingPath == null) {
+      TLog.e(
+        'AddExpense',
+        '❌ Unresolvable PDF source: name=${picked.name}, '
+        'size=${picked.size}, path=${picked.path}',
+      );
+      _showPdfError(
+        'This PDF could not be opened. Try a different file, or save it to '
+        'your device first.',
+      );
+      return;
+    }
+
+    if (!mounted) return;
+
+    // ── Step 3: Show scanning UI ──────────────────────────────────────────
+    // Promote PDF rendering + OCR + smart-parse to a foreground service so
+    // the (potentially long) pipeline survives screen-off / app
+    // minimisation.
+    _acquireScanSlot('\uD83D\uDCC4 Scanning PDF\u2026');
     setState(() {
       _isPdf = true;
       _capturedImage = null;
@@ -533,78 +651,384 @@ class _AddExpenseSheetState extends State<_AddExpenseSheet>
     });
 
     await Future<void>.delayed(
-      Duration(milliseconds: _scanPhases[0].ms),
+      Duration(milliseconds: _pdfScanPhases[0].ms),
     );
     if (!mounted) return;
     setState(() => _scanPhaseIdx = 1);
 
-    String ocrText = '';
+    // ── Step 4: Open + render + OCR with retries ──────────────────────────
+    String ocrText;
+    int pagesProcessed = 0;
     try {
-      final document = await pdfx.PdfDocument.openFile(pdfPath);
-      final pageCount = min(document.pagesCount, 5);
-      final tempDir = await getTemporaryDirectory();
-
-      TLog.d('AddExpense', 'PDF pages: ${document.pagesCount}, processing $pageCount');
-
-      for (var i = 1; i <= pageCount; i++) {
-        if (!mounted) break;
-        final page = await document.getPage(i);
-        final pageImage = await page.render(
-          width: page.width * 2,
-          height: page.height * 2,
-          format: pdfx.PdfPageImageFormat.png,
-        );
-        await page.close();
-
-        if (pageImage == null) continue;
-
-        final tempPath = '${tempDir.path}/nexus_pdf_p$i.png';
-        await File(tempPath).writeAsBytes(pageImage.bytes);
-
-        if (i == 1 && mounted) {
-          setState(() => _capturedImage = File(tempPath));
-        }
-
-        try {
-          final inputImage = InputImage.fromFilePath(tempPath);
-          final recognizer = TextRecognizer();
-          final ocrResult = await recognizer.processImage(inputImage);
-          ocrText += '${ocrResult.text}\n';
-          await recognizer.close();
-        } catch (e) {
-          TLog.w('AddExpense', 'PDF page $i OCR failed', error: e);
-        }
-
-        // Clean up temp file after OCR (except page 1 used as preview)
-        if (i > 1) {
-          try {
-            await File(tempPath).delete();
-          } catch (_) {}
-        }
-      }
-
-      await document.close();
-      sw.stop();
-      TLog.i('AddExpense', '📄 PDF OCR done in ${sw.elapsedMilliseconds}ms, ${ocrText.length} chars from $pageCount pages');
+      final processed = await _processPdfPages(
+        bytes: workingBytes,
+        path: workingPath,
+      );
+      ocrText = processed.text;
+      pagesProcessed = processed.pages;
+    } on _EncryptedPdfException {
+      overall.stop();
+      TLog.w(
+        'AddExpense',
+        '🔒 PDF is encrypted/password-protected (${overall.elapsedMilliseconds}ms)',
+      );
+      _resetScanIdle();
+      _showPdfError(
+        'This PDF is password-protected. Open it elsewhere and re-export an '
+        'unprotected copy.',
+      );
+      return;
     } catch (e, st) {
-      sw.stop();
-      TLog.e('AddExpense', 'PDF processing failed (${sw.elapsedMilliseconds}ms)',
-          error: e, st: st);
-      if (mounted) {
-        setState(() {
-          _scanState = _ScanState.idle;
-          _capturedImage = null;
-          _isPdf = false;
-        });
-      }
+      overall.stop();
+      TLog.e(
+        'AddExpense',
+        'PDF processing failed (${overall.elapsedMilliseconds}ms)',
+        error: e,
+        st: st,
+      );
+      _resetScanIdle();
+      // Android's PdfRenderer swallows SecurityException into a generic
+      // "Unknown error", so we can't reliably tell encrypted apart from
+      // damaged here — surface both possibilities in the user copy.
+      _showPdfError(
+        'Could not read this PDF. It may be password-protected, damaged, or '
+        'in an unsupported format.',
+      );
+      return;
+    }
+
+    overall.stop();
+    TLog.i(
+      'AddExpense',
+      '📄 PDF OCR done in ${overall.elapsedMilliseconds}ms, '
+      '${ocrText.length} chars from $pagesProcessed page(s)',
+    );
+
+    if (ocrText.trim().isEmpty) {
+      TLog.w(
+        'AddExpense',
+        '📄 PDF rendered ($pagesProcessed page(s)) but OCR returned no text — '
+        'image-only or blank document',
+      );
+      _resetScanIdle();
+      _showPdfError(
+        'No readable text found in this PDF. Try a sharper scan or a '
+        'text-based PDF.',
+      );
       return;
     }
 
     await _runExtractionPipeline(ocrText, 'pdf');
   }
 
+  /// Resolve an arbitrary [PlatformFile] into something we can actually feed
+  /// to `pdfx`. Handles three distinct provider behaviours:
+  ///
+  ///   1. Bytes already loaded by `file_picker` (`withData: true` succeeded).
+  ///   2. A cached local `path` (most common on Android/iOS).
+  ///   3. Only a `readStream` (some custom SAF DocumentsProviders / iCloud).
+  ///
+  /// At least one of [bytes] or [path] is returned non-null on success.
+  Future<({Uint8List? bytes, String? path})> _resolvePdfSource(
+    PlatformFile picked,
+  ) async {
+    if (picked.bytes != null && picked.bytes!.isNotEmpty) {
+      TLog.d('AddExpense', '📄 Using in-memory bytes (${picked.bytes!.length} B)');
+      return (bytes: picked.bytes, path: null);
+    }
+
+    final p = picked.path;
+    if (p != null) {
+      try {
+        final f = File(p);
+        if (await f.exists()) {
+          final size = await f.length();
+          if (size > 0) {
+            TLog.d('AddExpense', '📄 Using cached file path ($size B): $p');
+            return (bytes: null, path: p);
+          }
+        }
+      } catch (e) {
+        TLog.w('AddExpense', 'Path probe failed for $p', error: e);
+      }
+    }
+
+    final stream = picked.readStream;
+    if (stream != null) {
+      final tempDir = await getTemporaryDirectory();
+      final outPath =
+          '${tempDir.path}/nexus_picked_${DateTime.now().millisecondsSinceEpoch}.pdf';
+      final sink = File(outPath).openWrite();
+      var bytesWritten = 0;
+      try {
+        await for (final chunk in stream) {
+          sink.add(chunk);
+          bytesWritten += chunk.length;
+        }
+        await sink.flush();
+      } finally {
+        await sink.close();
+      }
+      TLog.d('AddExpense', '📄 Drained readStream → $outPath ($bytesWritten B)');
+      if (bytesWritten > 0) {
+        return (bytes: null, path: outPath);
+      }
+    }
+
+    return (bytes: null, path: null);
+  }
+
+  /// Open the PDF, render up to 5 pages, OCR each one. Every step has a
+  /// dedicated retry/fallback so a single bad page never breaks the whole
+  /// flow:
+  ///
+  ///   * `PdfDocument.open*` retries once on transient I/O errors and
+  ///     surfaces [_EncryptedPdfException] when the failure is
+  ///     password-related.
+  ///   * Page rendering walks 2.0 → 1.5 → 1.0 scale, so an OOM at high
+  ///     resolution falls back to a smaller bitmap instead of aborting.
+  ///   * OCR retries once on timeout/transient ML Kit failures.
+  ///
+  /// Returns the concatenated OCR text and the number of pages that produced
+  /// any text. Throws on hard failures (no usable source, all attempts
+  /// exhausted, encryption).
+  Future<({String text, int pages})> _processPdfPages({
+    Uint8List? bytes,
+    String? path,
+  }) async {
+    pdfx.PdfDocument? document;
+    Object? lastOpenError;
+
+    for (var attempt = 0; attempt < 2 && document == null; attempt++) {
+      try {
+        if (bytes != null) {
+          document = await pdfx.PdfDocument.openData(bytes);
+        } else if (path != null) {
+          document = await pdfx.PdfDocument.openFile(path);
+        } else {
+          throw StateError('No PDF source provided');
+        }
+      } catch (e, st) {
+        lastOpenError = e;
+        final msg = e.toString().toLowerCase();
+        if (msg.contains('password') ||
+            msg.contains('encrypted') ||
+            msg.contains('crypt')) {
+          throw _EncryptedPdfException();
+        }
+        TLog.w(
+          'AddExpense',
+          'PdfDocument open attempt ${attempt + 1} failed',
+          error: e,
+          st: st,
+        );
+        if (attempt == 0) {
+          await Future<void>.delayed(const Duration(milliseconds: 250));
+        }
+      }
+    }
+
+    if (document == null) {
+      throw lastOpenError ?? StateError('Failed to open PDF');
+    }
+
+    final maxPages = min(document.pagesCount, 5);
+    final tempDir = await getTemporaryDirectory();
+    TLog.d(
+      'AddExpense',
+      'PDF pages: ${document.pagesCount}, processing $maxPages',
+    );
+
+    final buffer = StringBuffer();
+    var pagesWithText = 0;
+
+    try {
+      for (var i = 1; i <= maxPages; i++) {
+        if (!mounted) break;
+
+        // pdfx caches PdfPage objects in `_pages[pageNumber-1]` and does NOT
+        // clear that slot on `page.close()`. Closing the page between scale
+        // retries would make every subsequent `getPage(i)` return the same
+        // already-closed object, and `page.render()` would throw
+        // `PdfPageAlreadyClosedException`. So we open the page exactly once
+        // and only retry the `render` call across progressively smaller
+        // scales (the OOM-prone step).
+        Uint8List? renderedBytes;
+        pdfx.PdfPage? page;
+        try {
+          try {
+            page = await document.getPage(i);
+          } catch (e, st) {
+            TLog.w(
+              'AddExpense',
+              'Page $i: getPage failed',
+              error: e,
+              st: st,
+            );
+          }
+
+          if (page != null) {
+            for (final scale in const <double>[2.0, 1.5, 1.0]) {
+              try {
+                final image = await page.render(
+                  width: page.width * scale,
+                  height: page.height * scale,
+                  format: pdfx.PdfPageImageFormat.png,
+                );
+                renderedBytes = image?.bytes;
+                if (renderedBytes != null) break;
+              } catch (e) {
+                TLog.w(
+                  'AddExpense',
+                  'Page $i render at ${scale}x failed',
+                  error: e,
+                );
+              }
+            }
+          }
+        } finally {
+          try {
+            await page?.close();
+          } catch (_) {}
+        }
+
+        if (renderedBytes == null) {
+          TLog.w(
+            'AddExpense',
+            'Page $i: skipping (all render attempts failed)',
+          );
+          continue;
+        }
+
+        final tempPath = '${tempDir.path}/nexus_pdf_p$i.png';
+        try {
+          await File(tempPath).writeAsBytes(renderedBytes);
+        } catch (e, st) {
+          TLog.w(
+            'AddExpense',
+            'Page $i: temp write failed',
+            error: e,
+            st: st,
+          );
+          continue;
+        }
+
+        if (i == 1 && mounted) {
+          setState(() => _capturedImage = File(tempPath));
+        }
+
+        var pageText = '';
+        for (var attempt = 0; attempt < 2; attempt++) {
+          TextRecognizer? recognizer;
+          try {
+            recognizer = TextRecognizer();
+            final ocrResult = await recognizer
+                .processImage(InputImage.fromFilePath(tempPath))
+                .timeout(const Duration(seconds: 30));
+            pageText = ocrResult.text;
+            break;
+          } on TimeoutException {
+            TLog.w(
+              'AddExpense',
+              'Page $i OCR timed out (attempt ${attempt + 1})',
+            );
+          } catch (e) {
+            TLog.w(
+              'AddExpense',
+              'Page $i OCR failed (attempt ${attempt + 1})',
+              error: e,
+            );
+          } finally {
+            try {
+              await recognizer?.close();
+            } catch (_) {}
+          }
+        }
+
+        if (pageText.isNotEmpty) {
+          buffer.writeln(pageText);
+          pagesWithText++;
+        }
+
+        if (i > 1) {
+          try {
+            await File(tempPath).delete();
+          } catch (_) {}
+        }
+      }
+    } finally {
+      try {
+        await document.close();
+      } catch (_) {}
+    }
+
+    return (text: buffer.toString(), pages: pagesWithText);
+  }
+
+  void _resetScanIdle() {
+    // Release the FG-service slot whenever we drop back to idle —
+    // there's no scan pipeline left to protect from Doze.
+    _releaseScanSlot();
+    if (!mounted) return;
+    setState(() {
+      _scanState = _ScanState.idle;
+      _capturedImage = null;
+      _isPdf = false;
+    });
+  }
+
+  void _showPdfError(String message) {
+    if (!mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.hideCurrentSnackBar();
+    messenger.showSnackBar(
+      SnackBar(
+        content: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Icon(LucideIcons.fileText, size: 16, color: Colors.white),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                message,
+                style: GoogleFonts.plusJakartaSans(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.white,
+                  height: 1.4,
+                ),
+              ),
+            ),
+          ],
+        ),
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 4),
+        backgroundColor: const Color(0xFFEF4444).withValues(alpha: 0.95),
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      ),
+    );
+  }
+
   /// Shared extraction pipeline: smart-parse → regex fallback → local categorize → apply results.
+  ///
+  /// Wrapped in a try-finally so the FG-service slot is always released
+  /// even if `widget.categorize` / `widget.smartParse` throws an
+  /// uncaught exception mid-flight. Without this guard a transient AI
+  /// failure could leave the OS-level wakelock held until the modal is
+  /// disposed, which on long-lived sessions could surface as a stuck
+  /// "✨ Nexus AI working" notification.
   Future<void> _runExtractionPipeline(String ocrText, String source) async {
+    try {
+      await _runExtractionPipelineInner(ocrText, source);
+    } finally {
+      _releaseScanSlot();
+    }
+  }
+
+  Future<void> _runExtractionPipelineInner(String ocrText, String source) async {
     if (!mounted) return;
     setState(() => _scanPhaseIdx = 2);
     await Future<void>.delayed(
@@ -705,6 +1129,9 @@ class _AddExpenseSheetState extends State<_AddExpenseSheet>
       _cardType = finalCardType;
       _scanState = _ScanState.done;
     });
+    // Slot release happens in the wrapping [_runExtractionPipeline]'s
+    // finally block so it fires on success and on every unexpected
+    // throw alike.
   }
 
   // ── Teach AI ───────────────────────────────────────────────────────────────
@@ -1893,6 +2320,11 @@ class _AddExpenseSheetState extends State<_AddExpenseSheet>
 }
 
 enum _ScanState { idle, scanning, done }
+
+/// Sentinel thrown by [_processPdfPages] when the underlying PDF requires a
+/// password. Caught at the [_pickPdf] boundary to render a dedicated error
+/// message instead of the generic "could not read this PDF" copy.
+class _EncryptedPdfException implements Exception {}
 
 // ─── Mode tabs (3 modes now) ─────────────────────────────────────────────────
 

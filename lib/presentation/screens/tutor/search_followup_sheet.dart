@@ -13,7 +13,11 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+
 import '../../../core/di/injection.dart';
+import '../../../core/platform/platform_capabilities.dart';
+import '../../../core/services/background_task_coordinator.dart';
 import '../../../core/services/telegram_logger.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../data/services/tutor_ai_service.dart';
@@ -138,6 +142,116 @@ class SearchFollowUpStore with WidgetsBindingObserver {
   /// Prevents concurrent background summarizations for the same query.
   final _summarizingQueries = <String>{};
 
+  /// Tracks whether the host app is currently in the background, so the
+  /// completion notification can fire only when the user can't see the
+  /// answer arrive in-app.
+  bool _appInBackground = false;
+
+  // ── Background notification helpers ──────────────────────────────────
+  static const _kAiChannelId = 'nexus_ai_processing';
+  static const _kAiChannelName = 'AI Processing';
+  static const _kAiChannelDesc =
+      'Shows progress when AI generates answers in the background';
+  static const _kProcessingNotifId = 9100;
+  static const _kCompletionNotifId = 9101;
+
+  static FlutterLocalNotificationsPlugin? _notifPlugin;
+
+  static Future<FlutterLocalNotificationsPlugin> _ensureNotifPlugin() async {
+    if (_notifPlugin != null) return _notifPlugin!;
+    _notifPlugin = FlutterLocalNotificationsPlugin();
+    const android = AndroidInitializationSettings('@mipmap/ic_launcher');
+    await _notifPlugin!.initialize(
+      const InitializationSettings(android: android),
+    );
+    return _notifPlugin!;
+  }
+
+  Future<void> _showProcessingNotification(String query) async {
+    if (!PlatformCapabilities.canUseNotifications) return;
+    try {
+      final fln = await _ensureNotifPlugin();
+      final q = query.length > 50 ? '${query.substring(0, 50)}\u2026' : query;
+      const details = AndroidNotificationDetails(
+        _kAiChannelId,
+        _kAiChannelName,
+        channelDescription: _kAiChannelDesc,
+        importance: Importance.low,
+        priority: Priority.low,
+        ongoing: true,
+        autoCancel: false,
+        showProgress: true,
+        indeterminate: true,
+        category: AndroidNotificationCategory.progress,
+        color: ui.Color(0xFF4285F4),
+      );
+      await fln.show(
+        _kProcessingNotifId,
+        '\u2728 AI is thinking\u2026',
+        'Answering follow-up for "$q"',
+        const NotificationDetails(android: details),
+      );
+    } catch (e) {
+      TLog.w('SearchFollowUp', 'Processing notification failed: $e');
+    }
+  }
+
+  Future<void> _showCompletionNotification(String query) async {
+    if (!PlatformCapabilities.canUseNotifications) return;
+    try {
+      final fln = await _ensureNotifPlugin();
+      await fln.cancel(_kProcessingNotifId);
+      final q = query.length > 50 ? '${query.substring(0, 50)}\u2026' : query;
+      const details = AndroidNotificationDetails(
+        _kAiChannelId,
+        _kAiChannelName,
+        channelDescription: _kAiChannelDesc,
+        importance: Importance.high,
+        priority: Priority.high,
+        category: AndroidNotificationCategory.message,
+        color: ui.Color(0xFF4285F4),
+      );
+      await fln.show(
+        _kCompletionNotifId,
+        '\u2705 Answer ready',
+        'Your follow-up about "$q" has been answered',
+        const NotificationDetails(android: details),
+        payload: 'tutor_tab',
+      );
+    } catch (e) {
+      TLog.w('SearchFollowUp', 'Completion notification failed: $e');
+    }
+  }
+
+  Future<void> _cancelProcessingNotification() async {
+    if (!PlatformCapabilities.canUseNotifications) return;
+    try {
+      final fln = await _ensureNotifPlugin();
+      await fln.cancel(_kProcessingNotifId);
+    } catch (_) {}
+  }
+
+  // ── Foreground-service slot ──────────────────────────────────────────
+  static String _coordSlotId(String query) =>
+      'search_followup:${query.hashCode.toUnsigned(32)}';
+
+  void _acquireCoordSlot(String query) {
+    if (!PlatformCapabilities.canUseForegroundTask) return;
+    final preview =
+        query.length > 40 ? '${query.substring(0, 37)}\u2026' : query;
+    unawaited(BackgroundTaskCoordinator.instance.acquire(
+      _coordSlotId(query),
+      label: '\uD83E\uDD16 Answering: $preview',
+    ));
+  }
+
+  void _releaseCoordSlot(String query) {
+    if (!PlatformCapabilities.canUseForegroundTask) return;
+    unawaited(
+      BackgroundTaskCoordinator.instance.release(_coordSlotId(query)),
+    );
+  }
+
   void init() {
     if (!_observerBound) {
       _observerBound = true;
@@ -153,21 +267,54 @@ class SearchFollowUpStore with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state != AppLifecycleState.resumed || _retryQueue.isEmpty) return;
-    final entries = Map.of(_retryQueue);
-    _retryQueue.clear();
+    // ── Going to background ──────────────────────────────────────────
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive) {
+      if (!_appInBackground && _pendingAiMsgs.isNotEmpty) {
+        _appInBackground = true;
+        // Use the first pending query as the notification subject.
+        final firstQuery = _pendingAiMsgs.keys.first;
+        unawaited(_showProcessingNotification(firstQuery));
+      }
+      return;
+    }
+
+    if (state != AppLifecycleState.resumed) return;
+
+    final wasInBackground = _appInBackground;
+    _appInBackground = false;
+    if (wasInBackground) {
+      unawaited(_cancelProcessingNotification());
+    }
+
+    if (_retryQueue.isEmpty) return;
+    // Snapshot the keys but DO NOT clear the queue yet. Leaving entries
+    // in place across the 1500ms reconnect delay keeps the in-flight
+    // cancel catch's `keepPending` check correct, so the FG-service slot
+    // is not released during the gap.
+    final pendingKeys = _retryQueue.keys.toList();
 
     Future<void>.delayed(const Duration(milliseconds: 1500), () {
-      for (final e in entries.entries) {
-        final query = e.key;
-        final r = e.value;
+      for (final query in pendingKeys) {
+        final r = _retryQueue.remove(query);
+        if (r == null) continue; // cancelled / replaced while delayed
         TLog.d('SearchStore', 'Resumed — retrying follow-up for "$query"');
         r.aiMsg
           ..text = ''
           ..isLoading = true
           ..isError = false;
         _pendingAiMsgs[query] = r.aiMsg;
+        // Wire a fresh cancel-token so the retry registers as the active
+        // execution for [query]. The finally block in [_executeRequest]
+        // uses identity on this token to decide whether it is the
+        // currently-owning run before releasing the FG slot.
+        final token = CancelToken();
+        _cancelTokens[query] = token;
         _listeners[query]?.call();
+        // Re-acquire FG-service slot before firing the retry so the OS
+        // does not throttle the request mid-flight if the user
+        // backgrounds again.
+        _acquireCoordSlot(query);
         unawaited(_executeRequest(
           query: query,
           initialAnswer: r.initialAnswer,
@@ -182,6 +329,7 @@ class SearchFollowUpStore with WidgetsBindingObserver {
           xgrokLiteModel: r.xgrokLiteModel,
           xgrokDeepModel: r.xgrokDeepModel,
           xgrokThinkingModel: r.xgrokThinkingModel,
+          cancelToken: token,
           isRetry: true,
         ));
       }
@@ -258,6 +406,10 @@ class SearchFollowUpStore with WidgetsBindingObserver {
     final token = CancelToken();
     _cancelTokens[query] = token;
 
+    // Promote to a foreground service so the request survives screen-off
+    // / app minimisation without the OS killing the HTTP socket.
+    _acquireCoordSlot(query);
+
     unawaited(_executeRequest(
       query: query,
       initialAnswer: initialAnswer,
@@ -283,6 +435,7 @@ class SearchFollowUpStore with WidgetsBindingObserver {
     _cancelTokens[query]?.cancel('User cancelled');
     _cancelTokens.remove(query);
     _retryQueue.remove(query);
+    _releaseCoordSlot(query);
 
     final list = _cache[query];
     if (list == null || list.isEmpty) {
@@ -471,8 +624,32 @@ class SearchFollowUpStore with WidgetsBindingObserver {
           ..isError = true;
       }
     } finally {
-      if (!keepPending) _pendingAiMsgs.remove(query);
-      _listeners[query]?.call();
+      // Only finalise state if THIS execution is still the active one.
+      // A concurrent sendQuestion (rapid resend) or resume-retry replaces
+      // `_cancelTokens[query]` with a newer token; in that case the newer
+      // execution owns the pending message + slot and we must leave them
+      // alone, otherwise the slot would be released mid-flight.
+      final isStillActive =
+          cancelToken != null && identical(_cancelTokens[query], cancelToken);
+
+      if (isStillActive && !keepPending) {
+        _pendingAiMsgs.remove(query);
+        _cancelTokens.remove(query);
+        // Drop the FG-service slot once we have a final answer (success or
+        // permanent error). When [keepPending] is true we retain the slot
+        // so the retry-on-resume path runs Doze-protected.
+        _releaseCoordSlot(query);
+
+        if (_appInBackground) {
+          unawaited(_cancelProcessingNotification());
+          if (!aiMsg.isError && aiMsg.text.isNotEmpty) {
+            unawaited(_showCompletionNotification(query));
+          }
+        }
+      }
+      if (isStillActive) {
+        _listeners[query]?.call();
+      }
     }
   }
 
@@ -502,9 +679,11 @@ class SearchFollowUpStore with WidgetsBindingObserver {
     _initialAnswers.remove(query);
     _summaries.remove(query);
     _summarizingQueries.remove(query);
+    _releaseCoordSlot(query);
   }
 
   void clearAll() {
+    final pendingQueries = _pendingAiMsgs.keys.toList();
     for (final t in _cancelTokens.values) {
       t.cancel('Cleared');
     }
@@ -515,6 +694,9 @@ class SearchFollowUpStore with WidgetsBindingObserver {
     _pendingAiMsgs.clear();
     _retryQueue.clear();
     _summarizingQueries.clear();
+    for (final q in pendingQueries) {
+      _releaseCoordSlot(q);
+    }
   }
 }
 

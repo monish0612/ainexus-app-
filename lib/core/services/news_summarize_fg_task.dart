@@ -4,43 +4,60 @@ import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import '../platform/platform_capabilities.dart';
 import 'telegram_logger.dart';
 
-/// Foreground-service plumbing for the News > For You "Summarize" feature.
+/// Foreground-service plumbing shared by every long-running AI task
+/// (news summarize, online search, URL summarize, follow-up Q&A, expense
+/// OCR + smart-parse, etc).
 ///
-/// Why this exists at all:
-///   The summarize session is a series of HTTP calls fired from the main
-///   isolate by [NewsSummarizeStore]. On Android, once the user backgrounds
-///   the app or locks the screen, the OS can put the process into App Standby
-///   / Doze within seconds — at which point in-flight sockets stall and the
-///   summarize pipeline silently dies until the user returns. That violates
-///   the "production grade, runs even with the screen off" requirement.
+/// ## Why a single shared service
+/// `flutter_foreground_task` only allows ONE foreground service per
+/// process. Every long-running AI feature in the app needs the same
+/// "don't let Doze kill my HTTP socket" guarantee, so we share a single
+/// service whose lifetime is owned by [BackgroundTaskCoordinator].
 ///
-/// The fix is the standard Android pattern: promote the work to a foreground
-/// service (an ongoing notification that tells the OS "this user-visible job
-/// is running, do not throttle me"). With the service active, the existing
-/// summarize logic in the main isolate keeps running normally even when the
-/// app is minimised, the screen is off, or the phone is locked.
+/// ## What this file is for
+/// - Declares the `@pragma('vm:entry-point')` callback the OS uses to
+///   re-enter the Dart isolate when the service starts.
+/// - Provides [initBackgroundForegroundTask] which configures the
+///   notification channel + foreground-task options once at app startup.
 ///
-/// We deliberately do NOT move the summarize logic into the task handler's
-/// isolate. The handler runs in a separate engine without our Riverpod
-/// container, repository, or in-memory state — running it there would mean
-/// reimplementing the entire session orchestrator with cross-isolate IPC.
-/// Instead we use the service as a "process keep-alive" only: the handler
-/// is intentionally inert and just exists because Android requires one.
+/// We deliberately do NOT move the actual AI work into the task handler's
+/// isolate — that runs in a separate engine without our Riverpod
+/// container, repository, or in-memory state. The handler is intentionally
+/// inert; all work continues to run in the main isolate, which keeps
+/// running because the OS sees the foreground service.
+
+/// Notification channel used by the shared foreground service. We keep a
+/// stable, generic id so Android's user-visible channel listing reads
+/// "Background AI Tasks" rather than feature-specific names.
+const String _kAiBgChannelId = 'nexus_ai_background';
+const String _kAiBgChannelName = 'Background AI Tasks';
+const String _kAiBgChannelDesc =
+    'Keeps AI tasks (search, summarize, follow-up Q&A, OCR) running while '
+    'the app is in the background or the screen is off.';
 
 @pragma('vm:entry-point')
-void newsSummarizeStartCallback() {
-  FlutterForegroundTask.setTaskHandler(_NewsSummarizeNoopHandler());
+void aiBackgroundStartCallback() {
+  FlutterForegroundTask.setTaskHandler(_AiBackgroundNoopHandler());
 }
 
-/// Inert task handler — its sole purpose is to satisfy the foreground-service
-/// contract. All actual work happens back in the main isolate where
-/// [NewsSummarizeStore] lives.
-class _NewsSummarizeNoopHandler extends TaskHandler {
+/// Backwards-compat alias for the legacy News-summarize callback name.
+/// Kept so any cached `Intent`/`Service` start state pointing at the old
+/// entry-point continues to resolve to a working handler instead of
+/// crashing the process.
+@pragma('vm:entry-point')
+void newsSummarizeStartCallback() {
+  aiBackgroundStartCallback();
+}
+
+/// Inert task handler — its sole purpose is to satisfy the
+/// foreground-service contract. All actual AI work happens back in the
+/// main isolate where the various stores live.
+class _AiBackgroundNoopHandler extends TaskHandler {
   @override
   Future<void> onStart(DateTime timestamp, TaskStarter starter) async {
     if (kDebugMode) {
       // ignore: avoid_print
-      print('[NewsSummarizeFG] service started by ${starter.name}');
+      print('[AIBgService] started by ${starter.name}');
     }
   }
 
@@ -51,26 +68,25 @@ class _NewsSummarizeNoopHandler extends TaskHandler {
   Future<void> onDestroy(DateTime timestamp, bool isTimeout) async {
     if (kDebugMode) {
       // ignore: avoid_print
-      print('[NewsSummarizeFG] service destroyed (timeout=$isTimeout)');
+      print('[AIBgService] destroyed (timeout=$isTimeout)');
     }
   }
 }
 
 /// Configures the foreground-task subsystem. Must be called once at app
-/// startup before any session can promote itself to a foreground service.
+/// startup before any feature can promote itself to a foreground service.
 ///
 /// Safe to call repeatedly; [FlutterForegroundTask.init] just stores the
-/// options. No-ops on platforms that do not support the foreground service
-/// (web, future iOS / desktop builds).
-void initNewsSummarizeForegroundTask() {
+/// options. No-ops on platforms that do not support the foreground
+/// service (web, future iOS / desktop builds).
+void initBackgroundForegroundTask() {
   if (!PlatformCapabilities.canUseForegroundTask) return;
   try {
     FlutterForegroundTask.init(
       androidNotificationOptions: AndroidNotificationOptions(
-        channelId: 'nexus_news_summarize',
-        channelName: 'News Summarizer',
-        channelDescription:
-            'Keeps the summarize task running while the app is in the background',
+        channelId: _kAiBgChannelId,
+        channelName: _kAiBgChannelName,
+        channelDescription: _kAiBgChannelDesc,
         channelImportance: NotificationChannelImportance.LOW,
         priority: NotificationPriority.LOW,
         onlyAlertOnce: true,
@@ -89,18 +105,22 @@ void initNewsSummarizeForegroundTask() {
         autoRunOnMyPackageReplaced: false,
         // The whole point of this service is that the OS does not put us
         // into Doze mid-batch — give the OS the explicit wakelock contract
-        // so CPU + network stay alive while we crunch through the pile.
+        // so CPU + network stay alive while we crunch through tasks.
         allowWakeLock: true,
         allowWifiLock: true,
         // If the user kills the app from recents, also stop us. We do not
-        // want a phantom service ticking after the user has clearly walked
-        // away from the app.
+        // want a phantom service ticking after the user has clearly
+        // walked away from the app.
         stopWithTask: true,
       ),
     );
-    TLog.d('NewsSummarize', 'foreground-task subsystem initialised');
+    TLog.d('BgFgTask', 'foreground-task subsystem initialised');
   } catch (e, st) {
-    TLog.w('NewsSummarize', 'foreground-task init failed: $e',
-        error: e, st: st);
+    TLog.w('BgFgTask', 'foreground-task init failed: $e', error: e, st: st);
   }
 }
+
+/// Backwards-compat alias for the legacy initializer name. Older callers
+/// (or out-of-tree integrations) that referenced
+/// `initNewsSummarizeForegroundTask()` continue to work.
+void initNewsSummarizeForegroundTask() => initBackgroundForegroundTask();

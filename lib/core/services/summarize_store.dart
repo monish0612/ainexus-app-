@@ -8,6 +8,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import '../../data/services/tutor_ai_service.dart';
 import '../../domain/entities/tutor_entities.dart';
 import '../platform/platform_capabilities.dart';
+import 'background_task_coordinator.dart';
 import 'telegram_logger.dart';
 
 /// Mutable state of a single URL summarize operation.
@@ -123,6 +124,8 @@ class SummarizeStore with WidgetsBindingObserver {
     final token = CancelToken();
     _cancelTokens[key] = token;
 
+    _acquireCoordSlot(key, url);
+
     unawaited(_executeSummarize(
       key: key,
       params: params,
@@ -142,6 +145,7 @@ class SummarizeStore with WidgetsBindingObserver {
         ..loading = false
         ..stage = '';
     }
+    _releaseCoordSlot(key);
     _listeners[key]?.call();
     TLog.d('SummarizeStore', 'Cancelled summarize for key="${key.length > 50 ? '${key.substring(0, 50)}\u2026' : key}"');
   }
@@ -152,6 +156,27 @@ class SummarizeStore with WidgetsBindingObserver {
     _params.remove(key);
     _listeners.remove(key);
     _resumeRetryCount.remove(key);
+  }
+
+  // ── Foreground-service slot management ────────────────────────────────
+
+  static String _coordSlotId(String key) =>
+      'url_summarize:${key.hashCode.toUnsigned(32)}';
+
+  void _acquireCoordSlot(String key, String url) {
+    if (!PlatformCapabilities.canUseForegroundTask) return;
+    final preview = url.length > 40 ? '${url.substring(0, 37)}\u2026' : url;
+    unawaited(BackgroundTaskCoordinator.instance.acquire(
+      _coordSlotId(key),
+      label: '\uD83D\uDCDD Summarizing: $preview',
+    ));
+  }
+
+  void _releaseCoordSlot(String key) {
+    if (!PlatformCapabilities.canUseForegroundTask) return;
+    unawaited(
+      BackgroundTaskCoordinator.instance.release(_coordSlotId(key)),
+    );
   }
 
   // ── Core execution ─────────────────────────────────────────────────────────
@@ -263,14 +288,27 @@ class SummarizeStore with WidgetsBindingObserver {
         }
       }
     } finally {
-      _cancelTokens.remove(key);
-      _listeners[key]?.call();
+      // Only finalise state if THIS execution is still the active one.
+      // A concurrent startSummarize ("Retry") or resume-retry replaces
+      // `_cancelTokens[key]` with a newer token; in that case the newer
+      // execution owns the slot + token entry and we must leave them
+      // alone — otherwise we'd kill the FG service mid-retry and remove
+      // the live cancel-token from the map.
+      final isStillActive = identical(_cancelTokens[key], cancelToken);
 
-      if (_appInBackground && !keepPending && _jobs.containsKey(key)) {
-        unawaited(_cancelProcessingNotification());
-        final j = _jobs[key]!;
-        if (j.error == null && j.result != null) {
-          unawaited(_showCompletionNotification(params.url));
+      if (isStillActive) {
+        _cancelTokens.remove(key);
+        if (!keepPending) {
+          _releaseCoordSlot(key);
+        }
+        _listeners[key]?.call();
+
+        if (_appInBackground && !keepPending && _jobs.containsKey(key)) {
+          unawaited(_cancelProcessingNotification());
+          final j = _jobs[key]!;
+          if (j.error == null && j.result != null) {
+            unawaited(_showCompletionNotification(params.url));
+          }
         }
       }
     }
@@ -375,13 +413,16 @@ class SummarizeStore with WidgetsBindingObserver {
     }
 
     if (_retryQueue.isEmpty) return;
-    final entries = Map.of(_retryQueue);
-    _retryQueue.clear();
+    // Snapshot the keys but DO NOT clear the queue yet. Leaving entries
+    // in place across the 1200ms reconnect delay keeps the in-flight
+    // cancel catch's `keepPending` check (`_retryQueue.containsKey(key)`)
+    // correct, so the FG-service slot is not released during the gap.
+    final pendingKeys = _retryQueue.keys.toList();
 
     Future<void>.delayed(const Duration(milliseconds: 1200), () {
-      for (final e in entries.entries) {
-        final key = e.key;
-        final p = e.value;
+      for (final key in pendingKeys) {
+        final p = _retryQueue.remove(key);
+        if (p == null) continue; // cancelled / replaced while delayed
         final job = _jobs[key];
         if (job == null || !job.loading) continue;
 
@@ -396,6 +437,9 @@ class SummarizeStore with WidgetsBindingObserver {
             ..loading = false
             ..stage = '';
           _resumeRetryCount.remove(key);
+          // Drop the FG-service slot held since the previous keepPending
+          // exit so the OS can settle.
+          _releaseCoordSlot(key);
           _listeners[key]?.call();
           continue;
         }
@@ -414,6 +458,10 @@ class SummarizeStore with WidgetsBindingObserver {
 
         final token = CancelToken();
         _cancelTokens[key] = token;
+
+        // Re-acquire the FG-service slot before firing the retry so it is
+        // also Doze-protected.
+        _acquireCoordSlot(key, p.url);
 
         unawaited(_executeSummarize(
           key: key,

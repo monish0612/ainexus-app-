@@ -8,6 +8,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import '../../data/services/tutor_ai_service.dart';
 import '../../domain/entities/tutor_entities.dart';
 import '../platform/platform_capabilities.dart';
+import 'background_task_coordinator.dart';
 import 'telegram_logger.dart';
 
 /// Holds the mutable state of a single online search operation.
@@ -158,6 +159,8 @@ class OnlineSearchStore with WidgetsBindingObserver {
     final token = CancelToken();
     _cancelTokens[queryKey] = token;
 
+    _acquireCoordSlot(queryKey, query);
+
     unawaited(_executeSearch(
       queryKey: queryKey,
       params: params,
@@ -177,6 +180,7 @@ class OnlineSearchStore with WidgetsBindingObserver {
         ..loading = false
         ..stage = '';
     }
+    _releaseCoordSlot(queryKey);
     _listeners[queryKey]?.call();
     TLog.d('SearchStore', 'Cancelled search for key="${queryKey.length > 50 ? '${queryKey.substring(0, 50)}\u2026' : queryKey}"');
   }
@@ -187,6 +191,31 @@ class OnlineSearchStore with WidgetsBindingObserver {
     _params.remove(queryKey);
     _listeners.remove(queryKey);
     _resumeRetryCount.remove(queryKey);
+  }
+
+  // ── Foreground-service slot management ────────────────────────────────
+
+  /// Slot ids used with [BackgroundTaskCoordinator] are scoped to this
+  /// store so two queries with identical text don't collide with a slot
+  /// owned by another store (URL summarize, follow-up Q&A, etc).
+  static String _coordSlotId(String queryKey) =>
+      'online_search:${queryKey.hashCode.toUnsigned(32)}';
+
+  void _acquireCoordSlot(String queryKey, String query) {
+    if (!PlatformCapabilities.canUseForegroundTask) return;
+    final preview =
+        query.length > 40 ? '${query.substring(0, 37)}\u2026' : query;
+    unawaited(BackgroundTaskCoordinator.instance.acquire(
+      _coordSlotId(queryKey),
+      label: '\uD83D\uDD0D Searching: $preview',
+    ));
+  }
+
+  void _releaseCoordSlot(String queryKey) {
+    if (!PlatformCapabilities.canUseForegroundTask) return;
+    unawaited(
+      BackgroundTaskCoordinator.instance.release(_coordSlotId(queryKey)),
+    );
   }
 
   // ── Core execution ────────────────────────────────────────────────────────
@@ -357,15 +386,31 @@ class OnlineSearchStore with WidgetsBindingObserver {
           ..stage = '';
       }
     } finally {
-      _cancelTokens.remove(queryKey);
-      _listeners[queryKey]?.call();
+      // Only finalise state if THIS execution is still the active one. A
+      // concurrent startSearch ("Retry") or resume-retry replaces
+      // `_cancelTokens[queryKey]` with a newer token; in that case the
+      // newer execution owns the slot + token entry and we must leave
+      // them alone — otherwise we'd kill the FG service mid-retry and
+      // remove the live cancel-token from the map.
+      final isStillActive =
+          identical(_cancelTokens[queryKey], cancelToken);
 
-      if (_appInBackground && !keepPending && _jobs.containsKey(queryKey)) {
-        unawaited(_cancelProcessingNotification());
-        final j = _jobs[queryKey]!;
-        if (j.error == null &&
-            (j.groundedResult != null || j.tavilyResult != null)) {
-          unawaited(_showCompletionNotification(params.query));
+      if (isStillActive) {
+        _cancelTokens.remove(queryKey);
+        if (!keepPending) {
+          _releaseCoordSlot(queryKey);
+        }
+        _listeners[queryKey]?.call();
+
+        if (_appInBackground &&
+            !keepPending &&
+            _jobs.containsKey(queryKey)) {
+          unawaited(_cancelProcessingNotification());
+          final j = _jobs[queryKey]!;
+          if (j.error == null &&
+              (j.groundedResult != null || j.tavilyResult != null)) {
+            unawaited(_showCompletionNotification(params.query));
+          }
         }
       }
     }
@@ -472,13 +517,16 @@ class OnlineSearchStore with WidgetsBindingObserver {
     }
 
     if (_retryQueue.isEmpty) return;
-    final entries = Map.of(_retryQueue);
-    _retryQueue.clear();
+    // Snapshot the keys but DO NOT clear the queue yet. Leaving entries in
+    // place across the 1500ms reconnect delay keeps the in-flight cancel
+    // catch's `keepPending` check (`_retryQueue.containsKey(queryKey)`)
+    // correct, so the FG-service slot is not released during the gap.
+    final pendingKeys = _retryQueue.keys.toList();
 
     Future<void>.delayed(const Duration(milliseconds: 1500), () {
-      for (final e in entries.entries) {
-        final queryKey = e.key;
-        final p = e.value;
+      for (final queryKey in pendingKeys) {
+        final p = _retryQueue.remove(queryKey);
+        if (p == null) continue; // cancelled / replaced while delayed
         final job = _jobs[queryKey];
         if (job == null || !job.loading) continue;
 
@@ -493,6 +541,9 @@ class OnlineSearchStore with WidgetsBindingObserver {
             ..loading = false
             ..stage = '';
           _resumeRetryCount.remove(queryKey);
+          // The previous attempt held the FG-service slot via keepPending;
+          // since we're giving up, drop it so the OS can settle.
+          _releaseCoordSlot(queryKey);
           _listeners[queryKey]?.call();
           continue;
         }
@@ -512,6 +563,10 @@ class OnlineSearchStore with WidgetsBindingObserver {
 
         final token = CancelToken();
         _cancelTokens[queryKey] = token;
+
+        // Re-acquire the FG-service slot before firing the request so the
+        // retry itself is also Doze-protected.
+        _acquireCoordSlot(queryKey, p.query);
 
         unawaited(_executeSearch(
           queryKey: queryKey,

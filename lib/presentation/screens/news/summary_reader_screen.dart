@@ -178,6 +178,21 @@ class _SummaryReaderScreenState extends ConsumerState<SummaryReaderScreen> {
     final progress = _store.progress;
     final unsavedRemaining = live.where((a) => !a.isSaved).length;
 
+    // Defensive: the FAB only opens the reader with a non-empty article
+    // list, but if the local DB sync clears everything mid-session (rare
+    // multi-device race) we close the screen on the next frame rather
+    // than crashing on the [clamp(0, -1)] below.
+    if (live.isEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _store.detachReader();
+        Navigator.of(context).maybePop();
+      });
+      return Scaffold(backgroundColor: colors.bg);
+    }
+
+    final safeIndex = _currentPage.clamp(0, live.length - 1);
+
     return Scaffold(
       backgroundColor: colors.bg,
       body: Stack(
@@ -234,6 +249,8 @@ class _SummaryReaderScreenState extends ConsumerState<SummaryReaderScreen> {
           _Header(
             colors: colors,
             progress: progress,
+            currentIndex: safeIndex,
+            total: live.length,
             onClose: _onClose,
           ),
 
@@ -277,11 +294,15 @@ class _Header extends StatelessWidget {
   const _Header({
     required this.colors,
     required this.progress,
+    required this.currentIndex,
+    required this.total,
     required this.onClose,
   });
 
   final AppColors colors;
   final SummaryProgress progress;
+  final int currentIndex;
+  final int total;
   final VoidCallback onClose;
 
   @override
@@ -349,15 +370,38 @@ class _Header extends StatelessWidget {
                       ),
                     ),
                     const Spacer(),
-                    Text(
-                      '${progress.ready} / ${progress.total} ready',
-                      style: GoogleFonts.plusJakartaSans(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
-                        color: colors.text2,
-                      ),
+                    // Counter moved here from the bottom of each card so it
+                    // stays sticky as the user pages. The animated progress
+                    // bar below already conveys summarization-ready status,
+                    // so we don't duplicate "X/Y ready" here.
+                    Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Text(
+                          '${currentIndex + 1} / $total',
+                          style: GoogleFonts.plusJakartaSans(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w800,
+                            color: colors.text,
+                            letterSpacing: 0.2,
+                          ),
+                        ),
+                        Text(
+                          progress.total > 0 && progress.ready < progress.total
+                              ? '${progress.ready}/${progress.total} ready'
+                              : 'all ready',
+                          style: GoogleFonts.plusJakartaSans(
+                            fontSize: 9,
+                            fontWeight: FontWeight.w600,
+                            color: colors.text4,
+                            letterSpacing: 0.4,
+                            height: 1.0,
+                          ),
+                        ),
+                      ],
                     ),
-                    const SizedBox(width: 8),
+                    const SizedBox(width: 10),
                     Material(
                       color: colors.bg3,
                       borderRadius: BorderRadius.circular(10),
@@ -596,72 +640,135 @@ class _SummaryCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final cat = newsCategoryColor(article.category);
     // Reserve top space for the frosted header and bottom for the Done pill.
-    final topInset = MediaQuery.viewPaddingOf(context).top + 84;
+    final topInset = MediaQuery.viewPaddingOf(context).top + 92;
     final bottomInset =
         MediaQuery.viewPaddingOf(context).bottom + 16 + 56 + 16;
 
+    // Tap-anywhere-to-open: the entire card body is wrapped in
+    // [Material] + [InkWell] so any tap on the hero / title / summary
+    // fades a subtle category-coloured ripple and opens the full article.
+    // The vertical [PageView] swipe still works because [InkWell] only
+    // claims tap gestures — drag gestures bubble up to the page view.
+    // The save heart overlaid on the hero uses its own [GestureDetector]
+    // with [HitTestBehavior.opaque] so its taps never reach the InkWell.
+    //
     // No nested vertical scrollable here — that previously stole drags
-    // from the parent vertical PageView and pinned the user to page 1.
-    // Instead we lay the card out as a Column whose [_SummaryBlock] is
-    // wrapped in [Flexible] so any unusually long summary text shrinks
-    // / fades gracefully rather than overflowing the viewport. The hero
-    // is sized by its inner [AspectRatio(16/10)] so it never grows
-    // beyond its intrinsic height.
-    return Padding(
-      padding: EdgeInsets.fromLTRB(20, topInset, 20, bottomInset),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        mainAxisSize: MainAxisSize.max,
-        children: [
-          _ParallaxHero(
-            article: article,
-            cat: cat,
-            index: index,
-            controller: pageController,
+    // from the parent PageView and pinned the user to page 1.
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onReadFull,
+        splashColor: cat.withValues(alpha: 0.08),
+        highlightColor: cat.withValues(alpha: 0.04),
+        child: Padding(
+          padding: EdgeInsets.fromLTRB(20, topInset, 20, bottomInset),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            mainAxisSize: MainAxisSize.max,
+            children: [
+              // Hero (16:9, slightly shorter than the original 16:10) with the
+              // save heart overlaid top-right. Heart is in the parent Stack
+              // (not inside _ParallaxHero) so it stays still while the image
+              // moves with the swipe — much less visually noisy.
+              Stack(
+                children: [
+                  _ParallaxHero(
+                    article: article,
+                    cat: cat,
+                    index: index,
+                    controller: pageController,
+                  ),
+                  Positioned(
+                    top: 10,
+                    right: 10,
+                    child: _OverlaySaveButton(
+                      isSaved: article.isSaved,
+                      onTap: () {
+                        HapticFeedback.lightImpact();
+                        onSaveToggle();
+                      },
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              _MetaRow(article: article, cat: cat, colors: colors),
+              const SizedBox(height: 10),
+              // Title capped to 2 lines so the summary card always gets
+              // the lion's share of the remaining vertical space.
+              Text(
+                article.title,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: GoogleFonts.plusJakartaSans(
+                  fontSize: 22,
+                  fontWeight: FontWeight.w800,
+                  height: 1.22,
+                  letterSpacing: -0.4,
+                  color: colors.text,
+                ),
+              ),
+              const SizedBox(height: 14),
+              Flexible(
+                child: _SummaryBlock(
+                  state: state,
+                  colors: colors,
+                  cat: cat,
+                  onRetry: onRetry,
+                ),
+              ),
+              const SizedBox(height: 12),
+              // Discovery hint — replaces the old "Read full article"
+              // button. Subtle so it doesn't compete with the summary, but
+              // explicit enough that users learn the tap affordance.
+              _TapToOpenHint(colors: colors, cat: cat),
+            ],
           ),
-          const SizedBox(height: 14),
-          _MetaRow(article: article, cat: cat, colors: colors),
-          const SizedBox(height: 10),
-          Text(
-            article.title,
-            maxLines: 3,
-            overflow: TextOverflow.ellipsis,
-            style: GoogleFonts.plusJakartaSans(
-              fontSize: 22,
-              fontWeight: FontWeight.w800,
-              height: 1.25,
-              letterSpacing: -0.4,
-              color: colors.text,
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// "Tap to open full article" hint — sits where the old Read Full button
+// did, but as a passive label. The whole card is the tap target now.
+// ─────────────────────────────────────────────────────────────────────────
+
+class _TapToOpenHint extends StatelessWidget {
+  const _TapToOpenHint({required this.colors, required this.cat});
+
+  final AppColors colors;
+  final Color cat;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+        decoration: BoxDecoration(
+          color: cat.withValues(alpha: 0.10),
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(color: cat.withValues(alpha: 0.22)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(LucideIcons.bookOpen, size: 12, color: cat),
+            const SizedBox(width: 7),
+            Text(
+              'Tap anywhere to read full article',
+              style: GoogleFonts.plusJakartaSans(
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+                color: cat,
+                letterSpacing: 0.2,
+              ),
             ),
-          ),
-          const SizedBox(height: 16),
-          Flexible(
-            child: _SummaryBlock(
-              state: state,
-              colors: colors,
-              cat: cat,
-              onRetry: onRetry,
-            ),
-          ),
-          const SizedBox(height: 18),
-          _ActionsRow(
-            article: article,
-            colors: colors,
-            cat: cat,
-            onSaveToggle: onSaveToggle,
-            onReadFull: onReadFull,
-          ),
-          const SizedBox(height: 10),
-          Text(
-            'Article ${index + 1} of $total',
-            textAlign: TextAlign.center,
-            style: GoogleFonts.plusJakartaSans(
-              fontSize: 11,
-              color: colors.text5,
-              letterSpacing: 0.4,
-            ),
-          ),
-        ],
+            const SizedBox(width: 5),
+            Icon(LucideIcons.arrowRight, size: 11, color: cat),
+          ],
+        ),
       ),
     );
   }
@@ -721,8 +828,10 @@ class _HeroImage extends StatelessWidget {
   Widget build(BuildContext context) {
     return ClipRRect(
       borderRadius: BorderRadius.circular(20),
+      // 16:9 instead of 16:10 — saves ~25 px of vertical space on a typical
+      // 372 px-wide content area, redirected to the now-richer summary card.
       child: AspectRatio(
-        aspectRatio: 16 / 10,
+        aspectRatio: 16 / 9,
         child: Stack(
           fit: StackFit.expand,
           children: [
@@ -917,16 +1026,27 @@ class _ReadySummary extends StatelessWidget {
         ),
       ),
       child: Container(
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+        padding: const EdgeInsets.fromLTRB(18, 16, 18, 18),
         decoration: BoxDecoration(
           color: colors.bg2,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: cat.withValues(alpha: 0.18)),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: cat.withValues(alpha: 0.20)),
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              colors.bg2,
+              Color.alphaBlend(
+                cat.withValues(alpha: 0.04),
+                colors.bg2,
+              ),
+            ],
+          ),
           boxShadow: [
             BoxShadow(
-              color: cat.withValues(alpha: 0.06),
-              blurRadius: 28,
-              offset: const Offset(0, 8),
+              color: cat.withValues(alpha: 0.08),
+              blurRadius: 30,
+              offset: const Offset(0, 10),
             ),
           ],
         ),
@@ -934,9 +1054,11 @@ class _ReadySummary extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
+            // Section label with a tiny accent line — gives the card a
+            // magazine-style "lede" look without taking much space.
             Row(
               children: [
-                Icon(LucideIcons.sparkles, size: 12, color: cat),
+                Icon(LucideIcons.sparkles, size: 13, color: cat),
                 const SizedBox(width: 6),
                 Text(
                   'QUICK SUMMARY',
@@ -944,25 +1066,42 @@ class _ReadySummary extends StatelessWidget {
                     fontSize: 10,
                     fontWeight: FontWeight.w800,
                     color: cat,
-                    letterSpacing: 1.4,
+                    letterSpacing: 1.6,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Container(
+                    height: 1,
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: [
+                          cat.withValues(alpha: 0.32),
+                          cat.withValues(alpha: 0.0),
+                        ],
+                      ),
+                    ),
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 10),
-            // [Flexible] + maxLines guards against the rare case where the
-            // model returns >45 words. Without these caps, a wordy summary
-            // would push the Done pill below the screen on small phones.
+            const SizedBox(height: 12),
+            // [Flexible] + generous maxLines = the new long-form prompt
+            // (4-6 sentences, ~90 words) renders fully on most phones; on
+            // tiny screens the bottom fades and the user taps to open the
+            // full article. 16 px / 1.6 line-height is the sweet spot for
+            // long-form reading on mobile (per Material 3 guidelines).
             Flexible(
               child: Text(
                 summary,
-                maxLines: 12,
+                maxLines: 18,
                 overflow: TextOverflow.fade,
                 style: GoogleFonts.plusJakartaSans(
-                  fontSize: 15,
-                  height: 1.55,
+                  fontSize: 16,
+                  height: 1.6,
                   color: colors.text,
                   letterSpacing: -0.1,
+                  fontWeight: FontWeight.w500,
                 ),
               ),
             ),
@@ -1159,88 +1298,24 @@ class _SkeletonSummaryState extends State<_SkeletonSummary>
   }
 }
 
-class _ActionsRow extends StatelessWidget {
-  const _ActionsRow({
-    required this.article,
-    required this.colors,
-    required this.cat,
-    required this.onSaveToggle,
-    required this.onReadFull,
-  });
+// ─────────────────────────────────────────────────────────────────────────
+// Overlay save button — sits on top of the hero image (Apple-News style).
+// Uses [HitTestBehavior.opaque] so its tap NEVER bubbles to the parent
+// InkWell that opens the full article. Glassmorphism background ensures
+// the icon stays legible regardless of the underlying image.
+// ─────────────────────────────────────────────────────────────────────────
 
-  final Article article;
-  final AppColors colors;
-  final Color cat;
-  final VoidCallback onSaveToggle;
-  final VoidCallback onReadFull;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        _SaveButton(
-          isSaved: article.isSaved,
-          colors: colors,
-          onTap: () {
-            HapticFeedback.lightImpact();
-            onSaveToggle();
-          },
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: Material(
-            color: Colors.transparent,
-            borderRadius: BorderRadius.circular(14),
-            child: InkWell(
-              onTap: onReadFull,
-              borderRadius: BorderRadius.circular(14),
-              child: Ink(
-                height: 48,
-                decoration: BoxDecoration(
-                  color: colors.bg2,
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: cat.withValues(alpha: 0.32)),
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(LucideIcons.bookOpen, size: 16, color: cat),
-                    const SizedBox(width: 8),
-                    Text(
-                      'Read full article',
-                      style: GoogleFonts.plusJakartaSans(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w700,
-                        color: cat,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _SaveButton extends StatefulWidget {
-  const _SaveButton({
-    required this.isSaved,
-    required this.colors,
-    required this.onTap,
-  });
+class _OverlaySaveButton extends StatefulWidget {
+  const _OverlaySaveButton({required this.isSaved, required this.onTap});
 
   final bool isSaved;
-  final AppColors colors;
   final VoidCallback onTap;
 
   @override
-  State<_SaveButton> createState() => _SaveButtonState();
+  State<_OverlaySaveButton> createState() => _OverlaySaveButtonState();
 }
 
-class _SaveButtonState extends State<_SaveButton>
+class _OverlaySaveButtonState extends State<_OverlaySaveButton>
     with SingleTickerProviderStateMixin {
   late final AnimationController _ctrl;
 
@@ -1250,7 +1325,7 @@ class _SaveButtonState extends State<_SaveButton>
     _ctrl = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 220),
-      lowerBound: 0.92,
+      lowerBound: 0.88,
       upperBound: 1.0,
       value: 1.0,
     );
@@ -1266,8 +1341,12 @@ class _SaveButtonState extends State<_SaveButton>
   Widget build(BuildContext context) {
     final saved = widget.isSaved;
     return GestureDetector(
+      // Opaque hit-testing absorbs every tap inside this button so it
+      // never reaches the card's [InkWell.onTap] that would otherwise
+      // open the full article.
+      behavior: HitTestBehavior.opaque,
       onTap: () async {
-        await _ctrl.animateTo(0.92,
+        await _ctrl.animateTo(0.88,
             duration: const Duration(milliseconds: 90));
         await _ctrl.animateTo(1.0,
             duration: const Duration(milliseconds: 130));
@@ -1275,37 +1354,44 @@ class _SaveButtonState extends State<_SaveButton>
       },
       child: AnimatedBuilder(
         animation: _ctrl,
-        builder: (_, child) => Transform.scale(scale: _ctrl.value, child: child),
-        child: Container(
-          width: 48,
-          height: 48,
-          decoration: BoxDecoration(
-            color: saved
-                ? const Color(0x33EF4444)
-                : widget.colors.bg2,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(
-              color: saved
-                  ? const Color(0xFFEF4444).withValues(alpha: 0.55)
-                  : widget.colors.border,
+        builder: (_, child) =>
+            Transform.scale(scale: _ctrl.value, child: child),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(14),
+          child: BackdropFilter(
+            filter: ui.ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 220),
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: saved
+                    ? const Color(0xCCEF4444)
+                    : Colors.black.withValues(alpha: 0.32),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                  color: saved
+                      ? const Color(0xFFEF4444).withValues(alpha: 0.85)
+                      : Colors.white.withValues(alpha: 0.18),
+                  width: 1.2,
+                ),
+                boxShadow: saved
+                    ? [
+                        BoxShadow(
+                          color: const Color(0xFFEF4444)
+                              .withValues(alpha: 0.40),
+                          blurRadius: 16,
+                        ),
+                      ]
+                    : null,
+              ),
+              alignment: Alignment.center,
+              child: const Icon(
+                LucideIcons.heart,
+                size: 18,
+                color: Colors.white,
+              ),
             ),
-            boxShadow: saved
-                ? [
-                    BoxShadow(
-                      color:
-                          const Color(0xFFEF4444).withValues(alpha: 0.32),
-                      blurRadius: 14,
-                    ),
-                  ]
-                : null,
-          ),
-          alignment: Alignment.center,
-          child: Icon(
-            saved ? LucideIcons.heart : LucideIcons.heart,
-            size: 18,
-            color: saved
-                ? const Color(0xFFEF4444)
-                : widget.colors.text2,
           ),
         ),
       ),

@@ -83,11 +83,13 @@ void main() async {
 
       await AuthService.instance.init();
       initializeRouter();
-      // Initialise the foreground-task subsystem early so the News summarize
-      // session can promote itself to a foreground service the first time
-      // the user taps the FAB. Safe to call before the engine renders;
+      // Initialise the shared AI-background foreground-task subsystem
+      // early so any long-running AI feature (news summarize, online
+      // search, URL summarize, follow-up Q&A, expense OCR + smart-parse)
+      // can promote itself to a foreground service the first time it
+      // needs to. Safe to call before the engine renders;
       // FlutterForegroundTask.init just stashes options.
-      initNewsSummarizeForegroundTask();
+      initBackgroundForegroundTask();
       TLog.d('Init', 'Auth + Router + ForegroundTask ready');
 
       runApp(

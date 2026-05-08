@@ -16,6 +16,8 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../../core/di/injection.dart';
 import '../../../core/network/api_client.dart';
 import '../../../core/network/api_endpoints.dart';
+import '../../../core/platform/platform_capabilities.dart';
+import '../../../core/services/background_task_coordinator.dart';
 import '../../../core/services/telegram_logger.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../data/local/database/app_database.dart';
@@ -231,6 +233,28 @@ class ArticleFollowUpStore with WidgetsBindingObserver {
     } catch (_) {}
   }
 
+  // ── Foreground-service slot ──────────────────────────────────────────
+  static String _coordSlotId(String articleId) =>
+      'article_followup:${articleId.hashCode.toUnsigned(32)}';
+
+  void _acquireCoordSlot(String articleId, String articleTitle) {
+    if (!PlatformCapabilities.canUseForegroundTask) return;
+    final preview = articleTitle.length > 40
+        ? '${articleTitle.substring(0, 37)}\u2026'
+        : articleTitle;
+    unawaited(BackgroundTaskCoordinator.instance.acquire(
+      _coordSlotId(articleId),
+      label: '\uD83E\uDD16 Answering: $preview',
+    ));
+  }
+
+  void _releaseCoordSlot(String articleId) {
+    if (!PlatformCapabilities.canUseForegroundTask) return;
+    unawaited(
+      BackgroundTaskCoordinator.instance.release(_coordSlotId(articleId)),
+    );
+  }
+
   void init(AppDatabase db, ApiClient api) {
     _db = db;
     _api = api;
@@ -264,21 +288,33 @@ class ArticleFollowUpStore with WidgetsBindingObserver {
     }
 
     if (_retryQueue.isEmpty) return;
-    final entries = Map.of(_retryQueue);
-    _retryQueue.clear();
+    // Snapshot the keys but DO NOT clear the queue yet. Leaving entries
+    // in place across the 1500ms reconnect delay keeps the in-flight
+    // cancel catch's `keepPending` check correct, so the FG-service slot
+    // is not released during the gap.
+    final pendingKeys = _retryQueue.keys.toList();
 
     // Let the OS fully restore network connectivity before retrying.
     Future<void>.delayed(const Duration(milliseconds: 1500), () {
-      for (final e in entries.entries) {
-        final articleId = e.key;
-        final r = e.value;
+      for (final articleId in pendingKeys) {
+        final r = _retryQueue.remove(articleId);
+        if (r == null) continue; // cancelled / replaced while delayed
         TLog.d('ChatStore', 'Resumed — retrying follow-up for $articleId');
         r.aiMsg
           ..text = ''
           ..isLoading = true
           ..isError = false;
         _pendingAiMsgs[articleId] = r.aiMsg;
+        // Wire a fresh cancel-token so the retry registers as the active
+        // execution. The finally block in [_executeRequest] uses identity
+        // on this token to decide whether it is the currently-owning run
+        // before releasing the FG slot.
+        final token = CancelToken();
+        _cancelTokens[articleId] = token;
         _listeners[articleId]?.call();
+        // Re-acquire FG-service slot so the resume-retry is also
+        // Doze-protected.
+        _acquireCoordSlot(articleId, r.articleTitle);
         unawaited(_executeRequest(
           articleId: articleId,
           articleTitle: r.articleTitle,
@@ -294,6 +330,7 @@ class ArticleFollowUpStore with WidgetsBindingObserver {
           xgrokLiteModel: r.xgrokLiteModel,
           xgrokDeepModel: r.xgrokDeepModel,
           xgrokThinkingModel: r.xgrokThinkingModel,
+          cancelToken: token,
           isRetry: true,
         ));
       }
@@ -461,6 +498,11 @@ class ArticleFollowUpStore with WidgetsBindingObserver {
     final token = CancelToken();
     _cancelTokens[articleId] = token;
 
+    // Promote to a foreground service so the AI request survives
+    // screen-off / app minimisation without the OS killing the HTTP
+    // socket.
+    _acquireCoordSlot(articleId, articleTitle);
+
     unawaited(_executeRequest(
       articleId: articleId,
       articleTitle: articleTitle,
@@ -486,6 +528,7 @@ class ArticleFollowUpStore with WidgetsBindingObserver {
     _cancelTokens[articleId]?.cancel('User cancelled');
     _cancelTokens.remove(articleId);
     _retryQueue.remove(articleId);
+    _releaseCoordSlot(articleId);
 
     final list = _cache[articleId];
     if (list == null || list.isEmpty) {
@@ -729,17 +772,33 @@ class ArticleFollowUpStore with WidgetsBindingObserver {
           ..isError = true;
       }
     } finally {
+      // Only finalise state if THIS execution is still the active one.
+      // A concurrent sendQuestion (rapid resend) or resume-retry replaces
+      // `_cancelTokens[articleId]` with a newer token; in that case the
+      // newer execution owns the pending message + slot and we must
+      // leave them alone, otherwise the slot would be released
+      // mid-flight.
+      final isStillActive = cancelToken != null &&
+          identical(_cancelTokens[articleId], cancelToken);
       final title = _pendingTitles[articleId];
-      if (!keepPending) {
+
+      if (isStillActive && !keepPending) {
         _pendingAiMsgs.remove(articleId);
         _pendingTitles.remove(articleId);
+        _cancelTokens.remove(articleId);
+        // Drop the FG-service slot once we have a final answer (success
+        // or permanent error). When [keepPending] is true we retain the
+        // slot so the retry-on-resume path runs Doze-protected.
+        _releaseCoordSlot(articleId);
       }
-      _listeners[articleId]?.call();
+      if (isStillActive) {
+        _listeners[articleId]?.call();
 
-      if (_appInBackground && !keepPending) {
-        unawaited(_cancelProcessingNotification());
-        if (!aiMsg.isError && aiMsg.text.isNotEmpty) {
-          unawaited(_showCompletionNotification(title ?? 'your article'));
+        if (_appInBackground && !keepPending) {
+          unawaited(_cancelProcessingNotification());
+          if (!aiMsg.isError && aiMsg.text.isNotEmpty) {
+            unawaited(_showCompletionNotification(title ?? 'your article'));
+          }
         }
       }
     }
@@ -793,6 +852,7 @@ class ArticleFollowUpStore with WidgetsBindingObserver {
     _pendingAiMsgs.remove(articleId);
     _pendingTitles.remove(articleId);
     _retryQueue.remove(articleId);
+    _releaseCoordSlot(articleId);
 
     try {
       final db = _db;
@@ -815,6 +875,7 @@ class ArticleFollowUpStore with WidgetsBindingObserver {
   }
 
   void clearAll() {
+    final pendingIds = _pendingAiMsgs.keys.toList();
     for (final t in _cancelTokens.values) {
       t.cancel('Cleared');
     }
@@ -823,6 +884,9 @@ class ArticleFollowUpStore with WidgetsBindingObserver {
     _summaries.clear();
     _summarizingArticleIds.clear();
     _pendingTitles.clear();
+    for (final id in pendingIds) {
+      _releaseCoordSlot(id);
+    }
   }
 
   // ── Conversation summaries ──────────────────────────────────────────────
