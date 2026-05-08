@@ -447,16 +447,22 @@ class _NewsScreenState extends ConsumerState<NewsScreen>
                           unfilteredFeed: unfilteredFeed,
                           filteredFeed: feed,
                         ),
-                        // The pill showing "Summary running in background"
-                        // is driven by the singleton store and rebuilt via
-                        // [_summarizeListener] above. We surface BOTH the
-                        // in-flight state AND the just-completed state so
-                        // the user always has a one-tap path back to the
-                        // reader after the OS notification disappears.
-                        activeSummaryProgress:
-                            NewsSummarizeStore.instance.hasReadableSession
-                                ? NewsSummarizeStore.instance.progress
-                                : null,
+                        // The pill showing "Catch-up summary ready" is
+                        // driven by the singleton store and rebuilt via
+                        // [_summarizeListener] above. We use the
+                        // RELEVANCE-aware check ([hasRelevantSession]) so
+                        // the pill auto-hides if the user has marked all
+                        // of the session's articles as read by some other
+                        // path (article-detail modal mark-read, multi-
+                        // device sync, etc.) — without that check, the
+                        // pill would stay even when "No articles in this
+                        // category" is showing below it.
+                        activeSummaryProgress: NewsSummarizeStore.instance
+                                .hasRelevantSession({
+                          for (final a in unfilteredFeed) a.id,
+                        })
+                            ? NewsSummarizeStore.instance.progress
+                            : null,
                         onResumeSummary: _reopenReaderForActiveSession,
                       ),
                       _SavedTab(

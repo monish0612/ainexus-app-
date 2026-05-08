@@ -330,21 +330,66 @@ class NewsSummarizeStore extends ChangeNotifier with WidgetsBindingObserver {
   /// the For You tab.
   bool get hasReadableSession => _articles.isNotEmpty;
 
-  /// Clears the "completed but not yet reopened" sticky state. Called by
-  /// the reader's "Done" handler so the pill disappears once the user has
-  /// actually consumed the catch-up summary. Does not touch the in-DB
-  /// summary cache — those summaries remain available on individual
-  /// articles forever.
+  /// Defensive variant of [hasReadableSession] used by the For You tab to
+  /// suppress a stale pill when the user has marked the session's articles
+  /// as read by some other path (e.g. opening the article-detail modal,
+  /// a multi-device sync, manual swipe-to-archive).
+  ///
+  /// Returns `true` only if at least one article currently in the cached
+  /// session is still present in [visibleUnreadIds] — i.e. the user has
+  /// something meaningful to resume reading.
+  bool hasRelevantSession(Set<String> visibleUnreadIds) {
+    if (_articles.isEmpty) return false;
+    for (final a in _articles) {
+      if (visibleUnreadIds.contains(a.id)) return true;
+    }
+    return false;
+  }
+
+  /// Clears the session UI state — the "Catch-up summary ready" pill on
+  /// the For You tab disappears immediately. Called by the reader's
+  /// "Done" handler when the user has explicitly finished reviewing.
+  ///
+  /// Behaviour by session state:
+  ///   • Already finished → just clear the cached UI rows (cheap).
+  ///   • Still in flight  → ALSO cancel any in-flight batches, drain the
+  ///     retry queue, stop the foreground service. The user said "Done";
+  ///     they don't want background work continuing. Summaries that
+  ///     already landed in the DB during earlier batches are preserved
+  ///     forever (per-article `summaryShort` column), so re-summarizing
+  ///     the same articles later picks them up instantly from cache.
+  ///
+  /// Bug history: previously this method early-returned when the session
+  /// was active, which left `_articles` populated → the pill stayed
+  /// visible on For You even after the user tapped Done and read every
+  /// summary. Closing the loop here makes "Done" mean "Done".
   void dismissCompletedSession() {
-    if (_sessionActive) return; // Don't accidentally cancel live work.
     if (_articles.isEmpty) return;
+    final wasActive = _sessionActive;
     final n = _articles.length;
+    final pending = _retryQueue.length;
+
+    if (wasActive) {
+      _cancelAllActive('Session dismissed by user via Done');
+      _retryQueue.clear();
+      _activeCount = 0;
+      _sessionActive = false;
+    }
+
     _articles.clear();
     _state.clear();
     _sessionKey = null;
     _pendingReaderReopen = false;
     notifyListeners();
-    TLog.d('NewsSummarize', 'completed session dismissed (cleared $n cached UI rows)');
+
+    if (wasActive) {
+      unawaited(_stopForegroundService());
+    }
+
+    TLog.i(
+      'NewsSummarize',
+      'session dismissed by user (wasActive=$wasActive articles=$n queuedBatches=$pending)',
+    );
   }
 
   /// Cancels all in-flight batches and clears session state. The persisted

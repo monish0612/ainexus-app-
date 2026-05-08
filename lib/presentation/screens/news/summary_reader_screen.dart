@@ -97,17 +97,14 @@ class _SummaryReaderScreenState extends ConsumerState<SummaryReaderScreen> {
       }
     }
 
-    // Done = "I'm finished reviewing." Two cases:
-    //   1. Session has fully finished → drop the sticky pill so the For
-    //      You tab returns to its normal layout.
-    //   2. Session still has in-flight batches → keep them running; their
-    //      results are cached to the DB and the user can re-enter the
-    //      reader later via the pill.
-    if (!_store.hasActiveSession) {
-      _store.dismissCompletedSession();
-    } else {
-      _store.detachReader();
-    }
+    // Done = "I'm finished reviewing." We ALWAYS dismiss the session UI
+    // here so the For You tab's "Catch-up summary ready" pill disappears
+    // immediately. [dismissCompletedSession] also cancels any in-flight
+    // batches and stops the foreground service if the session was still
+    // running (rare: user sped through faster than batches completed).
+    // Articles whose summaries already landed in the DB before Done are
+    // preserved forever, so re-summarizing them later is instant.
+    _store.dismissCompletedSession();
     HapticFeedback.mediumImpact();
 
     if (!mounted) return;
@@ -200,17 +197,22 @@ class _SummaryReaderScreenState extends ConsumerState<SummaryReaderScreen> {
           // ── Body: vertical PageView ─────────────────────────────────
           //
           // Behaviour notes:
-          //   • [BouncingScrollPhysics] makes overscroll at the first/last
-          //     card feel iOS-native (rubber-banding) which reads as
-          //     "buttery" on both platforms.
+          //   • Each card is now internally scrollable (see [_SummaryCard]
+          //     for the rationale — comprehensive ~150-180 word summaries
+          //     don't fit on a single phone screen). The card claims all
+          //     vertical drags within its body, so the PageView's NATIVE
+          //     swipe-to-page gesture is unused. Page navigation happens
+          //     instead via OVERSCROLL: pulling past the top or bottom
+          //     edge of the card by ≥90 px programmatically calls
+          //     [PageController.nextPage] / [previousPage]. This is the
+          //     Apple-News pattern and feels native on both platforms.
+          //   • [BouncingScrollPhysics] on this PageView is largely
+          //     vestigial (inner scroll wins drags) but kept for the
+          //     programmatic snap animation feel.
           //   • [pageSnapping] is true by default — we name it explicitly
           //     so future maintainers don't accidentally turn it off.
           //   • Light haptic on each page change gives a tactile "tick"
-          //     that masks the 300ms snap animation latency.
-          //   • The inner card layout deliberately avoids any nested
-          //     Scrollable on the vertical axis (was a SingleChildScrollView
-          //     before — that stole every drag from the PageView and pinned
-          //     the user to page 1). See [_SummaryCard.build] for details.
+          //     that masks the 320 ms snap animation latency.
           Positioned.fill(
             child: PageView.builder(
               controller: _pageCtrl,
@@ -613,7 +615,7 @@ class _DoneButton extends StatelessWidget {
 // Summary card
 // ─────────────────────────────────────────────────────────────────────────
 
-class _SummaryCard extends StatelessWidget {
+class _SummaryCard extends StatefulWidget {
   const _SummaryCard({
     required this.article,
     required this.state,
@@ -637,92 +639,166 @@ class _SummaryCard extends StatelessWidget {
   final VoidCallback onRetry;
 
   @override
+  State<_SummaryCard> createState() => _SummaryCardState();
+}
+
+class _SummaryCardState extends State<_SummaryCard> {
+  late final ScrollController _scrollCtrl;
+
+  /// Accumulated overscroll in logical pixels for the current gesture.
+  /// Positive = pulling up past bottom (next-page intent).
+  /// Negative = pulling down past top (previous-page intent).
+  /// Reset on [ScrollEndNotification] so each fling is independent.
+  double _overscrollAccum = 0;
+
+  /// Guards against firing nextPage / previousPage twice for the same
+  /// gesture if the model still emits overscroll events while the page
+  /// snap animation is running.
+  bool _pageChangeInFlight = false;
+
+  /// Pixels of accumulated overscroll required to trigger a page change.
+  /// 90 px hits the iOS rubber-band sweet spot: an accidental bounce at
+  /// the edge stays a bounce, while a deliberate "swipe up to next" fully
+  /// snaps over.
+  static const double _kPageOverscrollThreshold = 90;
+
+  @override
+  void initState() {
+    super.initState();
+    _scrollCtrl = ScrollController();
+  }
+
+  @override
+  void dispose() {
+    _scrollCtrl.dispose();
+    super.dispose();
+  }
+
+  bool _onScrollNotification(ScrollNotification n) {
+    if (n is OverscrollNotification) {
+      _overscrollAccum += n.overscroll;
+      if (_pageChangeInFlight) return false;
+
+      if (_overscrollAccum >= _kPageOverscrollThreshold) {
+        _pageChangeInFlight = true;
+        _overscrollAccum = 0;
+        widget.pageController.nextPage(
+          duration: const Duration(milliseconds: 320),
+          curve: Curves.easeOutCubic,
+        );
+      } else if (_overscrollAccum <= -_kPageOverscrollThreshold) {
+        _pageChangeInFlight = true;
+        _overscrollAccum = 0;
+        widget.pageController.previousPage(
+          duration: const Duration(milliseconds: 320),
+          curve: Curves.easeOutCubic,
+        );
+      }
+    } else if (n is ScrollEndNotification) {
+      _overscrollAccum = 0;
+      _pageChangeInFlight = false;
+    }
+    return false;
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final cat = newsCategoryColor(article.category);
+    final cat = newsCategoryColor(widget.article.category);
     // Reserve top space for the frosted header and bottom for the Done pill.
     final topInset = MediaQuery.viewPaddingOf(context).top + 92;
     final bottomInset =
         MediaQuery.viewPaddingOf(context).bottom + 16 + 56 + 16;
 
-    // Tap-anywhere-to-open: the entire card body is wrapped in
-    // [Material] + [InkWell] so any tap on the hero / title / summary
-    // fades a subtle category-coloured ripple and opens the full article.
-    // The vertical [PageView] swipe still works because [InkWell] only
-    // claims tap gestures — drag gestures bubble up to the page view.
-    // The save heart overlaid on the hero uses its own [GestureDetector]
-    // with [HitTestBehavior.opaque] so its taps never reach the InkWell.
-    //
-    // No nested vertical scrollable here — that previously stole drags
-    // from the parent PageView and pinned the user to page 1.
+    // Card layout strategy (rev. 3):
+    //   • The entire card body is now a single vertically-scrollable
+    //     [SingleChildScrollView]. This lets the new ~150-180 word
+    //     comprehensive summaries render in full — the user scrolls
+    //     within the card to read everything.
+    //   • Page navigation between articles still works: pulling past
+    //     the top OR bottom edge accumulates overscroll, and at 90 px
+    //     the parent [PageView] snaps to the previous / next card.
+    //     This is the Apple News pattern — feels native on both
+    //     platforms thanks to [BouncingScrollPhysics].
+    //   • Tap-anywhere-to-open: the card body is wrapped in
+    //     [Material] + [InkWell]; tap fires [onReadFull]. Vertical drag
+    //     is claimed by the inner scroll view and never fires onTap.
+    //   • The save heart uses its own [GestureDetector] with
+    //     [HitTestBehavior.opaque] so its taps never reach the InkWell.
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        onTap: onReadFull,
-        splashColor: cat.withValues(alpha: 0.08),
-        highlightColor: cat.withValues(alpha: 0.04),
-        child: Padding(
-          padding: EdgeInsets.fromLTRB(20, topInset, 20, bottomInset),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            mainAxisSize: MainAxisSize.max,
-            children: [
-              // Hero (16:9, slightly shorter than the original 16:10) with the
-              // save heart overlaid top-right. Heart is in the parent Stack
-              // (not inside _ParallaxHero) so it stays still while the image
-              // moves with the swipe — much less visually noisy.
-              Stack(
-                children: [
-                  _ParallaxHero(
-                    article: article,
-                    cat: cat,
-                    index: index,
-                    controller: pageController,
-                  ),
-                  Positioned(
-                    top: 10,
-                    right: 10,
-                    child: _OverlaySaveButton(
-                      isSaved: article.isSaved,
-                      onTap: () {
-                        HapticFeedback.lightImpact();
-                        onSaveToggle();
-                      },
+        onTap: widget.onReadFull,
+        splashColor: cat.withValues(alpha: 0.06),
+        highlightColor: cat.withValues(alpha: 0.03),
+        child: NotificationListener<ScrollNotification>(
+          onNotification: _onScrollNotification,
+          child: SingleChildScrollView(
+            controller: _scrollCtrl,
+            physics: const BouncingScrollPhysics(
+              parent: AlwaysScrollableScrollPhysics(),
+            ),
+            padding: EdgeInsets.fromLTRB(20, topInset, 20, bottomInset),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // Hero (16:9) with the save heart overlaid top-right.
+                Stack(
+                  children: [
+                    _ParallaxHero(
+                      article: widget.article,
+                      cat: cat,
+                      index: widget.index,
+                      controller: widget.pageController,
                     ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 14),
-              _MetaRow(article: article, cat: cat, colors: colors),
-              const SizedBox(height: 10),
-              // Title capped to 2 lines so the summary card always gets
-              // the lion's share of the remaining vertical space.
-              Text(
-                article.title,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: GoogleFonts.plusJakartaSans(
-                  fontSize: 22,
-                  fontWeight: FontWeight.w800,
-                  height: 1.22,
-                  letterSpacing: -0.4,
-                  color: colors.text,
+                    Positioned(
+                      top: 10,
+                      right: 10,
+                      child: _OverlaySaveButton(
+                        isSaved: widget.article.isSaved,
+                        onTap: () {
+                          HapticFeedback.lightImpact();
+                          widget.onSaveToggle();
+                        },
+                      ),
+                    ),
+                  ],
                 ),
-              ),
-              const SizedBox(height: 14),
-              Flexible(
-                child: _SummaryBlock(
-                  state: state,
-                  colors: colors,
+                const SizedBox(height: 14),
+                _MetaRow(
+                  article: widget.article,
                   cat: cat,
-                  onRetry: onRetry,
+                  colors: widget.colors,
                 ),
-              ),
-              const SizedBox(height: 12),
-              // Discovery hint — replaces the old "Read full article"
-              // button. Subtle so it doesn't compete with the summary, but
-              // explicit enough that users learn the tap affordance.
-              _TapToOpenHint(colors: colors, cat: cat),
-            ],
+                const SizedBox(height: 10),
+                // Title can take 3 lines now that the card scrolls — no
+                // need to be aggressive about saving vertical space.
+                Text(
+                  widget.article.title,
+                  maxLines: 3,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.plusJakartaSans(
+                    fontSize: 22,
+                    fontWeight: FontWeight.w800,
+                    height: 1.22,
+                    letterSpacing: -0.4,
+                    color: widget.colors.text,
+                  ),
+                ),
+                const SizedBox(height: 14),
+                _SummaryBlock(
+                  state: widget.state,
+                  colors: widget.colors,
+                  cat: cat,
+                  onRetry: widget.onRetry,
+                ),
+                const SizedBox(height: 12),
+                // Discovery hint — the entire card is the tap target.
+                _TapToOpenHint(colors: widget.colors, cat: cat),
+                // Bottom breathing room so the last line of the summary
+                // never sits flush against the Done pill.
+                const SizedBox(height: 8),
+              ],
+            ),
           ),
         ),
       ),
@@ -1086,23 +1162,20 @@ class _ReadySummary extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 12),
-            // [Flexible] + generous maxLines = the new long-form prompt
-            // (4-6 sentences, ~90 words) renders fully on most phones; on
-            // tiny screens the bottom fades and the user taps to open the
-            // full article. 16 px / 1.6 line-height is the sweet spot for
-            // long-form reading on mobile (per Material 3 guidelines).
-            Flexible(
-              child: Text(
-                summary,
-                maxLines: 18,
-                overflow: TextOverflow.fade,
-                style: GoogleFonts.plusJakartaSans(
-                  fontSize: 16,
-                  height: 1.6,
-                  color: colors.text,
-                  letterSpacing: -0.1,
-                  fontWeight: FontWeight.w500,
-                ),
+            // No maxLines / Flexible cap any more — the parent
+            // [_SummaryCard] is now a [SingleChildScrollView], so the
+            // full ~150-180 word comprehensive summary always renders
+            // and the user scrolls to read the rest. 16 px / 1.6
+            // line-height is the long-form mobile-reading sweet spot
+            // (Material 3 guidelines).
+            Text(
+              summary,
+              style: GoogleFonts.plusJakartaSans(
+                fontSize: 16,
+                height: 1.6,
+                color: colors.text,
+                letterSpacing: -0.1,
+                fontWeight: FontWeight.w500,
               ),
             ),
           ],
