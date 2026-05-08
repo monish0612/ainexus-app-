@@ -76,7 +76,12 @@ class _AppShellState extends ConsumerState<AppShell>
     _notifSub = notificationPayloadStream.stream.listen((payload) {
       if (payload == 'expense_tab') {
         ref.read(currentTabProvider.notifier).state = 0;
-      } else if (payload == 'news_tab') {
+      } else if (payload == 'news_tab' || payload == 'news_summary') {
+        // 'news_summary' is the deep-link payload from the For You catch-up
+        // completion notification. Switching to the News tab is enough — the
+        // News screen has its own listener that re-opens the reader bound
+        // to the live session when it sees the payload bubble through the
+        // broadcast stream a second time (this listener does NOT consume it).
         ref.read(currentTabProvider.notifier).state = 1;
       } else if (payload == 'tutor_tab') {
         ref.read(currentTabProvider.notifier).state = 2;

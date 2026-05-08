@@ -1,17 +1,25 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:lucide_icons/lucide_icons.dart';
-import 'package:speech_to_text/speech_to_text.dart' as stt;
 
-import '../../core/services/telegram_logger.dart';
+import '../../core/services/hold_to_speak_service.dart';
 import '../../core/theme/app_colors.dart';
 
 /// Self-contained hold-to-speak mic button for follow-up chat inputs.
 ///
-/// Hold → records speech → release → replaces [controller] text with result.
-/// Uses [speech_to_text] with dictation mode and auto-restart on silence while
-/// held. Text is accumulated across engine auto-restarts so nothing is lost
-/// when Android's native silence detector fires.
+/// Hold → records speech → release → replaces [controller] text with the
+/// final transcript. All robustness lives in [HoldToSpeakController]
+/// (silence-recovery, restart accumulation, sound-level monitoring,
+/// permission handling, single-engine coordination).
+///
+/// This widget is a thin UI shell that:
+///   * pipes live partials into the parent [TextEditingController] for
+///     immediate visual feedback;
+///   * runs a pulse animation while the mic is hot;
+///   * scales the icon based on incoming audio level so the user can see
+///     that the mic is actually listening (the previous version gave no
+///     such feedback, leaving users to guess whether their words were
+///     being captured during pauses).
 class VoiceInputButton extends StatefulWidget {
   const VoiceInputButton({
     super.key,
@@ -31,7 +39,7 @@ class VoiceInputButton extends StatefulWidget {
   /// Disables the button (e.g. while sending).
   final bool disabled;
 
-  /// Tag for TLog messages.
+  /// Tag for log messages.
   final String tag;
 
   @override
@@ -40,31 +48,19 @@ class VoiceInputButton extends StatefulWidget {
 
 class _VoiceInputButtonState extends State<VoiceInputButton>
     with SingleTickerProviderStateMixin {
-  final stt.SpeechToText _speech = stt.SpeechToText();
-  bool _available = false;
-  bool _listening = false;
-  bool _holdActive = false;
-
-  /// Text recognised in previous listen sessions within the same hold gesture.
-  /// Android's speech recogniser fires silence-timeout after 1-3 s which kills
-  /// the session; we restart transparently but must keep what was already said.
-  String _accumulatedText = '';
-
-  /// Guards against overlapping restart attempts.
-  bool _restarting = false;
-
-  /// When true, `onResult` callbacks are ignored (stop/restart in progress).
-  bool _resultsGated = false;
-
-  static const _kRestartDelay = Duration(milliseconds: 350);
-  static const _kMaxRestartRetries = 3;
-
+  late final HoldToSpeakController _voice;
   late final AnimationController _pulseCtrl;
   late final Animation<double> _pulseAnim;
+
+  bool _wasListening = false;
+  String _lastShownText = '';
 
   @override
   void initState() {
     super.initState();
+    _voice = HoldToSpeakController(tag: widget.tag);
+    _voice.addListener(_onVoiceUpdate);
+
     _pulseCtrl = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 900),
@@ -72,202 +68,79 @@ class _VoiceInputButtonState extends State<VoiceInputButton>
     _pulseAnim = Tween<double>(begin: 1.0, end: 1.35).animate(
       CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeInOut),
     );
-    _initSpeech();
+
+    // Pre-warm the engine so the first press doesn't cold-start.
+    HoldToSpeakController.warmUp();
   }
 
   @override
   void dispose() {
-    _holdActive = false;
-    _resultsGated = true;
-    if (_listening) {
-      try {
-        _speech.stop();
-      } catch (e) {
-        TLog.w('VoiceInput', 'Failed to stop speech on dispose', error: e);
-      }
-    }
+    _voice.removeListener(_onVoiceUpdate);
+    _voice.dispose();
     _pulseCtrl.dispose();
     super.dispose();
   }
 
-  Future<void> _initSpeech() async {
-    try {
-      _available = await _speech.initialize(
-        onStatus: (status) {
-          if ((status == 'done' || status == 'notListening') && mounted) {
-            if (_holdActive) {
-              _restartSession();
-            } else {
-              _setListening(false);
-            }
-          }
-        },
-        onError: (error) {
-          TLog.w(widget.tag, 'Speech error: ${error.errorMsg} (permanent=${error.permanent})');
-          if (error.permanent && mounted) {
-            if (_holdActive) {
-              _restartSession();
-            } else {
-              _setListening(false);
-            }
-          }
-        },
+  void _onVoiceUpdate() {
+    if (!mounted) return;
+    final listening = _voice.isListening;
+    bool needsRebuild = false;
+
+    // Pipe live partials into the parent controller. We only write when the
+    // text actually changes to avoid spurious cursor jumps during typing.
+    final next = _voice.displayText;
+    if (next != _lastShownText) {
+      _lastShownText = next;
+      widget.controller.value = TextEditingValue(
+        text: next,
+        selection: TextSelection.collapsed(offset: next.length),
       );
-      TLog.d(widget.tag, 'Speech init: available=$_available');
-    } catch (e) {
-      TLog.e(widget.tag, 'Speech init failed', error: e);
-      _available = false;
+      needsRebuild = true;
     }
+
+    if (listening != _wasListening) {
+      _wasListening = listening;
+      widget.onListeningChanged?.call(listening);
+      if (listening) {
+        _pulseCtrl.repeat(reverse: true);
+      } else {
+        _pulseCtrl.stop();
+        _pulseCtrl.reset();
+      }
+      needsRebuild = true;
+    }
+
+    if (needsRebuild) setState(() {});
   }
 
-  void _setListening(bool value) {
-    if (_listening == value) return;
-    setState(() => _listening = value);
-    widget.onListeningChanged?.call(value);
-    if (value) {
-      _pulseCtrl.repeat(reverse: true);
-    } else {
-      _pulseCtrl.stop();
-      _pulseCtrl.reset();
-    }
+  Future<void> _onPointerDown() async {
+    if (widget.disabled || _voice.isListening) return;
+    widget.controller.clear();
+    _lastShownText = '';
+    await _voice.start();
   }
 
-  Future<void> _start() async {
-    if (_listening || widget.disabled) return;
-    if (!_available) {
-      TLog.w(widget.tag, 'Speech not available on device');
+  Future<void> _onPointerUp() async {
+    if (!_voice.isListening &&
+        _voice.status != HoldToSpeakStatus.stopping &&
+        _voice.status != HoldToSpeakStatus.initializing) {
       return;
     }
-
-    try {
-      _holdActive = true;
-      _accumulatedText = '';
-      _restarting = false;
-      widget.controller.clear();
-      _setListening(true);
-      TLog.i(widget.tag, 'Hold-to-speak started');
-      await _beginSession();
-    } catch (e) {
-      TLog.e(widget.tag, 'Failed to start voice', error: e);
-      _holdActive = false;
-      _setListening(false);
-    }
-  }
-
-  Future<void> _beginSession() async {
-    if (!_holdActive || !mounted) return;
-    _resultsGated = false;
-    try {
-      await _speech.listen(
-        onResult: (result) {
-          if (!mounted || _resultsGated) return;
-          final sessionWords = result.recognizedWords;
-          final combined = _accumulatedText.isEmpty
-              ? sessionWords
-              : '$_accumulatedText $sessionWords';
-          widget.controller.value = TextEditingValue(
-            text: combined,
-            selection: TextSelection.collapsed(offset: combined.length),
-          );
-        },
-        listenFor: const Duration(seconds: 120),
-        pauseFor: const Duration(seconds: 60),
-        listenOptions: stt.SpeechListenOptions(
-          listenMode: stt.ListenMode.dictation,
-          partialResults: true,
-          cancelOnError: false,
-          autoPunctuation: true,
-        ),
-      );
-    } catch (e) {
-      TLog.e(widget.tag, 'Listen session error', error: e);
-      if (_holdActive && mounted) {
-        _restartSession();
-      } else {
-        _holdActive = false;
-        _setListening(false);
-      }
-    }
-  }
-
-  Future<void> _restartSession() async {
-    if (!_holdActive || !mounted || _restarting) return;
-    _restarting = true;
-
-    for (var attempt = 1; attempt <= _kMaxRestartRetries; attempt++) {
-      if (!_holdActive || !mounted) break;
-      try {
-        // Gate results BEFORE stop so the final onResult from stop() is
-        // ignored — this prevents the doubled-text bug.
-        _resultsGated = true;
-        await _speech.stop();
-
-        // NOW safe to snapshot: no more callbacks can fire for the old session.
-        final currentText = widget.controller.text.trim();
-        if (currentText.isNotEmpty) {
-          _accumulatedText = currentText;
-        }
-
-        await Future<void>.delayed(_kRestartDelay);
-        if (!_holdActive || !mounted) break;
-        // _beginSession resets the gate to false before calling listen().
-        await _beginSession();
-        _restarting = false;
-        TLog.d(widget.tag, 'Session restarted (attempt $attempt, accumulated ${_accumulatedText.length} chars)');
-        return;
-      } catch (e) {
-        TLog.w(widget.tag, 'Restart attempt $attempt failed', error: e);
-        await Future<void>.delayed(Duration(milliseconds: 200 * attempt));
-      }
-    }
-
-    _restarting = false;
-    _resultsGated = false;
-    if (mounted && _holdActive) {
-      TLog.e(widget.tag, 'All restart attempts failed — stopping');
-      _holdActive = false;
-      _setListening(false);
-    }
-  }
-
-  Future<void> _stop() async {
-    if (!_listening) return;
-    _holdActive = false;
-
-    // Snapshot the final text BEFORE gating, then gate to block stale
-    // onResult callbacks that _speech.stop() may fire.
-    final textBeforeStop = widget.controller.text.trim();
-    _resultsGated = true;
-    _accumulatedText = '';
-    _restarting = false;
-
-    try {
-      await _speech.stop();
-    } catch (e) {
-      TLog.w(widget.tag, 'Stop speech error', error: e);
-    }
-
+    final result = await _voice.stop();
     if (!mounted) return;
-
-    // Restore the clean text in case a stale callback snuck through.
-    if (widget.controller.text.trim() != textBeforeStop) {
-      widget.controller.value = TextEditingValue(
-        text: textBeforeStop,
-        selection: TextSelection.collapsed(offset: textBeforeStop.length),
-      );
-    }
-
-    TLog.i(
-      widget.tag,
-      'Hold-to-speak ended → "${textBeforeStop.length > 60 ? '${textBeforeStop.substring(0, 60)}…' : textBeforeStop}"',
+    final text = result.transcript;
+    _lastShownText = text;
+    widget.controller.value = TextEditingValue(
+      text: text,
+      selection: TextSelection.collapsed(offset: text.length),
     );
-    _resultsGated = false;
-    _setListening(false);
   }
+
+  Future<void> _onPointerCancel() => _onPointerUp();
 
   @override
   Widget build(BuildContext context) {
-    final active = _listening;
+    final active = _voice.isListening;
     final color = active ? const Color(0xFFF87171) : AppColors.accent;
     final opacity = widget.disabled && !active ? 0.35 : 1.0;
 
@@ -275,16 +148,22 @@ class _VoiceInputButtonState extends State<VoiceInputButton>
       opacity: opacity,
       child: Listener(
         behavior: HitTestBehavior.opaque,
-        onPointerDown: (_) => _start(),
-        onPointerUp: (_) => _stop(),
-        onPointerCancel: (_) => _stop(),
-        child: AnimatedBuilder(
-          animation: _pulseAnim,
-          builder: (context, child) {
-            final scale = active ? _pulseAnim.value : 1.0;
-            return Transform.scale(
-              scale: scale,
-              child: child,
+        onPointerDown: (_) => _onPointerDown(),
+        onPointerUp: (_) => _onPointerUp(),
+        onPointerCancel: (_) => _onPointerCancel(),
+        // Sound-level updates have their own ValueListenable so they DON'T
+        // rebuild the whole button tree on every audio frame — only the
+        // inner Transform.scale rebuilds, and only when the level changes.
+        child: ValueListenableBuilder<double>(
+          valueListenable: _voice.soundLevelListenable,
+          builder: (context, level, child) {
+            return AnimatedBuilder(
+              animation: _pulseAnim,
+              builder: (context, _) {
+                final levelBoost = active ? (level * 0.10) : 0.0;
+                final scale = active ? _pulseAnim.value + levelBoost : 1.0;
+                return Transform.scale(scale: scale, child: child);
+              },
             );
           },
           child: AnimatedContainer(

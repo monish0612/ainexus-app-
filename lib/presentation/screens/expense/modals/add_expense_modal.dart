@@ -10,12 +10,12 @@ import 'package:intl/intl.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:pdfx/pdfx.dart' as pdfx;
-import 'package:speech_to_text/speech_to_text.dart' as stt;
 
 import '../../../../core/platform/io_stub.dart';
 import '../../../../core/platform/local_file_image.dart';
 import '../../../../core/platform/ocr_stub.dart';
 import '../../../../core/platform/platform_capabilities.dart';
+import '../../../../core/services/hold_to_speak_service.dart';
 import '../../../../core/services/telegram_logger.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/utils/currency_formatter.dart';
@@ -194,19 +194,13 @@ class _AddExpenseSheetState extends State<_AddExpenseSheet>
   // Date
   _DateOption _dateOption = _DateOption.today;
 
-  // Voice
-  final stt.SpeechToText _speech = stt.SpeechToText();
-  bool _speechAvailable = false;
+  // ── Voice (hold-to-record) ─────────────────────────────────────────────
+  // All STT robustness (silence-recovery, restart accumulation, error
+  // backoff, sound-level monitoring) lives in [HoldToSpeakController].
+  late final HoldToSpeakController _voice;
   bool _isListening = false;
   bool _voiceParsing = false;
   String _voiceText = '';
-  String _voiceAccumulated = '';
-  bool _voiceRestarting = false;
-
-  /// When true, `onResult` callbacks are ignored (stop/restart in progress).
-  bool _voiceResultsGated = false;
-  static const _kVoiceRestartDelay = Duration(milliseconds: 350);
-  static const _kMaxVoiceRestartRetries = 3;
 
   Timer? _debounce;
 
@@ -218,7 +212,9 @@ class _AddExpenseSheetState extends State<_AddExpenseSheet>
       duration: const Duration(milliseconds: 600),
     );
     _descCtrl.addListener(_onDescriptionChanged);
-    _initSpeech();
+    _voice = HoldToSpeakController(tag: 'AddExpense');
+    _voice.addListener(_onVoiceUpdate);
+    HoldToSpeakController.warmUp();
 
     if (widget.initialImagePath != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -246,33 +242,19 @@ class _AddExpenseSheetState extends State<_AddExpenseSheet>
   bool get _cardTypeError =>
       _hasAttemptedSubmit && _cardType.isEmpty;
 
-  Future<void> _initSpeech() async {
-    try {
-      _speechAvailable = await _speech.initialize(
-        onStatus: (status) {
-          if ((status == 'done' || status == 'notListening') && mounted) {
-            if (_holdActive) {
-              _restartListening();
-            } else if (_isListening) {
-              setState(() => _isListening = false);
-            }
-          }
-        },
-        onError: (error) {
-          TLog.w('AddExpense', 'Speech error: ${error.errorMsg} (permanent=${error.permanent})');
-          if (error.permanent && mounted) {
-            if (_holdActive) {
-              _restartListening();
-            } else {
-              setState(() => _isListening = false);
-            }
-          }
-        },
-      );
-      TLog.d('AddExpense', 'Speech init: available=$_speechAvailable');
-    } catch (e) {
-      TLog.e('AddExpense', 'Speech init failed', error: e);
-      _speechAvailable = false;
+  void _onVoiceUpdate() {
+    if (!mounted) return;
+    final text = _voice.displayText;
+    final listening = _voice.isListening;
+    // Only rebuild when transcript or listening flag actually changed.
+    // Sound-level updates ride a separate ValueListenable on the
+    // [HoldToSpeakController] and the inner mic widget owns its own pulse
+    // animation, so we never need a setState here for audio frames.
+    if (text != _voiceText || listening != _isListening) {
+      setState(() {
+        _voiceText = text;
+        _isListening = listening;
+      });
     }
   }
 
@@ -310,18 +292,13 @@ class _AddExpenseSheetState extends State<_AddExpenseSheet>
 
   @override
   void dispose() {
-    _holdActive = false;
-    _voiceResultsGated = true;
+    _voice.removeListener(_onVoiceUpdate);
+    _voice.dispose();
     _debounce?.cancel();
     _shakeCtrl.dispose();
     _descCtrl.removeListener(_onDescriptionChanged);
     _amountCtrl.dispose();
     _descCtrl.dispose();
-    if (_isListening) {
-      try {
-        _speech.stop();
-      } catch (_) {}
-    }
     super.dispose();
   }
 
@@ -360,125 +337,35 @@ class _AddExpenseSheetState extends State<_AddExpenseSheet>
 
   // ── Voice (hold-to-record) ─────────────────────────────────────────────────
 
-  bool _holdActive = false;
-
   Future<void> _startListening() async {
-    if (_isListening) return;
-    if (!_speechAvailable) {
-      TLog.w('AddExpense', 'Speech not available on device');
-      return;
-    }
-
-    _holdActive = true;
-    _voiceAccumulated = '';
-    _voiceRestarting = false;
-    setState(() {
-      _isListening = true;
-      _voiceText = '';
-    });
-    TLog.i('AddExpense', 'Voice hold started');
-
-    await _beginListenSession();
-  }
-
-  Future<void> _beginListenSession() async {
-    if (!_holdActive || !mounted) return;
-    _voiceResultsGated = false;
-    try {
-      await _speech.listen(
-        onResult: (result) {
-          if (!mounted || _voiceResultsGated) return;
-          final sessionWords = result.recognizedWords;
-          final combined = _voiceAccumulated.isEmpty
-              ? sessionWords
-              : '$_voiceAccumulated $sessionWords';
-          setState(() => _voiceText = combined);
-        },
-        listenFor: const Duration(seconds: 120),
-        pauseFor: const Duration(seconds: 60),
-        listenOptions: stt.SpeechListenOptions(
-          listenMode: stt.ListenMode.dictation,
-          partialResults: true,
-          cancelOnError: false,
-          autoPunctuation: true,
-        ),
-      );
-    } catch (e) {
-      TLog.e('AddExpense', 'Listen session error', error: e);
-      if (_holdActive && mounted) {
-        _restartListening();
-      } else {
-        _holdActive = false;
-        if (mounted) setState(() => _isListening = false);
-      }
-    }
-  }
-
-  Future<void> _restartListening() async {
-    if (!_holdActive || !mounted || _voiceRestarting) return;
-    _voiceRestarting = true;
-
-    for (var attempt = 1; attempt <= _kMaxVoiceRestartRetries; attempt++) {
-      if (!_holdActive || !mounted) break;
-      try {
-        // Gate results BEFORE stop so the final onResult from stop() is
-        // ignored — this prevents the doubled-text bug.
-        _voiceResultsGated = true;
-        await _speech.stop();
-
-        // NOW safe to snapshot: no more callbacks can fire for the old session.
-        final currentText = _voiceText.trim();
-        if (currentText.isNotEmpty) {
-          _voiceAccumulated = currentText;
-        }
-
-        await Future<void>.delayed(_kVoiceRestartDelay);
-        if (!_holdActive || !mounted) break;
-        // _beginListenSession resets the gate to false before calling listen().
-        await _beginListenSession();
-        _voiceRestarting = false;
-        TLog.d('AddExpense', 'Voice restarted (attempt $attempt, accumulated ${_voiceAccumulated.length} chars)');
-        return;
-      } catch (e) {
-        TLog.w('AddExpense', 'Voice restart attempt $attempt failed', error: e);
-        await Future<void>.delayed(Duration(milliseconds: 200 * attempt));
-      }
-    }
-
-    _voiceRestarting = false;
-    _voiceResultsGated = false;
-    if (mounted && _holdActive) {
-      TLog.e('AddExpense', 'All voice restart attempts failed');
-      _holdActive = false;
-      setState(() => _isListening = false);
+    if (_voice.isListening) return;
+    setState(() => _voiceText = '');
+    final ok = await _voice.start();
+    if (!ok && mounted) {
+      TLog.w('AddExpense', 'Voice unavailable on this device');
     }
   }
 
   Future<void> _stopListeningAndParse() async {
-    _holdActive = false;
-
-    // Snapshot the final text BEFORE gating, then gate to block stale
-    // onResult callbacks that _speech.stop() may fire.
-    final textBeforeStop = _voiceText.trim();
-    _voiceResultsGated = true;
-    _voiceAccumulated = '';
-    _voiceRestarting = false;
-
-    try {
-      await _speech.stop();
-    } catch (e) {
-      TLog.w('AddExpense', 'Stop speech error', error: e);
+    if (!_voice.isListening &&
+        _voice.status != HoldToSpeakStatus.stopping &&
+        _voice.status != HoldToSpeakStatus.initializing) {
+      return;
     }
+
+    final voiceResult = await _voice.stop();
     if (!mounted) return;
 
-    // Always use the pre-stop snapshot; a stale callback may have mutated it.
-    _voiceText = textBeforeStop;
-    final finalText = textBeforeStop;
+    final finalText = voiceResult.transcript;
+    _voiceText = finalText;
 
-    TLog.i('AddExpense',
-        'Voice hold ended (${finalText.length} chars) → '
-        '"${finalText.length > 60 ? '${finalText.substring(0, 60)}…' : finalText}"');
-    _voiceResultsGated = false;
+    TLog.i(
+      'AddExpense',
+      'Voice hold ended (${finalText.length} chars, '
+      '${voiceResult.duration.inMilliseconds}ms, '
+      '${voiceResult.restartCount} restarts) → '
+      '"${finalText.length > 60 ? '${finalText.substring(0, 60)}…' : finalText}"',
+    );
 
     setState(() {
       _isListening = false;
@@ -970,11 +857,8 @@ class _AddExpenseSheetState extends State<_AddExpenseSheet>
                 onSelect: (m) {
                   if (m == _mode) return;
                   // Stop speech engine when leaving voice mode
-                  if (_mode == 2 && _isListening) {
-                    _holdActive = false;
-                    try {
-                      _speech.stop();
-                    } catch (_) {}
+                  if (_mode == 2 && _voice.isListening) {
+                    unawaited(_voice.cancel());
                   }
                   setState(() {
                     _mode = m;

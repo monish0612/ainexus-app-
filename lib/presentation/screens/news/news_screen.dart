@@ -1,17 +1,25 @@
+import 'dart:async';
+import 'dart:ui' as ui;
+
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
+import '../../../core/di/injection.dart';
+import '../../../core/services/news_summarize_store.dart';
+import '../../../core/services/notification_service.dart';
 import '../../../core/services/telegram_logger.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../domain/entities/news_entities.dart';
 import '../../widgets/compact_header.dart';
+import '../../widgets/news_action_fab.dart';
 import '../settings/settings_modal.dart';
 import 'article_detail_modal.dart';
 import 'article_followup_sheet.dart';
 import 'news_controller.dart';
+import 'summary_reader_screen.dart';
 
 class _NewsNotif {
   const _NewsNotif({
@@ -72,17 +80,55 @@ class _NewsScreenState extends ConsumerState<NewsScreen>
   String _savedSearch = '';
   final Set<String> _dismissedNotifIds = {};
 
+  /// Listener bound to [NewsSummarizeStore] so the "Resume summary" pill
+  /// rebuilds when a background session progresses or completes.
+  late final VoidCallback _summarizeListener;
+  StreamSubscription<String>? _payloadSub;
+
   @override
   void initState() {
     super.initState();
     _tabCtrl = TabController(length: 2, vsync: this)
       ..addListener(_onTabChanged);
     _savedSearchCtrl = TextEditingController();
+    _summarizeListener = () {
+      if (!mounted) return;
+      // The store also raises notifyListeners when [requestReaderReopen]
+      // sets the pending-reopen flag — handle that here so cold-start /
+      // notification-tap flows don't depend on payload-stream timing.
+      if (NewsSummarizeStore.instance.consumePendingReopen()) {
+        _reopenReaderForActiveSession();
+      }
+      setState(() {});
+    };
+    NewsSummarizeStore.instance.addListener(_summarizeListener);
+
+    // Listen for the deep-link payload fired when the user taps the
+    // "summary ready" notification. We pop any active route stack down to
+    // the news screen and reopen the reader for the live session.
+    _payloadSub = notificationPayloadStream.stream.listen((payload) {
+      if (!mounted) return;
+      if (payload != NewsSummarizeStore.kReopenPayload) return;
+      _reopenReaderForActiveSession();
+    });
+
+    // If the user reached the news screen via the completion-notification
+    // tap that fired before we had a chance to subscribe, the reopen flag
+    // will already be set on the store. Drain it on the next frame so the
+    // reader opens the moment the screen is laid out.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (NewsSummarizeStore.instance.consumePendingReopen()) {
+        _reopenReaderForActiveSession();
+      }
+    });
   }
 
   @override
   void dispose() {
     _tabCtrl.removeListener(_onTabChanged);
+    NewsSummarizeStore.instance.removeListener(_summarizeListener);
+    _payloadSub?.cancel();
     _savedSearchCtrl.dispose();
     _tabCtrl.dispose();
     super.dispose();
@@ -92,6 +138,24 @@ class _NewsScreenState extends ConsumerState<NewsScreen>
     if (_showNotif && _tabCtrl.indexIsChanging) {
       setState(() => _showNotif = false);
     }
+  }
+
+  /// Re-opens the [SummaryReaderScreen] for the current background session.
+  /// Called from the "Resume summary" pill and from the completion-
+  /// notification deep-link.
+  Future<void> _reopenReaderForActiveSession() async {
+    final store = NewsSummarizeStore.instance;
+    final session = store.articles;
+    if (session.isEmpty) return;
+    if (!mounted) return;
+    // Make sure the For You tab is in front when we navigate.
+    if (_tabCtrl.index != 0) _tabCtrl.animateTo(0);
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        fullscreenDialog: true,
+        builder: (_) => SummaryReaderScreen(articles: session),
+      ),
+    );
   }
 
   List<_NewsNotif> _buildNotifications(List<Article> articles) {
@@ -190,6 +254,89 @@ class _NewsScreenState extends ConsumerState<NewsScreen>
     );
   }
 
+  /// Handles an action picked from the For You speed-dial FAB. The full feed
+  /// list is computed once in `build()` and forwarded here so we don't redo
+  /// the filter work and so we always operate on the user's current view.
+  Future<void> _handleFabAction({
+    required NewsFabAction action,
+    required NewsFabScope scope,
+    required List<Article> unfilteredFeed,
+    required List<Article> filteredFeed,
+  }) async {
+    final target = scope == NewsFabScope.all ? unfilteredFeed : filteredFeed;
+    if (target.isEmpty) return;
+
+    switch (action) {
+      case NewsFabAction.summarize:
+        await _openSummaryReader(target);
+        break;
+      case NewsFabAction.clearAll:
+        await _confirmClearAll(target);
+        break;
+    }
+  }
+
+  Future<void> _openSummaryReader(List<Article> articles) async {
+    final service = ref.read(newsSummarizeServiceProvider);
+    final repo = ref.read(newsRepositoryProvider);
+
+    NewsSummarizeStore.instance.start(
+      articles: articles,
+      service: service,
+      repository: repo,
+    );
+
+    if (!mounted) return;
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        fullscreenDialog: true,
+        builder: (_) => SummaryReaderScreen(articles: articles),
+      ),
+    );
+  }
+
+  Future<void> _confirmClearAll(List<Article> articles) async {
+    final colors = Theme.of(context).extension<AppColors>()!;
+    final confirmed = await showModalBottomSheet<bool>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (_) => _ClearAllConfirmSheet(
+        colors: colors,
+        count: articles.length,
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    final ids = articles.map((a) => a.id).toList(growable: false);
+    try {
+      await ref.read(newsControllerProvider.notifier).markManyRead(ids);
+    } catch (e) {
+      TLog.w('News', 'Clear All failed', error: e);
+    }
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context)
+      ..clearSnackBars()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(
+            'Cleared ${ids.length} article${ids.length == 1 ? '' : 's'}',
+            style: GoogleFonts.plusJakartaSans(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          behavior: SnackBarBehavior.floating,
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          margin: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+          duration: const Duration(seconds: 2),
+          backgroundColor: const Color(0xFF34D399),
+        ),
+      );
+  }
+
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).extension<AppColors>()!;
@@ -197,8 +344,9 @@ class _NewsScreenState extends ConsumerState<NewsScreen>
     final allArticles = newsState.valueOrNull ?? const <Article>[];
     final notifications = _buildNotifications(allArticles);
     final unreadNotifCount = notifications.where((n) => !n.read).length;
-    var feed =
+    final unfilteredFeed =
         allArticles.where((a) => !a.isRead && !a.isSaved).toList();
+    var feed = unfilteredFeed;
     if (_category != 'All') {
       feed = feed.where((a) => a.category == _category).toList();
     }
@@ -288,6 +436,25 @@ class _NewsScreenState extends ConsumerState<NewsScreen>
                         feedEmpty: feed.isEmpty,
                         onRefresh: _handleRefresh,
                         onOpen: _openArticle,
+                        unreadCountAll: unfilteredFeed.length,
+                        unreadCountInCategory: feed.length,
+                        onFabAction: (action, scope) => _handleFabAction(
+                          action: action,
+                          scope: scope,
+                          unfilteredFeed: unfilteredFeed,
+                          filteredFeed: feed,
+                        ),
+                        // The pill showing "Summary running in background"
+                        // is driven by the singleton store and rebuilt via
+                        // [_summarizeListener] above. We surface BOTH the
+                        // in-flight state AND the just-completed state so
+                        // the user always has a one-tap path back to the
+                        // reader after the OS notification disappears.
+                        activeSummaryProgress:
+                            NewsSummarizeStore.instance.hasReadableSession
+                                ? NewsSummarizeStore.instance.progress
+                                : null,
+                        onResumeSummary: _reopenReaderForActiveSession,
                       ),
                       _SavedTab(
                         colors: colors,
@@ -371,6 +538,11 @@ class _ForYouTab extends StatelessWidget {
     required this.feedEmpty,
     required this.onRefresh,
     required this.onOpen,
+    required this.unreadCountAll,
+    required this.unreadCountInCategory,
+    required this.onFabAction,
+    required this.activeSummaryProgress,
+    required this.onResumeSummary,
   });
 
   final AppColors colors;
@@ -384,15 +556,42 @@ class _ForYouTab extends StatelessWidget {
   final Future<void> Function() onRefresh;
   final ValueChanged<Article> onOpen;
 
+  /// Total unread+unsaved across all categories (used by the FAB sheet).
+  final int unreadCountAll;
+
+  /// Unread+unsaved in the currently-active category chip.
+  final int unreadCountInCategory;
+
+  /// Fired when the user picks an action from the speed-dial FAB.
+  final void Function(NewsFabAction action, NewsFabScope scope) onFabAction;
+
+  /// Snapshot of progress from a still-running background summarize
+  /// session, or `null` if no session is active.
+  final SummaryProgress? activeSummaryProgress;
+
+  /// Re-opens the reader bound to the live session.
+  final VoidCallback onResumeSummary;
+
   @override
   Widget build(BuildContext context) {
-    return RefreshIndicator(
-      onRefresh: onRefresh,
-      color: AppColors.accent,
-      child: ListView(
-        physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.only(bottom: 24),
-        children: [
+    return Stack(
+      children: [
+        RefreshIndicator(
+          onRefresh: onRefresh,
+          color: AppColors.accent,
+          child: ListView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.only(bottom: 96),
+            children: [
+          if (activeSummaryProgress != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+              child: _SummaryRunningPill(
+                colors: colors,
+                progress: activeSummaryProgress!,
+                onTap: onResumeSummary,
+              ),
+            ),
           if (featured != null) ...[
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
@@ -490,8 +689,22 @@ class _ForYouTab extends StatelessWidget {
               ),
             ),
           ],
-        ],
-      ),
+            ],
+          ),
+        ),
+        Positioned.fill(
+          child: IgnorePointer(
+            ignoring: false,
+            child: NewsActionFab(
+              colors: colors,
+              unreadCount: unreadCountAll,
+              unreadCountInCategory: unreadCountInCategory,
+              activeCategory: category,
+              onAction: onFabAction,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -1578,6 +1791,309 @@ class _NotificationPanelState extends State<_NotificationPanel>
             ],
           ),
         ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Clear-All confirmation bottom sheet
+// ─────────────────────────────────────────────────────────────────────────
+
+class _ClearAllConfirmSheet extends StatelessWidget {
+  const _ClearAllConfirmSheet({required this.colors, required this.count});
+
+  final AppColors colors;
+  final int count;
+
+  @override
+  Widget build(BuildContext context) {
+    final bottomInset = MediaQuery.viewPaddingOf(context).bottom;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Container(
+        margin: EdgeInsets.only(bottom: 16 + bottomInset),
+        padding: const EdgeInsets.fromLTRB(20, 22, 20, 18),
+        decoration: BoxDecoration(
+          color: colors.bg1,
+          borderRadius: BorderRadius.circular(22),
+          border: Border.all(color: colors.border),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.4),
+              blurRadius: 32,
+              offset: const Offset(0, 12),
+            ),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 56,
+              height: 56,
+              decoration: BoxDecoration(
+                color: const Color(0x1AEF4444),
+                shape: BoxShape.circle,
+                border: Border.all(color: const Color(0x33EF4444)),
+              ),
+              child: const Icon(
+                LucideIcons.eraser,
+                size: 24,
+                color: Color(0xFFEF4444),
+              ),
+            ),
+            const SizedBox(height: 14),
+            Text(
+              'Clear all unread?',
+              style: GoogleFonts.plusJakartaSans(
+                fontSize: 18,
+                fontWeight: FontWeight.w800,
+                color: colors.text,
+                letterSpacing: -0.2,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '$count article${count == 1 ? '' : 's'} will be marked as read and disappear from For You. Saved articles are not affected.',
+              textAlign: TextAlign.center,
+              style: GoogleFonts.plusJakartaSans(
+                fontSize: 13,
+                height: 1.4,
+                color: colors.text3,
+              ),
+            ),
+            const SizedBox(height: 18),
+            Row(
+              children: [
+                Expanded(
+                  child: Material(
+                    color: Colors.transparent,
+                    borderRadius: BorderRadius.circular(12),
+                    child: InkWell(
+                      onTap: () => Navigator.of(context).pop(false),
+                      borderRadius: BorderRadius.circular(12),
+                      child: Ink(
+                        height: 48,
+                        decoration: BoxDecoration(
+                          color: colors.bg2,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: colors.border),
+                        ),
+                        child: Center(
+                          child: Text(
+                            'Cancel',
+                            style: GoogleFonts.plusJakartaSans(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w700,
+                              color: colors.text2,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Material(
+                    color: Colors.transparent,
+                    borderRadius: BorderRadius.circular(12),
+                    child: InkWell(
+                      onTap: () => Navigator.of(context).pop(true),
+                      borderRadius: BorderRadius.circular(12),
+                      child: Ink(
+                        height: 48,
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(12),
+                          gradient: const LinearGradient(
+                            colors: [
+                              Color(0xFFEF4444),
+                              Color(0xFFDC2626),
+                            ],
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: const Color(0xFFEF4444)
+                                  .withValues(alpha: 0.4),
+                              blurRadius: 14,
+                              offset: const Offset(0, 6),
+                            ),
+                          ],
+                        ),
+                        child: Center(
+                          child: Text(
+                            'Clear $count',
+                            style: GoogleFonts.plusJakartaSans(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w800,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// "Summary running in background" pill
+//
+// Shows up at the top of the For You feed any time the user has a live
+// summarize session in flight (after closing the reader before all batches
+// finished, or after coming back to the app from the completion notification).
+// One-tap re-opens the reader on the current state — every cached summary
+// is already in the local DB, so no work is duplicated.
+// ─────────────────────────────────────────────────────────────────────────
+
+class _SummaryRunningPill extends StatefulWidget {
+  const _SummaryRunningPill({
+    required this.colors,
+    required this.progress,
+    required this.onTap,
+  });
+
+  final AppColors colors;
+  final SummaryProgress progress;
+  final VoidCallback onTap;
+
+  @override
+  State<_SummaryRunningPill> createState() => _SummaryRunningPillState();
+}
+
+class _SummaryRunningPillState extends State<_SummaryRunningPill>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _pulseCtrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _pulseCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1500),
+    )..repeat(reverse: true);
+  }
+
+  @override
+  void dispose() {
+    _pulseCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final p = widget.progress;
+    final isComplete = p.isComplete;
+    final pct = (p.fraction * 100).clamp(0, 100).round();
+
+    return Material(
+      color: Colors.transparent,
+      borderRadius: BorderRadius.circular(16),
+      child: InkWell(
+        onTap: widget.onTap,
+        borderRadius: BorderRadius.circular(16),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(16),
+          child: BackdropFilter(
+            filter: ui.ImageFilter.blur(sigmaX: 14, sigmaY: 14),
+            child: Container(
+              padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: isComplete
+                      ? const [Color(0xFF10B981), Color(0xFF059669)]
+                      : const [Color(0xFF6366F1), Color(0xFFA855F7)],
+                ),
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: [
+                  BoxShadow(
+                    color: (isComplete
+                            ? const Color(0xFF10B981)
+                            : const Color(0xFF8B5CF6))
+                        .withValues(alpha: 0.32),
+                    blurRadius: 18,
+                    offset: const Offset(0, 6),
+                  ),
+                ],
+              ),
+              child: Row(
+                children: [
+                  AnimatedBuilder(
+                    animation: _pulseCtrl,
+                    builder: (_, __) {
+                      final t = isComplete ? 1.0 : (0.7 + _pulseCtrl.value * 0.3);
+                      return Container(
+                        width: 32,
+                        height: 32,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: Colors.white.withValues(alpha: 0.18),
+                          border: Border.all(
+                            color: Colors.white.withValues(alpha: t),
+                            width: 1.5,
+                          ),
+                        ),
+                        alignment: Alignment.center,
+                        child: Icon(
+                          isComplete
+                              ? LucideIcons.check
+                              : LucideIcons.sparkles,
+                          size: 14,
+                          color: Colors.white,
+                        ),
+                      );
+                    },
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          isComplete
+                              ? 'Catch-up summary ready'
+                              : 'Summarizing in background',
+                          style: GoogleFonts.plusJakartaSans(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w800,
+                            color: Colors.white,
+                            letterSpacing: 0.1,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          isComplete
+                              ? 'Tap to read ${p.ready} quick summaries'
+                              : '${p.ready} / ${p.total} ready · $pct%',
+                          style: GoogleFonts.plusJakartaSans(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.white.withValues(alpha: 0.85),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  const Icon(
+                    LucideIcons.chevronRight,
+                    size: 18,
+                    color: Colors.white,
+                  ),
+                ],
+              ),
+            ),
+          ),
         ),
       ),
     );

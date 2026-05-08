@@ -29,6 +29,7 @@ class Article {
     required this.date,
     required this.blocks,
     this.summaryMarkdown,
+    this.summaryShort,
     this.originalUrl,
     this.tag,
     this.timeAgo,
@@ -48,6 +49,10 @@ class Article {
   final String date;
   final List<ArticleBlock> blocks;
   final String? summaryMarkdown;
+
+  /// AI-generated 1-2 sentence quick summary (Gemini 2.5 Flash Lite).
+  /// Populated by the For You "Summarize" batch flow and cached in SQLite.
+  final String? summaryShort;
   final String? originalUrl;
   final String? tag;
   final String? timeAgo;
@@ -67,6 +72,7 @@ class Article {
     String? date,
     List<ArticleBlock>? blocks,
     String? summaryMarkdown,
+    String? summaryShort,
     String? originalUrl,
     String? tag,
     String? timeAgo,
@@ -86,6 +92,7 @@ class Article {
       date: date ?? this.date,
       blocks: blocks ?? this.blocks,
       summaryMarkdown: summaryMarkdown ?? this.summaryMarkdown,
+      summaryShort: summaryShort ?? this.summaryShort,
       originalUrl: originalUrl ?? this.originalUrl,
       tag: tag ?? this.tag,
       timeAgo: timeAgo ?? this.timeAgo,

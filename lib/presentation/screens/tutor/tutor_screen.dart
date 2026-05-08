@@ -8,11 +8,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:shimmer/shimmer.dart';
-import 'package:speech_to_text/speech_to_text.dart' as stt;
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/di/injection.dart';
+import '../../../core/services/hold_to_speak_service.dart';
 import '../../../core/services/online_search_store.dart';
 import '../../../core/services/process_text_service.dart';
 import '../../../core/services/summarize_store.dart';
@@ -22,6 +22,7 @@ import '../../../data/local/database/app_database.dart';
 import '../../../domain/entities/tutor_entities.dart';
 import '../../widgets/app_shell.dart';
 import '../../widgets/compact_header.dart';
+import '../../widgets/sources_disclosure.dart';
 import '../settings/settings_controller.dart';
 import '../settings/settings_modal.dart';
 import 'deep_research_sheet.dart';
@@ -325,19 +326,16 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
   // Coach
   bool _coachLoading = false;
   CoachResult? _coachResult;
-  bool _isListening = false;
-  bool _voiceHoldActive = false;
-  final stt.SpeechToText _speech = stt.SpeechToText();
-  bool _speechAvailable = false;
-  TextEditingController? _voiceTarget;
-  String _voiceAccumulated = '';
-  bool _voiceRestarting = false;
 
-  /// Guards against stale `onResult` callbacks fired by `_speech.stop()`.
-  /// When true, the `onResult` in `_beginVoiceSession` is a no-op.
-  bool _voiceResultsGated = false;
-  static const _kVoiceRestartDelay = Duration(milliseconds: 350);
-  static const _kMaxVoiceRestartRetries = 3;
+  // ── Voice (hold-to-speak) ───────────────────────────────────────────────
+  // All robustness (auto-restart on Android silence-timeout, final-result
+  // tracking, error backoff, single-engine coordination, sound-level
+  // monitoring) lives in [HoldToSpeakController]. We just bind it to the
+  // currently selected target controller (Coach / Search / etc.).
+  late final HoldToSpeakController _voice;
+  TextEditingController? _voiceTarget;
+  String _voiceLastShown = '';
+  bool _isListening = false;
 
   // Summarizer & Search
   final TextEditingController _summaryUrlCtrl = TextEditingController();
@@ -347,6 +345,11 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
   String _summaryStage = '';
   TavilySearchResponse? _tavilyResult;
   GroundedSearchResponse? _groundedResult;
+
+  /// Search depth toggle for the InsightAI tab. Defaults to Lite (fast). Mirrors
+  /// the Lite/Deep toggle in the search follow-up sheet so users get a
+  /// consistent experience across the search → follow-up flow.
+  bool _searchUseDeepModel = false;
 
   // Dictionary
   bool _dictLoading = false;
@@ -363,7 +366,9 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
     _tabController.addListener(_onTabChanged);
     activeTutorSubtabSwitcher = _switchToSubtab;
     _loadSavedWords();
-    _initSpeech();
+    _voice = HoldToSpeakController(tag: 'Tutor');
+    _voice.addListener(_onVoiceUpdate);
+    HoldToSpeakController.warmUp();
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _consumePendingSubtab();
@@ -450,9 +455,8 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
   @override
   void dispose() {
     activeTutorSubtabSwitcher = null;
-    _voiceHoldActive = false;
-    _voiceResultsGated = true;
-    if (_isListening) _speech.stop();
+    _voice.removeListener(_onVoiceUpdate);
+    _voice.dispose();
     if (_summarizeKey != null) {
       SummarizeStore.instance
           .removeListener(_summarizeKey!, _onSummarizeStoreUpdate);
@@ -472,33 +476,28 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
     super.dispose();
   }
 
-  Future<void> _initSpeech() async {
-    try {
-      _speechAvailable = await _speech.initialize(
-        onStatus: (status) {
-          if ((status == 'done' || status == 'notListening') && mounted) {
-            if (_voiceHoldActive) {
-              _restartVoiceSession();
-            } else if (_isListening) {
-              setState(() => _isListening = false);
-            }
-          }
-        },
-        onError: (error) {
-          TLog.w('Tutor', 'Speech error: ${error.errorMsg} (permanent=${error.permanent})');
-          if (error.permanent && mounted) {
-            if (_voiceHoldActive) {
-              _restartVoiceSession();
-            } else {
-              setState(() => _isListening = false);
-            }
-          }
-        },
+  void _onVoiceUpdate() {
+    if (!mounted) return;
+    final ctrl = _voiceTarget;
+    final listening = _voice.isListening;
+    final next = _voice.displayText;
+
+    // Pipe live partials into whichever target controller the user is
+    // currently dictating into. Only write when the text actually changes
+    // to avoid spurious cursor jumps.
+    if (ctrl != null && next != _voiceLastShown) {
+      _voiceLastShown = next;
+      ctrl.value = TextEditingValue(
+        text: next,
+        selection: TextSelection.collapsed(offset: next.length),
       );
-      TLog.d('Tutor', 'Speech init: available=$_speechAvailable');
-    } catch (e) {
-      TLog.e('Tutor', 'Speech init failed', error: e);
-      _speechAvailable = false;
+    }
+
+    // Only rebuild when the listening flag actually flipped — sound-level
+    // updates come through a separate ValueListenable so they don't drag
+    // this 4 000-line build method into every audio frame.
+    if (listening != _isListening) {
+      setState(() => _isListening = listening);
     }
   }
 
@@ -625,136 +624,44 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
   }
 
   Future<void> _startVoice({TextEditingController? target}) async {
-    if (_isListening) return;
-
-    if (!_speechAvailable) {
-      _showMessage('Voice input is not available on this device');
-      return;
-    }
+    if (_voice.isListening) return;
 
     _voiceTarget = target ?? _coachCtrl;
-    _voiceHoldActive = true;
-    _voiceAccumulated = '';
-    _voiceRestarting = false;
-    setState(() => _isListening = true);
-    TLog.i('Tutor', 'Voice hold started');
-    await _beginVoiceSession();
-  }
+    // Clear the target so partials build a fresh transcript.
+    _voiceTarget!.clear();
+    _voiceLastShown = '';
 
-  Future<void> _beginVoiceSession() async {
-    if (!_voiceHoldActive || !mounted) return;
-    final ctrl = _voiceTarget ?? _coachCtrl;
-    _voiceResultsGated = false;
-    try {
-      await _speech.listen(
-        onResult: (result) {
-          if (!mounted || _voiceResultsGated) return;
-          final sessionWords = result.recognizedWords;
-          final combined = _voiceAccumulated.isEmpty
-              ? sessionWords
-              : '$_voiceAccumulated $sessionWords';
-          ctrl.value = TextEditingValue(
-            text: combined,
-            selection: TextSelection.collapsed(offset: combined.length),
-          );
-          if (!result.finalResult && ctrl == _coachCtrl) setState(() {});
-        },
-        listenFor: const Duration(seconds: 120),
-        pauseFor: const Duration(seconds: 60),
-        listenOptions: stt.SpeechListenOptions(
-          listenMode: stt.ListenMode.dictation,
-          partialResults: true,
-          cancelOnError: false,
-          autoPunctuation: true,
-        ),
-      );
-    } catch (e) {
-      TLog.e('Tutor', 'Listen session error', error: e);
-      if (_voiceHoldActive && mounted) {
-        _restartVoiceSession();
-      } else {
-        _voiceHoldActive = false;
-        if (mounted) setState(() => _isListening = false);
-      }
-    }
-  }
-
-  Future<void> _restartVoiceSession() async {
-    if (!_voiceHoldActive || !mounted || _voiceRestarting) return;
-    _voiceRestarting = true;
-
-    final ctrl = _voiceTarget ?? _coachCtrl;
-
-    for (var attempt = 1; attempt <= _kMaxVoiceRestartRetries; attempt++) {
-      if (!_voiceHoldActive || !mounted) break;
-      try {
-        // Gate results BEFORE stop so the final onResult from stop() is
-        // ignored — this prevents the doubled-text bug.
-        _voiceResultsGated = true;
-        await _speech.stop();
-
-        // NOW safe to snapshot: no more callbacks can fire for the old session.
-        final currentText = ctrl.text.trim();
-        if (currentText.isNotEmpty) {
-          _voiceAccumulated = currentText;
-        }
-
-        await Future<void>.delayed(_kVoiceRestartDelay);
-        if (!_voiceHoldActive || !mounted) break;
-        // _beginVoiceSession resets the gate to false before calling listen().
-        await _beginVoiceSession();
-        _voiceRestarting = false;
-        TLog.d('Tutor', 'Voice restarted (attempt $attempt, accumulated ${_voiceAccumulated.length} chars)');
-        return;
-      } catch (e) {
-        TLog.w('Tutor', 'Voice restart attempt $attempt failed', error: e);
-        await Future<void>.delayed(Duration(milliseconds: 200 * attempt));
-      }
-    }
-
-    _voiceRestarting = false;
-    _voiceResultsGated = false;
-    if (mounted && _voiceHoldActive) {
-      TLog.e('Tutor', 'All voice restart attempts failed');
-      _voiceHoldActive = false;
-      setState(() => _isListening = false);
+    final ok = await _voice.start();
+    if (!ok && mounted) {
+      _showMessage('Voice input is not available on this device');
     }
   }
 
   Future<void> _stopVoice() async {
-    if (!_isListening) return;
-    _voiceHoldActive = false;
-
-    // Snapshot the final text BEFORE gating, then gate to block stale
-    // onResult callbacks that _speech.stop() may fire.
-    final ctrl = _voiceTarget ?? _coachCtrl;
-    final textBeforeStop = ctrl.text.trim();
-    _voiceResultsGated = true;
-    _voiceAccumulated = '';
-    _voiceRestarting = false;
-
-    try {
-      await _speech.stop();
-    } catch (e) {
-      TLog.w('Tutor', 'Stop speech error', error: e);
+    if (!_voice.isListening &&
+        _voice.status != HoldToSpeakStatus.stopping &&
+        _voice.status != HoldToSpeakStatus.initializing) {
+      return;
     }
-
+    final ctrl = _voiceTarget;
+    final result = await _voice.stop();
     if (!mounted) return;
-
-    // Restore the clean text in case a stale callback snuck through.
-    if (ctrl.text.trim() != textBeforeStop) {
+    if (ctrl != null) {
+      final text = result.transcript;
       ctrl.value = TextEditingValue(
-        text: textBeforeStop,
-        selection: TextSelection.collapsed(offset: textBeforeStop.length),
+        text: text,
+        selection: TextSelection.collapsed(offset: text.length),
       );
     }
-
-    TLog.i('Tutor', 'Voice hold ended → "${textBeforeStop.length > 60 ? '${textBeforeStop.substring(0, 60)}…' : textBeforeStop}"');
-    _voiceResultsGated = false;
-    setState(() {
-      _isListening = false;
-      _voiceTarget = null;
-    });
+    // Only clear the target if the user hasn't already started a new hold
+    // on a different field — otherwise we'd strand the new session with
+    // nowhere to pipe its partial text.
+    if (_voiceTarget == ctrl) {
+      setState(() {
+        _voiceTarget = null;
+        _voiceLastShown = '';
+      });
+    }
   }
 
   // ── Summarizer & Tavily ──────────────────────────────────────────────────
@@ -822,12 +729,21 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
     final useXGrok = settings.xgrokEnabled &&
         settings.onlineSearchProvider == 'xgrok';
 
+    // Lite is the default; only opt into Deep when the toggle is on. We
+    // forward `mode` plus the corresponding deep / lite model hints so the
+    // backend can resolve the right model per provider. Forwarding the
+    // off-mode hints too is harmless (the backend ignores unused ones) and
+    // makes future provider-side fallback decisions more flexible.
+    final mode = _searchUseDeepModel ? 'deep' : 'lite';
+
     setState(() {
       _summaryLoading = true;
       _summaryResult = null;
       _tavilyResult = null;
       _groundedResult = null;
-      _summaryStage = 'Searching the web\u2026';
+      _summaryStage = _searchUseDeepModel
+          ? 'Deep search starting\u2026'
+          : 'Searching the web\u2026';
     });
 
     final store = OnlineSearchStore.instance;
@@ -835,7 +751,11 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
       query: query,
       service: ref.read(tutorAiServiceProvider),
       useXGrok: useXGrok,
+      mode: mode,
+      deepModel: useXGrok ? null : settings.deepModel,
       xgrokLiteModel: useXGrok ? settings.xgrokLiteModel : null,
+      xgrokDeepModel: useXGrok ? settings.xgrokDeepModel : null,
+      xgrokThinkingModel: useXGrok ? settings.xgrokThinkingModel : null,
     );
     store.addListener(_onlineSearchKey!, _onSearchStoreUpdate);
   }
@@ -2612,6 +2532,13 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
               : (ref.watch(settingsProvider).onlineSearchIsXGrok
                   ? 'xGrok'
                   : 'Gemini'),
+          searchUseDeepModel: _searchUseDeepModel,
+          onSearchModeToggle: () {
+            // Allow toggling at any time except mid-flight; the chip itself
+            // gates the visual disabled state.
+            if (_summaryLoading) return;
+            setState(() => _searchUseDeepModel = !_searchUseDeepModel);
+          },
           onChanged: () => setState(() {}),
           onSubmitted: _handleSummarizerSubmit,
           onCancel: _cancelSummarize,
@@ -2713,31 +2640,23 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
             ),
             const SizedBox(height: 16),
           ],
-          if (result.results.isNotEmpty) ...[
-            Row(children: [
-              Icon(LucideIcons.globe, size: 14, color: colors.text3),
-              const SizedBox(width: 6),
-              Text('SOURCES',
-                  style: GoogleFonts.plusJakartaSans(
-                      fontSize: 10, fontWeight: FontWeight.w700,
-                      color: colors.text3, letterSpacing: 1.2)),
-              const SizedBox(width: 8),
-              Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 8, vertical: 2),
-                decoration: BoxDecoration(
-                  color: _summarizeGradientStart.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(20)),
-                child: Text('${result.results.length}',
-                    style: GoogleFonts.plusJakartaSans(
-                        fontSize: 9, fontWeight: FontWeight.w800,
-                        color: _summarizeGradientStart)),
+          // Source links live behind a collapsed-by-default disclosure pill;
+          // see _groundedResultWidget for the same UX pattern.
+          if (result.results.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: SourcesDisclosure(
+                count: result.results.length,
+                accentColor: _summarizeGradientStart,
+                body: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: result.results
+                      .map((r) =>
+                          _TavilySourceCard(result: r, colors: colors))
+                      .toList(),
+                ),
               ),
-            ]),
-            const SizedBox(height: 10),
-            ...result.results.map((r) => _TavilySourceCard(
-                  result: r, colors: colors)),
-          ],
+            ),
           const SizedBox(height: 16),
           OutlinedButton.icon(
             onPressed: () => setState(() {
@@ -3060,126 +2979,22 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
                   ],
                 ),
               ),
-              if (r.sources.isNotEmpty) ...[
-                Divider(height: 1, color: colors.border2),
-                Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(children: [
-                        const Icon(LucideIcons.link,
-                            size: 13, color: accentColor),
-                        const SizedBox(width: 6),
-                        Text(
-                          'SOURCES',
-                          style: GoogleFonts.plusJakartaSans(
-                            fontSize: 10,
-                            fontWeight: FontWeight.w700,
-                            color: colors.text5,
-                            letterSpacing: 1.2,
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 7, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: accentColor.withValues(alpha: 0.12),
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                          child: Text(
-                            '${r.sources.length}',
-                            style: GoogleFonts.plusJakartaSans(
-                              fontSize: 9,
-                              fontWeight: FontWeight.w800,
-                              color: accentColor,
-                            ),
-                          ),
-                        ),
-                      ]),
-                      const SizedBox(height: 10),
-                      ...r.sources.map((src) => Padding(
-                            padding: const EdgeInsets.only(bottom: 8),
-                            child: InkWell(
-                              onTap: () => _openUrl(src.url),
-                              borderRadius: BorderRadius.circular(10),
-                              child: Container(
-                                padding: const EdgeInsets.all(10),
-                                decoration: BoxDecoration(
-                                  color: colors.bg2,
-                                  borderRadius: BorderRadius.circular(10),
-                                  border:
-                                      Border.all(color: colors.border2),
-                                ),
-                                child: Row(
-                                  children: [
-                                    Container(
-                                      width: 24,
-                                      height: 24,
-                                      alignment: Alignment.center,
-                                      decoration: BoxDecoration(
-                                        color: accentColor
-                                            .withValues(alpha: 0.12),
-                                        shape: BoxShape.circle,
-                                      ),
-                                      child: Text(
-                                        '${src.index + 1}',
-                                        style: GoogleFonts.plusJakartaSans(
-                                          fontSize: 10,
-                                          fontWeight: FontWeight.w800,
-                                          color: accentColor,
-                                        ),
-                                      ),
-                                    ),
-                                    const SizedBox(width: 10),
-                                    Expanded(
-                                      child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          Text(
-                                            src.title.isNotEmpty
-                                                ? src.title
-                                                : src.url,
-                                            maxLines: 1,
-                                            overflow:
-                                                TextOverflow.ellipsis,
-                                            style:
-                                                GoogleFonts.plusJakartaSans(
-                                              fontSize: 12,
-                                              fontWeight: FontWeight.w600,
-                                              color: colors.text,
-                                            ),
-                                          ),
-                                          Text(
-                                            src.url,
-                                            maxLines: 1,
-                                            overflow:
-                                                TextOverflow.ellipsis,
-                                            style:
-                                                GoogleFonts.plusJakartaSans(
-                                              fontSize: 10,
-                                              color: colors.text4,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                    Icon(LucideIcons.externalLink,
-                                        size: 14, color: colors.text4),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          )),
-                    ],
-                  ),
-                ),
-              ],
             ],
           ),
         ),
+        // Source links live behind a collapsed-by-default disclosure pill so
+        // the answer stays the focal point of the screen and we no longer
+        // occupy several screens of vertical space with always-visible
+        // citation cards. Tapping the pill animates the list open.
+        if (r.sources.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 12),
+            child: SourcesDisclosure(
+              count: r.sources.length,
+              accentColor: accentColor,
+              body: _buildGroundedSourcesList(colors, accentColor, r.sources),
+            ),
+          ),
         const SizedBox(height: 12),
         OutlinedButton.icon(
           onPressed: () => setState(() {
@@ -3205,6 +3020,86 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
           ),
         ),
       ],
+    );
+  }
+
+  /// Builds the list of grounded source cards that the disclosure reveals
+  /// when expanded. Kept as a separate method so the markup is paid for only
+  /// when the user actively opens the disclosure.
+  Widget _buildGroundedSourcesList(
+    AppColors colors,
+    Color accentColor,
+    List<GroundedSource> sources,
+  ) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: sources
+          .map((src) => Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: InkWell(
+                  onTap: () => _openUrl(src.url),
+                  borderRadius: BorderRadius.circular(10),
+                  child: Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: colors.bg2,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: colors.border2),
+                    ),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 24,
+                          height: 24,
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
+                            color: accentColor.withValues(alpha: 0.12),
+                            shape: BoxShape.circle,
+                          ),
+                          child: Text(
+                            '${src.index + 1}',
+                            style: GoogleFonts.plusJakartaSans(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w800,
+                              color: accentColor,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                src.title.isNotEmpty ? src.title : src.url,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: GoogleFonts.plusJakartaSans(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                  color: colors.text,
+                                ),
+                              ),
+                              Text(
+                                src.url,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: GoogleFonts.plusJakartaSans(
+                                  fontSize: 10,
+                                  color: colors.text4,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Icon(LucideIcons.externalLink,
+                            size: 14, color: colors.text4),
+                      ],
+                    ),
+                  ),
+                ),
+              ))
+          .toList(),
     );
   }
 
@@ -3250,7 +3145,12 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'This may take 10–20 seconds for detailed analysis',
+                  // When the user explicitly asked for a Deep search, surface
+                  // the longer expected wait so they don't think it's stuck.
+                  _onlineSearchKey != null && _searchUseDeepModel
+                      ? 'Deep search may take 30–60 seconds for thorough analysis'
+                      : 'This may take 10–20 seconds for detailed analysis',
+                  textAlign: TextAlign.center,
                   style: GoogleFonts.plusJakartaSans(
                     fontSize: 11,
                     color: colors.text4,
@@ -4215,6 +4115,8 @@ class _SearchInputBox extends StatefulWidget {
     required this.isLoading,
     required this.isListening,
     required this.onlineSearchProvider,
+    required this.searchUseDeepModel,
+    required this.onSearchModeToggle,
     required this.onChanged,
     required this.onSubmitted,
     required this.onCancel,
@@ -4233,6 +4135,15 @@ class _SearchInputBox extends StatefulWidget {
   final bool isLoading;
   final bool isListening;
   final String onlineSearchProvider;
+
+  /// Whether the Lite/Deep toggle is set to Deep. Only meaningful in search
+  /// (non-URL) mode. The toggle is always rendered Lite-first so users see
+  /// the safe default at a glance.
+  final bool searchUseDeepModel;
+
+  /// Tap handler for the Lite ⇄ Deep search toggle.
+  final VoidCallback onSearchModeToggle;
+
   final VoidCallback onChanged;
   final VoidCallback onSubmitted;
   final VoidCallback onCancel;
@@ -4426,6 +4337,27 @@ class _SearchInputBoxState extends State<_SearchInputBox> {
           ),
           const SizedBox(height: 12),
 
+          // ── Lite ⇄ Deep depth toggle (search mode only) ────────
+          // Hidden in URL mode because Summarize already routes through
+          // its own deep-research surface below. We only animate in/out
+          // when the mode actually changes to keep the input box stable.
+          AnimatedSize(
+            duration: const Duration(milliseconds: 220),
+            curve: Curves.easeOutCubic,
+            alignment: Alignment.topCenter,
+            child: widget.isUrl
+                ? const SizedBox(width: double.infinity, height: 0)
+                : Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        _buildSearchModeToggle(colors),
+                      ],
+                    ),
+                  ),
+          ),
+
           // ── Submit / Stop button ───────────────────────────────
           GestureDetector(
             onTapDown: widget.hasText || widget.isLoading
@@ -4456,6 +4388,104 @@ class _SearchInputBoxState extends State<_SearchInputBox> {
               enabled: !widget.isLoading,
             ),
           ],
+        ],
+      ),
+    );
+  }
+
+  // ── Lite / Deep depth toggle ─────────────────────────────────────────────
+
+  Widget _buildSearchModeToggle(AppColors colors) {
+    const liteColor = Color(0xFF4285F4);
+    const deepColor = Color(0xFFC084FC);
+    final disabled = widget.isLoading;
+
+    return Semantics(
+      button: true,
+      enabled: !disabled,
+      toggled: widget.searchUseDeepModel,
+      label: widget.searchUseDeepModel
+          ? 'Search depth: Deep (slower, thorough)'
+          : 'Search depth: Lite (faster)',
+      child: Opacity(
+        opacity: disabled ? 0.55 : 1.0,
+        child: GestureDetector(
+          onTap: disabled
+              ? null
+              : () {
+                  HapticFeedback.selectionClick();
+                  widget.onSearchModeToggle();
+                },
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 250),
+            curve: Curves.easeOutCubic,
+            padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 3),
+            decoration: BoxDecoration(
+              color: colors.bg2,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: colors.border),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _searchToggleChip(
+                  label: 'Lite',
+                  icon: LucideIcons.zap,
+                  active: !widget.searchUseDeepModel,
+                  color: liteColor,
+                  colors: colors,
+                ),
+                const SizedBox(width: 2),
+                _searchToggleChip(
+                  label: 'Deep',
+                  icon: LucideIcons.brain,
+                  active: widget.searchUseDeepModel,
+                  color: deepColor,
+                  colors: colors,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _searchToggleChip({
+    required String label,
+    required IconData icon,
+    required bool active,
+    required Color color,
+    required AppColors colors,
+  }) {
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 250),
+      curve: Curves.easeOutCubic,
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: active ? color.withValues(alpha: 0.15) : Colors.transparent,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: active ? color.withValues(alpha: 0.35) : Colors.transparent,
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            icon,
+            size: 12,
+            color: active ? color : colors.text5,
+          ),
+          const SizedBox(width: 4),
+          Text(
+            label,
+            style: GoogleFonts.plusJakartaSans(
+              fontSize: 11,
+              fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+              color: active ? color : colors.text4,
+            ),
+          ),
         ],
       ),
     );

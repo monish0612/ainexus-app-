@@ -17,6 +17,8 @@ abstract final class ApiEndpoints {
   static String get aiCorrect => '$_base/api/v1/ai/correct';
   static String get aiDefine => '$_base/api/v1/ai/define';
   static String get aiSummarize => '$_base/api/v1/ai/summarize';
+  static String get aiSummarizeArticlesBatch =>
+      '$_base/api/v1/ai/summarize-articles-batch';
   static String get aiSearch => '$_base/api/v1/ai/search';
   static String get aiGroundedSearch => '$_base/api/v1/ai/grounded-search';
   static String get aiArticleFollowup => '$_base/api/v1/ai/article-followup';
@@ -27,6 +29,7 @@ abstract final class ApiEndpoints {
   // News
   static String get news => '$_base/api/v1/news';
   static String get newsRefresh => '$_base/api/v1/news/refresh';
+  static String get newsMarkAllRead => '$_base/api/v1/news/mark-all-read';
   static String get newsXFeedSync => '$_base/api/v1/news/x-feed/sync';
   static String get newsXFeedStatus => '$_base/api/v1/news/x-feed/status';
   static String article(String id) => '$_base/api/v1/news/$id';

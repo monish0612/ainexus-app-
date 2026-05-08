@@ -623,6 +623,11 @@ class NotificationService {
       _onTap?.call('expense_tab');
     } else if (actionId == 'open_news' || payload == 'news_tab') {
       _onTap?.call('news_tab');
+    } else if (payload != null && payload.isNotEmpty) {
+      // Forward any other payload verbatim (e.g. tutor_tab, news_summary).
+      // The main.dart handler decides which strings are valid before routing
+      // them onto the broadcast stream.
+      _onTap?.call(payload);
     }
   }
 

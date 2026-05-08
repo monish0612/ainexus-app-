@@ -24,13 +24,28 @@ class _SearchParams {
     required this.query,
     required this.service,
     required this.useXGrok,
+    this.mode,
+    this.deepModel,
     this.xgrokLiteModel,
+    this.xgrokDeepModel,
+    this.xgrokThinkingModel,
   });
 
   final String query;
   final TutorAiService service;
   final bool useXGrok;
+
+  /// 'lite' (fast, default) or 'deep' (thorough). When null the backend
+  /// defaults to 'lite' for backward compatibility.
+  final String? mode;
+
+  /// Gemini deep model — only relevant when mode == 'deep'.
+  final String? deepModel;
+
+  /// xGrok model overrides per depth — only relevant when useXGrok is true.
   final String? xgrokLiteModel;
+  final String? xgrokDeepModel;
+  final String? xgrokThinkingModel;
 }
 
 /// Singleton store that executes online searches (grounded → Tavily fallback)
@@ -94,11 +109,22 @@ class OnlineSearchStore with WidgetsBindingObserver {
   /// Start a grounded search with Tavily fallback. The search runs via
   /// [unawaited] and survives widget disposal. Returns the query key so the
   /// caller can [addListener] and [getJob].
+  ///
+  /// [mode] selects depth — 'lite' (fast, default) or 'deep' (thorough). When
+  /// null the backend treats it as 'lite' for backward compatibility.
+  ///
+  /// The model hints are only forwarded when their respective provider/mode
+  /// pair is active on the backend (e.g. [deepModel] is consulted only when
+  /// mode='deep' and useXGrok=false).
   String startSearch({
     required String query,
     required TutorAiService service,
     required bool useXGrok,
+    String? mode,
+    String? deepModel,
     String? xgrokLiteModel,
+    String? xgrokDeepModel,
+    String? xgrokThinkingModel,
   }) {
     init();
     final queryKey = query;
@@ -111,7 +137,11 @@ class OnlineSearchStore with WidgetsBindingObserver {
       query: query,
       service: service,
       useXGrok: useXGrok,
+      mode: mode,
+      deepModel: deepModel,
       xgrokLiteModel: xgrokLiteModel,
+      xgrokDeepModel: xgrokDeepModel,
+      xgrokThinkingModel: xgrokThinkingModel,
     );
     _params[queryKey] = params;
 
@@ -163,13 +193,14 @@ class OnlineSearchStore with WidgetsBindingObserver {
     if (job == null) return;
 
     final providerTag = params.useXGrok ? 'xGrok' : 'Gemini';
+    final modeTag = params.mode ?? 'lite';
     final sw = Stopwatch()..start();
 
     TLog.d(
       'SearchStore',
       '${isRetry ? 'RETRY' : 'START'} search \u2192 '
           '"${params.query.length > 60 ? '${params.query.substring(0, 57)}\u2026' : params.query}" '
-          '[provider=$providerTag, inBackground=$_appInBackground]',
+          '[provider=$providerTag, mode=$modeTag, inBackground=$_appInBackground]',
     );
 
     bool keepPending = false;
@@ -197,7 +228,11 @@ class OnlineSearchStore with WidgetsBindingObserver {
         final result = await params.service.groundedSearch(
           query: params.query,
           provider: params.useXGrok ? 'xgrok' : null,
-          xgrokModel: params.useXGrok ? params.xgrokLiteModel : null,
+          mode: params.mode,
+          deepModel: params.useXGrok ? null : params.deepModel,
+          xgrokLiteModel: params.useXGrok ? params.xgrokLiteModel : null,
+          xgrokDeepModel: params.useXGrok ? params.xgrokDeepModel : null,
+          xgrokThinkingModel: params.useXGrok ? params.xgrokThinkingModel : null,
           cancelToken: cancelToken,
         );
         if (!_jobs.containsKey(queryKey)) return;
@@ -206,7 +241,7 @@ class OnlineSearchStore with WidgetsBindingObserver {
         sw.stop();
         _resumeRetryCount.remove(queryKey);
         TLog.i('SearchStore',
-            'Search \u2713 provider=$providerTag model=${result.model} '
+            'Search \u2713 provider=$providerTag mode=$modeTag model=${result.model} '
             'sources=${result.sources.length} ${sw.elapsedMilliseconds}ms '
             'retry=$isRetry inBackground=$_appInBackground');
 
@@ -227,7 +262,7 @@ class OnlineSearchStore with WidgetsBindingObserver {
         }
         groundedError = e;
         TLog.w('SearchStore',
-            '$providerTag grounded search failed ${sw.elapsedMilliseconds}ms '
+            '$providerTag grounded search [$modeTag] failed ${sw.elapsedMilliseconds}ms '
             '(${e.runtimeType}): ${_errorSummary(e)}');
       }
 

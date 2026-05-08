@@ -5,6 +5,7 @@ import '../../data/local/database/app_database.dart';
 import '../../data/repositories/expense_repository.dart';
 import '../../data/repositories/news_repository.dart';
 import '../../data/services/ai_categorize_service.dart';
+import '../../data/services/news_summarize_service.dart';
 import '../../data/services/tutor_ai_service.dart';
 import '../../data/services/user_preferences_service.dart';
 import '../network/api_client.dart';
@@ -42,6 +43,10 @@ final aiCategorizeServiceProvider = Provider<AICategorizeService>((ref) {
 
 final tutorAiServiceProvider = Provider<TutorAiService>((ref) {
   return TutorAiService(ref.watch(apiClientProvider));
+});
+
+final newsSummarizeServiceProvider = Provider<NewsSummarizeService>((ref) {
+  return NewsSummarizeService(ref.watch(apiClientProvider));
 });
 
 final userPreferencesServiceProvider =

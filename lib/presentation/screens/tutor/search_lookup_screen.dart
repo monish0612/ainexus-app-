@@ -12,6 +12,7 @@ import '../../../core/services/telegram_logger.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../domain/entities/tutor_entities.dart';
 import '../../screens/settings/settings_controller.dart';
+import '../../widgets/sources_disclosure.dart';
 import 'search_followup_sheet.dart';
 
 /// Standalone grounded-search screen that can be pushed on any navigation stack.
@@ -94,14 +95,22 @@ class _SearchLookupScreenState extends ConsumerState<SearchLookupScreen>
     final useXGrok = settings.xgrokEnabled &&
         settings.onlineSearchProvider == 'xgrok';
 
-    TLog.d('SearchLookup', 'Search \u2192 "${widget.query}" [provider=${useXGrok ? 'xGrok' : 'Gemini'}]');
+    // Standalone lookup launched from text-selection actions defaults to
+    // 'lite' (fast). Forwarding all model hints keeps the call site future
+    // proof — the backend ignores the irrelevant ones.
+    TLog.d('SearchLookup',
+        'Search \u2192 "${widget.query}" [provider=${useXGrok ? 'xGrok' : 'Gemini'} mode=lite]');
 
     final store = OnlineSearchStore.instance;
     _searchKey = store.startSearch(
       query: widget.query,
       service: service,
       useXGrok: useXGrok,
+      mode: 'lite',
+      deepModel: useXGrok ? null : settings.deepModel,
       xgrokLiteModel: useXGrok ? settings.xgrokLiteModel : null,
+      xgrokDeepModel: useXGrok ? settings.xgrokDeepModel : null,
+      xgrokThinkingModel: useXGrok ? settings.xgrokThinkingModel : null,
     );
     store.addListener(_searchKey!, _onStoreUpdate);
   }
@@ -460,9 +469,22 @@ class _SearchLookupScreenState extends ConsumerState<SearchLookupScreen>
               ],
             ),
           ),
+          // Source links live behind a collapsed-by-default disclosure pill
+          // so the answer remains the focal point of the screen and we no
+          // longer occupy a large chunk of vertical space with always-
+          // visible citation cards. Tapping the pill animates the list open.
           if (r.sources.isNotEmpty) ...[
-            const SizedBox(height: 20),
-            _sourcesSection(colors, r.sources),
+            const SizedBox(height: 14),
+            SourcesDisclosure(
+              count: r.sources.length,
+              accentColor: _accent,
+              body: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: r.sources
+                    .map((src) => _sourceCard(colors, src.title, src.url))
+                    .toList(),
+              ),
+            ),
           ],
         ],
       ),
@@ -561,9 +583,20 @@ class _SearchLookupScreenState extends ConsumerState<SearchLookupScreen>
                 ],
               ),
             ),
+          // Source links live behind a collapsed-by-default disclosure pill;
+          // see _buildGroundedResult for the same UX pattern.
           if (r.results.isNotEmpty) ...[
-            const SizedBox(height: 20),
-            _tavilySourcesSection(colors, r.results),
+            const SizedBox(height: 14),
+            SourcesDisclosure(
+              count: r.results.length,
+              accentColor: _accent,
+              body: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: r.results
+                    .map((res) => _sourceCard(colors, res.title, res.url))
+                    .toList(),
+              ),
+            ),
           ],
         ],
       ),
@@ -571,69 +604,6 @@ class _SearchLookupScreenState extends ConsumerState<SearchLookupScreen>
   }
 
   // ── Shared source widgets ───────────────────────────────────────────────
-
-  Widget _sourcesSection(AppColors colors, List<GroundedSource> sources) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(children: [
-          const Icon(LucideIcons.link, size: 13, color: _accent),
-          const SizedBox(width: 6),
-          Text(
-            'SOURCES',
-            style: GoogleFonts.plusJakartaSans(
-              fontSize: 10,
-              fontWeight: FontWeight.w700,
-              color: _accent,
-              letterSpacing: 1.2,
-            ),
-          ),
-          const SizedBox(width: 8),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-            decoration: BoxDecoration(
-              color: _accent.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(20),
-            ),
-            child: Text(
-              '${sources.length}',
-              style: GoogleFonts.plusJakartaSans(
-                fontSize: 9,
-                fontWeight: FontWeight.w800,
-                color: _accent,
-              ),
-            ),
-          ),
-        ]),
-        const SizedBox(height: 10),
-        ...sources.map((src) => _sourceCard(colors, src.title, src.url)),
-      ],
-    );
-  }
-
-  Widget _tavilySourcesSection(
-      AppColors colors, List<TavilyResultItem> results) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(children: [
-          const Icon(LucideIcons.link, size: 13, color: _accent),
-          const SizedBox(width: 6),
-          Text(
-            'SOURCES',
-            style: GoogleFonts.plusJakartaSans(
-              fontSize: 10,
-              fontWeight: FontWeight.w700,
-              color: _accent,
-              letterSpacing: 1.2,
-            ),
-          ),
-        ]),
-        const SizedBox(height: 10),
-        ...results.map((r) => _sourceCard(colors, r.title, r.url)),
-      ],
-    );
-  }
 
   MarkdownStyleSheet _answerMarkdownStyle(AppColors colors) {
     return MarkdownStyleSheet(

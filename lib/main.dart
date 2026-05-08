@@ -14,6 +14,9 @@ import 'core/di/injection.dart';
 import 'core/platform/platform_capabilities.dart';
 import 'core/router/app_router.dart';
 import 'core/services/expense_widget_service.dart';
+import 'core/services/hold_to_speak_service.dart';
+import 'core/services/news_summarize_fg_task.dart';
+import 'core/services/news_summarize_store.dart';
 import 'core/services/notification_service.dart';
 import 'core/services/telegram_logger.dart';
 import 'presentation/screens/settings/settings_controller.dart';
@@ -80,7 +83,12 @@ void main() async {
 
       await AuthService.instance.init();
       initializeRouter();
-      TLog.d('Init', 'Auth + Router ready');
+      // Initialise the foreground-task subsystem early so the News summarize
+      // session can promote itself to a foreground service the first time
+      // the user taps the FAB. Safe to call before the engine renders;
+      // FlutterForegroundTask.init just stashes options.
+      initNewsSummarizeForegroundTask();
+      TLog.d('Init', 'Auth + Router + ForegroundTask ready');
 
       runApp(
         ProviderScope(
@@ -101,6 +109,9 @@ void main() async {
 
       unawaited(ExpenseWidgetService.instance.refreshOnAppStart());
       unawaited(_initNotifications());
+      // Pre-warm the speech engine so the first hold-to-speak press doesn't
+      // pay a 1-2 s cold-start penalty (binding the native recognizer).
+      unawaited(HoldToSpeakController.warmUp());
     },
     (error, stack) {
       TLog.fatal('Zone', 'Uncaught error', error: error, st: stack);
@@ -112,10 +123,17 @@ Future<void> _initNotifications() async {
   try {
     await NotificationService.instance.initialize(
       onTap: (payload) {
-        if (payload == 'expense_tab' ||
+        if (payload == null) return;
+        if (payload == NewsSummarizeStore.kReopenPayload) {
+          // Mark the intent BEFORE the broadcast so the News screen sees
+          // the flag the very first time it rebuilds, even if the stream
+          // event lost the race to the screen mounting.
+          NewsSummarizeStore.instance.requestReaderReopen();
+          notificationPayloadStream.add(payload);
+        } else if (payload == 'expense_tab' ||
             payload == 'news_tab' ||
             payload == 'tutor_tab') {
-          notificationPayloadStream.add(payload!);
+          notificationPayloadStream.add(payload);
         }
       },
     );

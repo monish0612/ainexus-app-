@@ -738,6 +738,12 @@ class $NewsArticlesTable extends NewsArticles
       defaultConstraints:
           GeneratedColumn.constraintIsAlways('CHECK ("is_read" IN (0, 1))'),
       defaultValue: const Constant(false));
+  static const VerificationMeta _summaryShortMeta =
+      const VerificationMeta('summaryShort');
+  @override
+  late final GeneratedColumn<String> summaryShort = GeneratedColumn<String>(
+      'summary_short', aliasedName, true,
+      type: DriftSqlType.string, requiredDuringInsert: false);
   @override
   List<GeneratedColumn> get $columns => [
         id,
@@ -750,7 +756,8 @@ class $NewsArticlesTable extends NewsArticles
         date,
         blocksJson,
         isSaved,
-        isRead
+        isRead,
+        summaryShort
       ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -825,6 +832,12 @@ class $NewsArticlesTable extends NewsArticles
       context.handle(_isReadMeta,
           isRead.isAcceptableOrUnknown(data['is_read']!, _isReadMeta));
     }
+    if (data.containsKey('summary_short')) {
+      context.handle(
+          _summaryShortMeta,
+          summaryShort.isAcceptableOrUnknown(
+              data['summary_short']!, _summaryShortMeta));
+    }
     return context;
   }
 
@@ -856,6 +869,8 @@ class $NewsArticlesTable extends NewsArticles
           .read(DriftSqlType.bool, data['${effectivePrefix}is_saved'])!,
       isRead: attachedDatabase.typeMapping
           .read(DriftSqlType.bool, data['${effectivePrefix}is_read'])!,
+      summaryShort: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}summary_short']),
     );
   }
 
@@ -877,6 +892,11 @@ class NewsArticle extends DataClass implements Insertable<NewsArticle> {
   final String blocksJson;
   final bool isSaved;
   final bool isRead;
+
+  /// AI-generated 1-2 sentence quick summary used by the For You "Summarize"
+  /// action. NULL = not yet summarized. Cached forever per article so re-opening
+  /// the summary reader is instant for already-processed items.
+  final String? summaryShort;
   const NewsArticle(
       {required this.id,
       required this.title,
@@ -888,7 +908,8 @@ class NewsArticle extends DataClass implements Insertable<NewsArticle> {
       required this.date,
       required this.blocksJson,
       required this.isSaved,
-      required this.isRead});
+      required this.isRead,
+      this.summaryShort});
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
@@ -903,6 +924,9 @@ class NewsArticle extends DataClass implements Insertable<NewsArticle> {
     map['blocks_json'] = Variable<String>(blocksJson);
     map['is_saved'] = Variable<bool>(isSaved);
     map['is_read'] = Variable<bool>(isRead);
+    if (!nullToAbsent || summaryShort != null) {
+      map['summary_short'] = Variable<String>(summaryShort);
+    }
     return map;
   }
 
@@ -919,6 +943,9 @@ class NewsArticle extends DataClass implements Insertable<NewsArticle> {
       blocksJson: Value(blocksJson),
       isSaved: Value(isSaved),
       isRead: Value(isRead),
+      summaryShort: summaryShort == null && nullToAbsent
+          ? const Value.absent()
+          : Value(summaryShort),
     );
   }
 
@@ -937,6 +964,7 @@ class NewsArticle extends DataClass implements Insertable<NewsArticle> {
       blocksJson: serializer.fromJson<String>(json['blocksJson']),
       isSaved: serializer.fromJson<bool>(json['isSaved']),
       isRead: serializer.fromJson<bool>(json['isRead']),
+      summaryShort: serializer.fromJson<String?>(json['summaryShort']),
     );
   }
   @override
@@ -954,6 +982,7 @@ class NewsArticle extends DataClass implements Insertable<NewsArticle> {
       'blocksJson': serializer.toJson<String>(blocksJson),
       'isSaved': serializer.toJson<bool>(isSaved),
       'isRead': serializer.toJson<bool>(isRead),
+      'summaryShort': serializer.toJson<String?>(summaryShort),
     };
   }
 
@@ -968,7 +997,8 @@ class NewsArticle extends DataClass implements Insertable<NewsArticle> {
           String? date,
           String? blocksJson,
           bool? isSaved,
-          bool? isRead}) =>
+          bool? isRead,
+          Value<String?> summaryShort = const Value.absent()}) =>
       NewsArticle(
         id: id ?? this.id,
         title: title ?? this.title,
@@ -981,6 +1011,8 @@ class NewsArticle extends DataClass implements Insertable<NewsArticle> {
         blocksJson: blocksJson ?? this.blocksJson,
         isSaved: isSaved ?? this.isSaved,
         isRead: isRead ?? this.isRead,
+        summaryShort:
+            summaryShort.present ? summaryShort.value : this.summaryShort,
       );
   NewsArticle copyWithCompanion(NewsArticlesCompanion data) {
     return NewsArticle(
@@ -996,6 +1028,9 @@ class NewsArticle extends DataClass implements Insertable<NewsArticle> {
           data.blocksJson.present ? data.blocksJson.value : this.blocksJson,
       isSaved: data.isSaved.present ? data.isSaved.value : this.isSaved,
       isRead: data.isRead.present ? data.isRead.value : this.isRead,
+      summaryShort: data.summaryShort.present
+          ? data.summaryShort.value
+          : this.summaryShort,
     );
   }
 
@@ -1012,14 +1047,15 @@ class NewsArticle extends DataClass implements Insertable<NewsArticle> {
           ..write('date: $date, ')
           ..write('blocksJson: $blocksJson, ')
           ..write('isSaved: $isSaved, ')
-          ..write('isRead: $isRead')
+          ..write('isRead: $isRead, ')
+          ..write('summaryShort: $summaryShort')
           ..write(')'))
         .toString();
   }
 
   @override
   int get hashCode => Object.hash(id, title, excerpt, source, category,
-      imageUrl, readTime, date, blocksJson, isSaved, isRead);
+      imageUrl, readTime, date, blocksJson, isSaved, isRead, summaryShort);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -1034,7 +1070,8 @@ class NewsArticle extends DataClass implements Insertable<NewsArticle> {
           other.date == this.date &&
           other.blocksJson == this.blocksJson &&
           other.isSaved == this.isSaved &&
-          other.isRead == this.isRead);
+          other.isRead == this.isRead &&
+          other.summaryShort == this.summaryShort);
 }
 
 class NewsArticlesCompanion extends UpdateCompanion<NewsArticle> {
@@ -1049,6 +1086,7 @@ class NewsArticlesCompanion extends UpdateCompanion<NewsArticle> {
   final Value<String> blocksJson;
   final Value<bool> isSaved;
   final Value<bool> isRead;
+  final Value<String?> summaryShort;
   final Value<int> rowid;
   const NewsArticlesCompanion({
     this.id = const Value.absent(),
@@ -1062,6 +1100,7 @@ class NewsArticlesCompanion extends UpdateCompanion<NewsArticle> {
     this.blocksJson = const Value.absent(),
     this.isSaved = const Value.absent(),
     this.isRead = const Value.absent(),
+    this.summaryShort = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   NewsArticlesCompanion.insert({
@@ -1076,6 +1115,7 @@ class NewsArticlesCompanion extends UpdateCompanion<NewsArticle> {
     required String blocksJson,
     this.isSaved = const Value.absent(),
     this.isRead = const Value.absent(),
+    this.summaryShort = const Value.absent(),
     this.rowid = const Value.absent(),
   })  : id = Value(id),
         title = Value(title),
@@ -1098,6 +1138,7 @@ class NewsArticlesCompanion extends UpdateCompanion<NewsArticle> {
     Expression<String>? blocksJson,
     Expression<bool>? isSaved,
     Expression<bool>? isRead,
+    Expression<String>? summaryShort,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -1112,6 +1153,7 @@ class NewsArticlesCompanion extends UpdateCompanion<NewsArticle> {
       if (blocksJson != null) 'blocks_json': blocksJson,
       if (isSaved != null) 'is_saved': isSaved,
       if (isRead != null) 'is_read': isRead,
+      if (summaryShort != null) 'summary_short': summaryShort,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -1128,6 +1170,7 @@ class NewsArticlesCompanion extends UpdateCompanion<NewsArticle> {
       Value<String>? blocksJson,
       Value<bool>? isSaved,
       Value<bool>? isRead,
+      Value<String?>? summaryShort,
       Value<int>? rowid}) {
     return NewsArticlesCompanion(
       id: id ?? this.id,
@@ -1141,6 +1184,7 @@ class NewsArticlesCompanion extends UpdateCompanion<NewsArticle> {
       blocksJson: blocksJson ?? this.blocksJson,
       isSaved: isSaved ?? this.isSaved,
       isRead: isRead ?? this.isRead,
+      summaryShort: summaryShort ?? this.summaryShort,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -1181,6 +1225,9 @@ class NewsArticlesCompanion extends UpdateCompanion<NewsArticle> {
     if (isRead.present) {
       map['is_read'] = Variable<bool>(isRead.value);
     }
+    if (summaryShort.present) {
+      map['summary_short'] = Variable<String>(summaryShort.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -1201,6 +1248,7 @@ class NewsArticlesCompanion extends UpdateCompanion<NewsArticle> {
           ..write('blocksJson: $blocksJson, ')
           ..write('isSaved: $isSaved, ')
           ..write('isRead: $isRead, ')
+          ..write('summaryShort: $summaryShort, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -3598,6 +3646,7 @@ typedef $$NewsArticlesTableCreateCompanionBuilder = NewsArticlesCompanion
   required String blocksJson,
   Value<bool> isSaved,
   Value<bool> isRead,
+  Value<String?> summaryShort,
   Value<int> rowid,
 });
 typedef $$NewsArticlesTableUpdateCompanionBuilder = NewsArticlesCompanion
@@ -3613,6 +3662,7 @@ typedef $$NewsArticlesTableUpdateCompanionBuilder = NewsArticlesCompanion
   Value<String> blocksJson,
   Value<bool> isSaved,
   Value<bool> isRead,
+  Value<String?> summaryShort,
   Value<int> rowid,
 });
 
@@ -3657,6 +3707,9 @@ class $$NewsArticlesTableFilterComposer
 
   ColumnFilters<bool> get isRead => $composableBuilder(
       column: $table.isRead, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get summaryShort => $composableBuilder(
+      column: $table.summaryShort, builder: (column) => ColumnFilters(column));
 }
 
 class $$NewsArticlesTableOrderingComposer
@@ -3700,6 +3753,10 @@ class $$NewsArticlesTableOrderingComposer
 
   ColumnOrderings<bool> get isRead => $composableBuilder(
       column: $table.isRead, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get summaryShort => $composableBuilder(
+      column: $table.summaryShort,
+      builder: (column) => ColumnOrderings(column));
 }
 
 class $$NewsArticlesTableAnnotationComposer
@@ -3743,6 +3800,9 @@ class $$NewsArticlesTableAnnotationComposer
 
   GeneratedColumn<bool> get isRead =>
       $composableBuilder(column: $table.isRead, builder: (column) => column);
+
+  GeneratedColumn<String> get summaryShort => $composableBuilder(
+      column: $table.summaryShort, builder: (column) => column);
 }
 
 class $$NewsArticlesTableTableManager extends RootTableManager<
@@ -3782,6 +3842,7 @@ class $$NewsArticlesTableTableManager extends RootTableManager<
             Value<String> blocksJson = const Value.absent(),
             Value<bool> isSaved = const Value.absent(),
             Value<bool> isRead = const Value.absent(),
+            Value<String?> summaryShort = const Value.absent(),
             Value<int> rowid = const Value.absent(),
           }) =>
               NewsArticlesCompanion(
@@ -3796,6 +3857,7 @@ class $$NewsArticlesTableTableManager extends RootTableManager<
             blocksJson: blocksJson,
             isSaved: isSaved,
             isRead: isRead,
+            summaryShort: summaryShort,
             rowid: rowid,
           ),
           createCompanionCallback: ({
@@ -3810,6 +3872,7 @@ class $$NewsArticlesTableTableManager extends RootTableManager<
             required String blocksJson,
             Value<bool> isSaved = const Value.absent(),
             Value<bool> isRead = const Value.absent(),
+            Value<String?> summaryShort = const Value.absent(),
             Value<int> rowid = const Value.absent(),
           }) =>
               NewsArticlesCompanion.insert(
@@ -3824,6 +3887,7 @@ class $$NewsArticlesTableTableManager extends RootTableManager<
             blocksJson: blocksJson,
             isSaved: isSaved,
             isRead: isRead,
+            summaryShort: summaryShort,
             rowid: rowid,
           ),
           withReferenceMapper: (p0) => p0

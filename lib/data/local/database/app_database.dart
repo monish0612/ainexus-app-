@@ -41,6 +41,11 @@ class NewsArticles extends Table {
   BoolColumn get isSaved => boolean().withDefault(const Constant(false))();
   BoolColumn get isRead => boolean().withDefault(const Constant(false))();
 
+  /// AI-generated 1-2 sentence quick summary used by the For You "Summarize"
+  /// action. NULL = not yet summarized. Cached forever per article so re-opening
+  /// the summary reader is instant for already-processed items.
+  TextColumn get summaryShort => text().nullable()();
+
   @override
   Set<Column> get primaryKey => {id};
 }
@@ -130,7 +135,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.background() : super(connection.openBackgroundConnection());
 
   @override
-  int get schemaVersion => 4;
+  int get schemaVersion => 5;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -143,6 +148,9 @@ class AppDatabase extends _$AppDatabase {
       }
       if (from < 4) {
         await migrator.createTable(articleChatSummaries);
+      }
+      if (from < 5) {
+        await migrator.addColumn(newsArticles, newsArticles.summaryShort);
       }
     },
   );

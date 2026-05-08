@@ -73,6 +73,14 @@ class NewsController extends StateNotifier<AsyncValue<List<Article>>> {
     return _repository.markRead(id);
   }
 
+  /// Bulk mark-as-read for the For You "Clear All" / summary "Done" flows.
+  /// The repository updates local DB synchronously and fires a best-effort
+  /// remote bulk request in the background — this future resolves once the
+  /// local update is committed.
+  Future<int> markManyRead(List<String> ids) {
+    return _repository.markManyRead(ids);
+  }
+
   Future<Article?> loadArticle(String id) async {
     return await _repository.fetchArticleDetail(id) ??
         await _repository.getArticle(id);

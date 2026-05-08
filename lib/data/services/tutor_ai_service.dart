@@ -140,17 +140,42 @@ class TutorAiService {
   /// backoff. The backend already has internal retries & cross-provider
   /// fallback, so we keep client-side retries limited to transient network
   /// errors only to avoid amplifying load.
+  ///
+  /// [mode] selects depth — 'lite' (fast, default) or 'deep' (thorough). The
+  /// backend resolves the actual model from the corresponding provider-specific
+  /// hints below. Legacy callers that omit [mode] continue to behave as before
+  /// (the backend defaults to 'lite' for backward compatibility).
+  ///
+  /// [deepModel] is the Gemini deep model (only used when mode='deep').
+  /// [xgrokModel] is a legacy raw override for xGrok (treated as the lite
+  /// slot if [xgrokLiteModel] is absent — kept for backward compatibility).
   Future<GroundedSearchResponse> groundedSearch({
     required String query,
     String? provider,
     String? xgrokModel,
+    String? mode,
+    String? deepModel,
+    String? xgrokLiteModel,
+    String? xgrokDeepModel,
+    String? xgrokThinkingModel,
     CancelToken? cancelToken,
   }) async {
     final tag = provider ?? 'gemini';
+    final isDeep = mode == 'deep' || mode == 'thinking';
+    // Client-side timeouts are deliberately a few seconds longer than the
+    // backend's per-call timeouts (gemini=30s/75s, xgrok=75s/120s) so the
+    // backend gets a chance to surface its own error / fallback response
+    // before the client tears down the socket. We do NOT wait through full
+    // backend retry storms — the OnlineSearchStore queues a resume retry
+    // when the app is in the background, and the user can tap "Retry" in
+    // foreground.
     final timeout = provider == 'xgrok'
-        ? const Duration(seconds: 75)
-        : const Duration(seconds: 60);
-    TLog.d('TutorAI', 'GroundedSearch → "$query" [provider=$tag timeout=${timeout.inSeconds}s]');
+        ? Duration(seconds: isDeep ? 135 : 85)
+        : Duration(seconds: isDeep ? 90 : 60);
+    final qPreview =
+        query.length > 80 ? '${query.substring(0, 77)}\u2026' : query;
+    TLog.d('TutorAI',
+        'GroundedSearch → "$qPreview" [provider=$tag mode=${mode ?? 'lite'} timeout=${timeout.inSeconds}s]');
     final sw = Stopwatch()..start();
 
     Object? lastError;
@@ -166,7 +191,18 @@ class TutorAiService {
         }
         final body = <String, dynamic>{'query': query};
         if (provider != null && provider.isNotEmpty) body['provider'] = provider;
+        if (mode != null && mode.isNotEmpty) body['mode'] = mode;
+        if (deepModel != null && deepModel.isNotEmpty) body['deepModel'] = deepModel;
         if (xgrokModel != null && xgrokModel.isNotEmpty) body['xgrokModel'] = xgrokModel;
+        if (xgrokLiteModel != null && xgrokLiteModel.isNotEmpty) {
+          body['xgrokLiteModel'] = xgrokLiteModel;
+        }
+        if (xgrokDeepModel != null && xgrokDeepModel.isNotEmpty) {
+          body['xgrokDeepModel'] = xgrokDeepModel;
+        }
+        if (xgrokThinkingModel != null && xgrokThinkingModel.isNotEmpty) {
+          body['xgrokThinkingModel'] = xgrokThinkingModel;
+        }
         final response = await _apiClient.post<Object?>(
           ApiEndpoints.aiGroundedSearch,
           data: body,
@@ -179,7 +215,10 @@ class TutorAiService {
           throw StateError('Empty grounded search response');
         }
         sw.stop();
-        TLog.i('TutorAI', 'GroundedSearch ✓ provider=$tag model=${data['model']} sources=${(data['sources'] as List?)?.length ?? 0} ${sw.elapsedMilliseconds}ms (attempt $attempt)');
+        TLog.i('TutorAI',
+            'GroundedSearch ✓ provider=$tag mode=${data['mode'] ?? mode ?? 'lite'} '
+            'model=${data['model']} sources=${(data['sources'] as List?)?.length ?? 0} '
+            '${sw.elapsedMilliseconds}ms (attempt $attempt)');
         return GroundedSearchResponse.fromJson(data);
       } on DioException catch (e) {
         lastError = e;
@@ -198,7 +237,10 @@ class TutorAiService {
       }
     }
     sw.stop();
-    TLog.e('TutorAI', 'GroundedSearch FAILED after $_maxRetries attempts [provider=$tag] ${sw.elapsedMilliseconds}ms', error: lastError);
+    TLog.e('TutorAI',
+        'GroundedSearch FAILED after $_maxRetries attempts [provider=$tag mode=${mode ?? 'lite'}] '
+        '${sw.elapsedMilliseconds}ms',
+        error: lastError);
     throw lastError ?? StateError('Grounded search failed');
   }
 

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:dio/dio.dart';
@@ -152,6 +153,51 @@ class NewsRepository {
     }
   }
 
+  /// Bulk mark-as-read for the For You "Clear All" / summary "Done" flows.
+  ///
+  /// Local DB is updated first (single batched UPDATE) so the UI reacts
+  /// instantly. The server bulk endpoint is fire-and-forget — a transient
+  /// network failure must not block the user's catch-up flow because the
+  /// local state is already correct and will reconcile on the next
+  /// `syncNews()` round-trip. Saved articles are filtered server-side
+  /// (`saved=FALSE` guard) and we mirror that filter locally.
+  Future<int> markManyRead(List<String> ids) async {
+    if (ids.isEmpty) return 0;
+
+    final updated = await (_db.update(_db.newsArticles)
+          ..where((t) => t.id.isIn(ids) & t.isSaved.equals(false)))
+        .write(const db.NewsArticlesCompanion(isRead: Value(true)));
+
+    TLog.d('NewsRepo', 'markManyRead local ✓ requested=${ids.length} updated=$updated');
+
+    unawaited(() async {
+      try {
+        await _apiClient.post<Object?>(
+          ApiEndpoints.newsMarkAllRead,
+          data: <String, dynamic>{'ids': ids},
+          options: Options(receiveTimeout: const Duration(seconds: 30)),
+        );
+        TLog.i('NewsRepo', 'markManyRead remote ✓ ${ids.length} ids');
+      } catch (e) {
+        TLog.w('NewsRepo',
+            'markManyRead remote failed (local already updated): $e',
+            error: e);
+      }
+    }());
+
+    return updated;
+  }
+
+  /// Persists an AI-generated quick summary for the For You "Summarize"
+  /// flow. Local-only (cache); the server has no notion of this — it would
+  /// just regenerate on the next call. Gracefully no-ops if [summary] is
+  /// empty.
+  Future<void> setSummaryShort(String id, String summary) async {
+    if (summary.trim().isEmpty) return;
+    await (_db.update(_db.newsArticles)..where((t) => t.id.equals(id)))
+        .write(db.NewsArticlesCompanion(summaryShort: Value(summary)));
+  }
+
   Future<void> _upsertArticles(List<Map<String, dynamic>> apiArticles) async {
     if (apiArticles.isEmpty) {
       return;
@@ -216,6 +262,11 @@ class NewsRepository {
       'blocks': incomingBlocks ?? existingBlocks,
     };
 
+    // Preserve the locally-cached AI quick summary across server upserts.
+    // The server is unaware of this field so we always carry over whatever
+    // we already have (NULL stays NULL until the user runs Summarize).
+    final preservedSummaryShort = existingRow?.summaryShort;
+
     return db.NewsArticlesCompanion.insert(
       id: _stringOrNull(apiArticle['id']) ?? existingRow?.id ?? '',
       title: _stringOrNull(apiArticle['title']) ??
@@ -239,6 +290,9 @@ class NewsRepository {
           Value(_boolOr(apiArticle['isSaved'], existingRow?.isSaved ?? false)),
       isRead:
           Value(_boolOr(apiArticle['isRead'], existingRow?.isRead ?? false)),
+      summaryShort: preservedSummaryShort == null
+          ? const Value.absent()
+          : Value(preservedSummaryShort),
     );
   }
 
@@ -257,6 +311,7 @@ class NewsRepository {
       date: row.date,
       blocks: _parseBlocks(meta['blocks']),
       summaryMarkdown: _stringOrNull(meta['summaryMarkdown']),
+      summaryShort: _stringOrNull(row.summaryShort),
       originalUrl: _stringOrNull(meta['originalUrl']),
       tag: _stringOrNull(meta['tag']),
       timeAgo: _stringOrNull(meta['timeAgo']),
