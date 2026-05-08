@@ -121,6 +121,7 @@ class NewsSummarizeStore extends ChangeNotifier with WidgetsBindingObserver {
 
   NewsSummarizeService? _service;
   NewsRepository? _repository;
+  String? _liteModel;
   int _sessionId = 0;
   String? _sessionKey;
 
@@ -212,10 +213,12 @@ class NewsSummarizeStore extends ChangeNotifier with WidgetsBindingObserver {
     required List<Article> articles,
     required NewsSummarizeService service,
     required NewsRepository repository,
+    String? liteModel,
   }) {
     _bindObserver();
     _service = service;
     _repository = repository;
+    _liteModel = liteModel;
 
     // Increment session id so any in-flight batch from a previous session
     // can detect it has been superseded and bail out cleanly.
@@ -432,6 +435,7 @@ class NewsSummarizeStore extends ChangeNotifier with WidgetsBindingObserver {
 
         final results = await service.summarizeBatch(
           articles: batch,
+          liteModel: _liteModel,
           cancelToken: token,
         );
 

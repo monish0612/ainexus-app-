@@ -26,6 +26,7 @@ class _SearchParams {
     required this.useXGrok,
     this.mode,
     this.deepModel,
+    this.liteModel,
     this.xgrokLiteModel,
     this.xgrokDeepModel,
     this.xgrokThinkingModel,
@@ -41,6 +42,11 @@ class _SearchParams {
 
   /// Gemini deep model — only relevant when mode == 'deep'.
   final String? deepModel;
+
+  /// Gemini lite model — only relevant when mode == 'lite' and not xGrok.
+  /// Forwarded as `liteModel` so the backend pins the user-configured
+  /// Flash/Lite version (synced cross-device via user_preferences).
+  final String? liteModel;
 
   /// xGrok model overrides per depth — only relevant when useXGrok is true.
   final String? xgrokLiteModel;
@@ -122,6 +128,7 @@ class OnlineSearchStore with WidgetsBindingObserver {
     required bool useXGrok,
     String? mode,
     String? deepModel,
+    String? liteModel,
     String? xgrokLiteModel,
     String? xgrokDeepModel,
     String? xgrokThinkingModel,
@@ -139,6 +146,7 @@ class OnlineSearchStore with WidgetsBindingObserver {
       useXGrok: useXGrok,
       mode: mode,
       deepModel: deepModel,
+      liteModel: liteModel,
       xgrokLiteModel: xgrokLiteModel,
       xgrokDeepModel: xgrokDeepModel,
       xgrokThinkingModel: xgrokThinkingModel,
@@ -230,6 +238,7 @@ class OnlineSearchStore with WidgetsBindingObserver {
           provider: params.useXGrok ? 'xgrok' : null,
           mode: params.mode,
           deepModel: params.useXGrok ? null : params.deepModel,
+          liteModel: params.useXGrok ? null : params.liteModel,
           xgrokLiteModel: params.useXGrok ? params.xgrokLiteModel : null,
           xgrokDeepModel: params.useXGrok ? params.xgrokDeepModel : null,
           xgrokThinkingModel: params.useXGrok ? params.xgrokThinkingModel : null,

@@ -1,5 +1,6 @@
 import 'package:dio/dio.dart';
 
+import '../../core/llm/model_hints.dart';
 import '../../core/network/api_client.dart';
 import '../../core/network/api_endpoints.dart';
 import '../../core/services/telegram_logger.dart';
@@ -14,6 +15,7 @@ class TutorAiService {
     required String text,
     required String platform,
     String? intent,
+    String? liteModel,
   }) async {
     TLog.d('TutorAI', 'Rephrase → platform=$platform${intent != null && intent.isNotEmpty ? ' intent="${intent.length > 60 ? '${intent.substring(0, 60)}…' : intent}"' : ''}');
     try {
@@ -21,6 +23,7 @@ class TutorAiService {
       if (intent != null && intent.isNotEmpty) {
         body['intent'] = intent;
       }
+      _addLiteModel(body, liteModel);
       final response = await _apiClient.post<Object?>(
         ApiEndpoints.aiRephrase,
         data: body,
@@ -39,12 +42,17 @@ class TutorAiService {
     }
   }
 
-  Future<CoachResult> coach({required String text}) async {
+  Future<CoachResult> coach({
+    required String text,
+    String? liteModel,
+  }) async {
     TLog.d('TutorAI', 'Coach → ${text.length} chars');
     try {
+      final body = <String, dynamic>{'text': text};
+      _addLiteModel(body, liteModel);
       final response = await _apiClient.post<Object?>(
         ApiEndpoints.aiCorrect,
-        data: <String, dynamic>{'text': text},
+        data: body,
         options: Options(receiveTimeout: const Duration(seconds: 60)),
       );
       final data = _asMap(response.data);
@@ -60,12 +68,17 @@ class TutorAiService {
     }
   }
 
-  Future<DictionaryResult> define({required String word}) async {
+  Future<DictionaryResult> define({
+    required String word,
+    String? liteModel,
+  }) async {
     TLog.d('TutorAI', 'Define → "$word"');
     try {
+      final body = <String, dynamic>{'word': word};
+      _addLiteModel(body, liteModel);
       final response = await _apiClient.post<Object?>(
         ApiEndpoints.aiDefine,
-        data: <String, dynamic>{'word': word},
+        data: body,
         options: Options(receiveTimeout: const Duration(seconds: 45)),
       );
       final data = _asMap(response.data);
@@ -85,6 +98,7 @@ class TutorAiService {
     required String url,
     String? provider,
     String? xgrokModel,
+    String? liteModel,
     CancelToken? cancelToken,
   }) async {
     TLog.d('TutorAI', 'Summarize → $url [provider=${provider ?? 'gemini'}]');
@@ -92,6 +106,7 @@ class TutorAiService {
       final body = <String, dynamic>{'url': url};
       if (provider != null && provider.isNotEmpty) body['provider'] = provider;
       if (xgrokModel != null && xgrokModel.isNotEmpty) body['xgrokModel'] = xgrokModel;
+      _addLiteModel(body, liteModel);
       final response = await _apiClient.post<Object?>(
         ApiEndpoints.aiSummarize,
         data: body,
@@ -109,6 +124,19 @@ class TutorAiService {
       TLog.e('TutorAI', 'Summarize failed', error: e);
       rethrow;
     }
+  }
+
+  /// Adds a `liteModel` field to [body] when [model] is non-empty. Used by
+  /// every fast/lite endpoint so the user-configured Gemini Lite model from
+  /// Settings (synced cross-device via user_preferences) flows through to
+  /// the backend's LiteLLM gateway. The backend is responsible for
+  /// `gemini/`-prefix normalisation; the Flutter setting holds the bare
+  /// model id, matching the Deep Research convention.
+  void _addLiteModel(Map<String, dynamic> body, String? model) {
+    if (model == null) return;
+    final trimmed = model.trim();
+    if (trimmed.isEmpty) return;
+    body['liteModel'] = trimmed;
   }
 
   Future<TavilySearchResponse> search({
@@ -141,27 +169,45 @@ class TutorAiService {
   /// fallback, so we keep client-side retries limited to transient network
   /// errors only to avoid amplifying load.
   ///
-  /// [mode] selects depth — 'lite' (fast, default) or 'deep' (thorough). The
-  /// backend resolves the actual model from the corresponding provider-specific
-  /// hints below. Legacy callers that omit [mode] continue to behave as before
-  /// (the backend defaults to 'lite' for backward compatibility).
+  /// Model routing fields are funneled through [ModelHints.build] so the
+  /// wire body only ever carries the model id matching the active
+  /// (provider, mode) pair. This is the safety net that prevents a
+  /// permissive backend resolver from routing a "lite" request to a "deep"
+  /// (non-grounded) model — the regression that previously broke real-time
+  /// answers in InsightAI Lite.
   ///
-  /// [deepModel] is the Gemini deep model (only used when mode='deep').
-  /// [xgrokModel] is a legacy raw override for xGrok (treated as the lite
-  /// slot if [xgrokLiteModel] is absent — kept for backward compatibility).
+  /// [mode] selects depth — 'lite' (fast, default), 'deep' (thorough), or
+  /// 'thinking' (xGrok-only). When omitted the backend defaults to 'lite'
+  /// for backward compatibility.
+  ///
+  /// [xgrokModel] is the legacy single-slot xGrok override; it is honoured
+  /// only when [mode] is lite and [xgrokLiteModel] is absent.
   Future<GroundedSearchResponse> groundedSearch({
     required String query,
     String? provider,
     String? xgrokModel,
     String? mode,
     String? deepModel,
+    String? liteModel,
     String? xgrokLiteModel,
     String? xgrokDeepModel,
     String? xgrokThinkingModel,
     CancelToken? cancelToken,
   }) async {
-    final tag = provider ?? 'gemini';
-    final isDeep = mode == 'deep' || mode == 'thinking';
+    final hints = ModelHints.build(
+      provider: provider,
+      mode: mode,
+      deepModel: deepModel,
+      liteModel: liteModel,
+      xgrokLiteModel: xgrokLiteModel,
+      xgrokDeepModel: xgrokDeepModel,
+      xgrokThinkingModel: xgrokThinkingModel,
+      legacyXgrokModel: xgrokModel,
+    );
+    final resolvedProvider = hints['provider'] as String;
+    final resolvedMode = hints['mode'] as String;
+    final isDeep = resolvedMode == ModelHints.modeDeep ||
+        resolvedMode == ModelHints.modeThinking;
     // Client-side timeouts are deliberately a few seconds longer than the
     // backend's per-call timeouts (gemini=30s/75s, xgrok=75s/120s) so the
     // backend gets a chance to surface its own error / fallback response
@@ -169,13 +215,13 @@ class TutorAiService {
     // backend retry storms — the OnlineSearchStore queues a resume retry
     // when the app is in the background, and the user can tap "Retry" in
     // foreground.
-    final timeout = provider == 'xgrok'
+    final timeout = resolvedProvider == ModelHints.providerXGrok
         ? Duration(seconds: isDeep ? 135 : 85)
         : Duration(seconds: isDeep ? 90 : 60);
     final qPreview =
         query.length > 80 ? '${query.substring(0, 77)}\u2026' : query;
     TLog.d('TutorAI',
-        'GroundedSearch → "$qPreview" [provider=$tag mode=${mode ?? 'lite'} timeout=${timeout.inSeconds}s]');
+        'GroundedSearch → "$qPreview" [provider=$resolvedProvider mode=$resolvedMode timeout=${timeout.inSeconds}s]');
     final sw = Stopwatch()..start();
 
     Object? lastError;
@@ -189,20 +235,7 @@ class TutorAiService {
           TLog.w('TutorAI', 'GroundedSearch retry $attempt/$_maxRetries in ${delay.inMilliseconds}ms');
           await Future<void>.delayed(delay);
         }
-        final body = <String, dynamic>{'query': query};
-        if (provider != null && provider.isNotEmpty) body['provider'] = provider;
-        if (mode != null && mode.isNotEmpty) body['mode'] = mode;
-        if (deepModel != null && deepModel.isNotEmpty) body['deepModel'] = deepModel;
-        if (xgrokModel != null && xgrokModel.isNotEmpty) body['xgrokModel'] = xgrokModel;
-        if (xgrokLiteModel != null && xgrokLiteModel.isNotEmpty) {
-          body['xgrokLiteModel'] = xgrokLiteModel;
-        }
-        if (xgrokDeepModel != null && xgrokDeepModel.isNotEmpty) {
-          body['xgrokDeepModel'] = xgrokDeepModel;
-        }
-        if (xgrokThinkingModel != null && xgrokThinkingModel.isNotEmpty) {
-          body['xgrokThinkingModel'] = xgrokThinkingModel;
-        }
+        final body = <String, dynamic>{'query': query, ...hints};
         final response = await _apiClient.post<Object?>(
           ApiEndpoints.aiGroundedSearch,
           data: body,
@@ -216,7 +249,7 @@ class TutorAiService {
         }
         sw.stop();
         TLog.i('TutorAI',
-            'GroundedSearch ✓ provider=$tag mode=${data['mode'] ?? mode ?? 'lite'} '
+            'GroundedSearch ✓ provider=$resolvedProvider mode=${data['mode'] ?? resolvedMode} '
             'model=${data['model']} sources=${(data['sources'] as List?)?.length ?? 0} '
             '${sw.elapsedMilliseconds}ms (attempt $attempt)');
         return GroundedSearchResponse.fromJson(data);
@@ -238,7 +271,7 @@ class TutorAiService {
     }
     sw.stop();
     TLog.e('TutorAI',
-        'GroundedSearch FAILED after $_maxRetries attempts [provider=$tag mode=${mode ?? 'lite'}] '
+        'GroundedSearch FAILED after $_maxRetries attempts [provider=$resolvedProvider mode=$resolvedMode] '
         '${sw.elapsedMilliseconds}ms',
         error: lastError);
     throw lastError ?? StateError('Grounded search failed');
@@ -253,6 +286,7 @@ class TutorAiService {
     List<Map<String, String>> history = const [],
     String? mode,
     String? deepModel,
+    String? liteModel,
     String? provider,
     bool searchRequired = true,
     String? xgrokLiteModel,
@@ -260,7 +294,23 @@ class TutorAiService {
     String? xgrokThinkingModel,
     CancelToken? cancelToken,
   }) async {
-    TLog.d('TutorAI', 'Article follow-up → "${question.length > 60 ? '${question.substring(0, 60)}…' : question}" [mode=${mode ?? 'deep'}, provider=${provider ?? 'gemini'}, searchRequired=$searchRequired]');
+    // Article follow-up defaults to deep mode (legacy behaviour) when the
+    // caller omits [mode]. We resolve the default before going through the
+    // hint builder so the wire body always carries an explicit mode.
+    final hints = ModelHints.build(
+      provider: provider,
+      mode: mode ?? ModelHints.modeDeep,
+      deepModel: deepModel,
+      liteModel: liteModel,
+      xgrokLiteModel: xgrokLiteModel,
+      xgrokDeepModel: xgrokDeepModel,
+      xgrokThinkingModel: xgrokThinkingModel,
+    );
+    final resolvedProvider = hints['provider'] as String;
+    final resolvedMode = hints['mode'] as String;
+    TLog.d('TutorAI',
+        'Article follow-up → "${question.length > 60 ? '${question.substring(0, 60)}…' : question}" '
+        '[mode=$resolvedMode, provider=$resolvedProvider, searchRequired=$searchRequired]');
     try {
       final body = <String, dynamic>{
         'question': question,
@@ -268,13 +318,8 @@ class TutorAiService {
         'articleTitle': articleTitle,
         'history': history,
         'searchRequired': searchRequired,
+        ...hints,
       };
-      if (mode != null && mode.isNotEmpty) body['mode'] = mode;
-      if (deepModel != null && deepModel.isNotEmpty) body['deepModel'] = deepModel;
-      if (provider != null && provider.isNotEmpty) body['provider'] = provider;
-      if (xgrokLiteModel != null && xgrokLiteModel.isNotEmpty) body['xgrokLiteModel'] = xgrokLiteModel;
-      if (xgrokDeepModel != null && xgrokDeepModel.isNotEmpty) body['xgrokDeepModel'] = xgrokDeepModel;
-      if (xgrokThinkingModel != null && xgrokThinkingModel.isNotEmpty) body['xgrokThinkingModel'] = xgrokThinkingModel;
       final response = await _apiClient.post<Object?>(
         ApiEndpoints.aiArticleFollowup,
         data: body,
@@ -286,7 +331,10 @@ class TutorAiService {
         TLog.w('TutorAI', 'Empty article follow-up response body');
         throw StateError('Empty article follow-up response');
       }
-      TLog.i('TutorAI', 'ArticleFollowUp ✓ model=${data['model']} sources=${(data['sources'] as List?)?.length ?? 0} [mode=${mode ?? 'deep'}, provider=${provider ?? 'gemini'}]');
+      TLog.i('TutorAI',
+          'ArticleFollowUp ✓ model=${data['model']} '
+          'sources=${(data['sources'] as List?)?.length ?? 0} '
+          '[mode=$resolvedMode, provider=$resolvedProvider]');
       return ArticleFollowUpResponse.fromJson(data);
     } catch (e) {
       TLog.e('TutorAI', 'Article follow-up failed', error: e);
@@ -306,17 +354,27 @@ class TutorAiService {
     String? xgrokThinkingModel,
     CancelToken? cancelToken,
   }) async {
-    TLog.d('TutorAI', 'Deep research → ${url.length > 60 ? '${url.substring(0, 60)}…' : url} [provider=${provider ?? 'gemini'}]');
+    // Deep research is always deep-mode by definition. We pin the mode here
+    // so the hint builder strips any cross-mode fields a future caller
+    // might forward, and so the wire body always reflects the actual depth.
+    final hints = ModelHints.build(
+      provider: provider,
+      mode: ModelHints.modeDeep,
+      deepModel: deepModel,
+      xgrokDeepModel: xgrokDeepModel,
+      xgrokThinkingModel: xgrokThinkingModel,
+    );
+    final resolvedProvider = hints['provider'] as String;
+    TLog.d('TutorAI',
+        'Deep research → ${url.length > 60 ? '${url.substring(0, 60)}…' : url} '
+        '[provider=$resolvedProvider]');
     try {
       final body = <String, dynamic>{
         'url': url,
         'question': question,
         'history': history,
+        ...hints,
       };
-      if (deepModel != null && deepModel.isNotEmpty) body['deepModel'] = deepModel;
-      if (provider != null && provider.isNotEmpty) body['provider'] = provider;
-      if (xgrokDeepModel != null && xgrokDeepModel.isNotEmpty) body['xgrokDeepModel'] = xgrokDeepModel;
-      if (xgrokThinkingModel != null && xgrokThinkingModel.isNotEmpty) body['xgrokThinkingModel'] = xgrokThinkingModel;
       final response = await _apiClient.post<Object?>(
         ApiEndpoints.aiDeepResearch,
         data: body,
@@ -328,7 +386,10 @@ class TutorAiService {
         TLog.w('TutorAI', 'Empty deep research response body');
         throw StateError('Empty deep research response');
       }
-      TLog.i('TutorAI', 'DeepResearch ✓ model=${data['model']} sources=${(data['sources'] as List?)?.length ?? 0} [provider=${provider ?? 'gemini'}]');
+      TLog.i('TutorAI',
+          'DeepResearch ✓ model=${data['model']} '
+          'sources=${(data['sources'] as List?)?.length ?? 0} '
+          '[provider=$resolvedProvider]');
       return ArticleFollowUpResponse.fromJson(data);
     } catch (e) {
       TLog.e('TutorAI', 'Deep research failed', error: e);
@@ -345,6 +406,7 @@ class TutorAiService {
     List<Map<String, String>> history = const [],
     String? mode,
     String? deepModel,
+    String? liteModel,
     String? provider,
     bool searchRequired = true,
     String? xgrokLiteModel,
@@ -352,7 +414,22 @@ class TutorAiService {
     String? xgrokThinkingModel,
     CancelToken? cancelToken,
   }) async {
-    TLog.d('TutorAI', 'Search follow-up → "${question.length > 60 ? '${question.substring(0, 60)}…' : question}" [mode=${mode ?? 'deep'}, provider=${provider ?? 'gemini'}, searchRequired=$searchRequired]');
+    // Same defaulting rule as articleFollowUp: deep is the legacy default
+    // when the caller doesn't specify [mode].
+    final hints = ModelHints.build(
+      provider: provider,
+      mode: mode ?? ModelHints.modeDeep,
+      deepModel: deepModel,
+      liteModel: liteModel,
+      xgrokLiteModel: xgrokLiteModel,
+      xgrokDeepModel: xgrokDeepModel,
+      xgrokThinkingModel: xgrokThinkingModel,
+    );
+    final resolvedProvider = hints['provider'] as String;
+    final resolvedMode = hints['mode'] as String;
+    TLog.d('TutorAI',
+        'Search follow-up → "${question.length > 60 ? '${question.substring(0, 60)}…' : question}" '
+        '[mode=$resolvedMode, provider=$resolvedProvider, searchRequired=$searchRequired]');
     try {
       final body = <String, dynamic>{
         'query': query,
@@ -360,13 +437,8 @@ class TutorAiService {
         'question': question,
         'history': history,
         'searchRequired': searchRequired,
+        ...hints,
       };
-      if (mode != null && mode.isNotEmpty) body['mode'] = mode;
-      if (deepModel != null && deepModel.isNotEmpty) body['deepModel'] = deepModel;
-      if (provider != null && provider.isNotEmpty) body['provider'] = provider;
-      if (xgrokLiteModel != null && xgrokLiteModel.isNotEmpty) body['xgrokLiteModel'] = xgrokLiteModel;
-      if (xgrokDeepModel != null && xgrokDeepModel.isNotEmpty) body['xgrokDeepModel'] = xgrokDeepModel;
-      if (xgrokThinkingModel != null && xgrokThinkingModel.isNotEmpty) body['xgrokThinkingModel'] = xgrokThinkingModel;
       final response = await _apiClient.post<Object?>(
         ApiEndpoints.aiSearchFollowup,
         data: body,
@@ -378,7 +450,10 @@ class TutorAiService {
         TLog.w('TutorAI', 'Empty search follow-up response body');
         throw StateError('Empty search follow-up response');
       }
-      TLog.i('TutorAI', 'SearchFollowUp ✓ model=${data['model']} sources=${(data['sources'] as List?)?.length ?? 0} [mode=${mode ?? 'deep'}, provider=${provider ?? 'gemini'}]');
+      TLog.i('TutorAI',
+          'SearchFollowUp ✓ model=${data['model']} '
+          'sources=${(data['sources'] as List?)?.length ?? 0} '
+          '[mode=$resolvedMode, provider=$resolvedProvider]');
       return ArticleFollowUpResponse.fromJson(data);
     } catch (e) {
       TLog.e('TutorAI', 'Search follow-up failed', error: e);
@@ -391,6 +466,7 @@ class TutorAiService {
   Future<String> summarizeHistory({
     required List<Map<String, String>> messages,
     String? articleContext,
+    String? liteModel,
     CancelToken? cancelToken,
   }) async {
     TLog.d('TutorAI', 'Summarize history → ${messages.length} msgs, ctx="${articleContext ?? ''}"');
@@ -401,6 +477,7 @@ class TutorAiService {
       if (articleContext != null && articleContext.isNotEmpty) {
         body['articleContext'] = articleContext;
       }
+      _addLiteModel(body, liteModel);
       final response = await _apiClient.post<Object?>(
         ApiEndpoints.aiSummarizeHistory,
         data: body,

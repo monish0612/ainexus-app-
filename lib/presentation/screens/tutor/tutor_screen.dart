@@ -12,6 +12,7 @@ import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/di/injection.dart';
+import '../../../core/llm/model_name_format.dart';
 import '../../../core/services/hold_to_speak_service.dart';
 import '../../../core/services/online_search_store.dart';
 import '../../../core/services/process_text_service.dart';
@@ -575,10 +576,12 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
         intentToSend = null;
       }
 
+      final liteModel = ref.read(settingsProvider).liteModel;
       final result = await ref.read(tutorAiServiceProvider).rephrase(
         text: textToSend,
         platform: _selectedPlatform.id,
         intent: intentToSend,
+        liteModel: liteModel,
       );
       if (!mounted) return;
       setState(() {
@@ -609,7 +612,10 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
     });
 
     try {
-      final result = await ref.read(tutorAiServiceProvider).coach(text: text);
+      final liteModel = ref.read(settingsProvider).liteModel;
+      final result = await ref
+          .read(tutorAiServiceProvider)
+          .coach(text: text, liteModel: liteModel);
       if (!mounted) return;
       setState(() {
         _coachResult = result;
@@ -632,7 +638,12 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
     _voiceLastShown = '';
 
     final ok = await _voice.start();
-    if (!ok && mounted) {
+    // Only surface the "unavailable" toast for genuine engine/permission
+    // failures — NOT for super-fast taps where the user already released
+    // before init finished (status would be idle/stopping in that case).
+    if (!ok &&
+        mounted &&
+        _voice.status == HoldToSpeakStatus.unsupported) {
       _showMessage('Voice input is not available on this device');
     }
   }
@@ -753,6 +764,7 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
       useXGrok: useXGrok,
       mode: mode,
       deepModel: useXGrok ? null : settings.deepModel,
+      liteModel: useXGrok ? null : settings.liteModel,
       xgrokLiteModel: useXGrok ? settings.xgrokLiteModel : null,
       xgrokDeepModel: useXGrok ? settings.xgrokDeepModel : null,
       xgrokThinkingModel: useXGrok ? settings.xgrokThinkingModel : null,
@@ -799,6 +811,7 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
       service: ref.read(tutorAiServiceProvider),
       provider: useXGrok ? 'xgrok' : null,
       xgrokModel: useXGrok ? settings.xgrokLiteModel : null,
+      liteModel: useXGrok ? null : settings.liteModel,
     );
     store.addListener(_summarizeKey!, _onSummarizeStoreUpdate);
   }
@@ -823,7 +836,10 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
     });
 
     try {
-      final result = await ref.read(tutorAiServiceProvider).define(word: word);
+      final liteModel = ref.read(settingsProvider).liteModel;
+      final result = await ref
+          .read(tutorAiServiceProvider)
+          .define(word: word, liteModel: liteModel);
       if (!mounted) return;
       setState(() {
         _dictResult = result;
@@ -3168,28 +3184,7 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
     );
   }
 
-  String _shortModelName(String model) {
-    final lower = model.toLowerCase();
-    // Handle "gemini/gemini-2.5-flash" → "Gemini 2.5 Flash"
-    if (lower.contains('gemini')) {
-      final versionMatch = RegExp(r'(\d+\.?\d*)-?(\w+)?$').firstMatch(lower);
-      if (versionMatch != null) {
-        final ver = versionMatch.group(1) ?? '';
-        final variant = versionMatch.group(2) ?? '';
-        final pretty = variant.isNotEmpty
-            ? 'Gemini $ver ${variant[0].toUpperCase()}${variant.substring(1)}'
-            : 'Gemini $ver';
-        return pretty;
-      }
-      return 'Gemini';
-    }
-    if (lower.contains('llama')) return 'Llama 3.3';
-    if (lower.contains('gpt-4')) return 'GPT-4';
-    if (lower.contains('gpt-3')) return 'GPT-3.5';
-    if (lower.contains('claude')) return 'Claude';
-    if (model.length > 22) return '${model.substring(0, 20)}…';
-    return model;
-  }
+  String _shortModelName(String model) => shortModelName(model);
 
   String _extractionLabel(String method) {
     switch (method) {

@@ -86,6 +86,7 @@ class _SearchRetry {
     required this.aiService,
     this.mode,
     this.deepModel,
+    this.liteModel,
     this.provider,
     this.xgrokLiteModel,
     this.xgrokDeepModel,
@@ -100,6 +101,7 @@ class _SearchRetry {
   final TutorAiService aiService;
   final String? mode;
   final String? deepModel;
+  final String? liteModel;
   final String? provider;
   final String? xgrokLiteModel;
   final String? xgrokDeepModel;
@@ -175,6 +177,7 @@ class SearchFollowUpStore with WidgetsBindingObserver {
           aiService: r.aiService,
           mode: r.mode,
           deepModel: r.deepModel,
+          liteModel: r.liteModel,
           provider: r.provider,
           xgrokLiteModel: r.xgrokLiteModel,
           xgrokDeepModel: r.xgrokDeepModel,
@@ -238,6 +241,7 @@ class SearchFollowUpStore with WidgetsBindingObserver {
     required TutorAiService aiService,
     String? mode,
     String? deepModel,
+    String? liteModel,
     String? provider,
     String? xgrokLiteModel,
     String? xgrokDeepModel,
@@ -263,6 +267,7 @@ class SearchFollowUpStore with WidgetsBindingObserver {
       aiService: aiService,
       mode: mode,
       deepModel: deepModel,
+      liteModel: liteModel,
       provider: provider,
       xgrokLiteModel: xgrokLiteModel,
       xgrokDeepModel: xgrokDeepModel,
@@ -312,6 +317,7 @@ class SearchFollowUpStore with WidgetsBindingObserver {
     required TutorAiService aiService,
     String? mode,
     String? deepModel,
+    String? liteModel,
     String? provider,
     String? xgrokLiteModel,
     String? xgrokDeepModel,
@@ -333,6 +339,7 @@ class SearchFollowUpStore with WidgetsBindingObserver {
             history: history,
             mode: mode,
             deepModel: deepModel,
+            liteModel: liteModel,
             provider: provider,
             xgrokLiteModel: xgrokLiteModel,
             xgrokDeepModel: xgrokDeepModel,
@@ -364,6 +371,7 @@ class SearchFollowUpStore with WidgetsBindingObserver {
               final summaryText = await aiService.summarizeHistory(
                 messages: oldPairs,
                 articleContext: query,
+                liteModel: liteModel,
               );
               if (summaryText.isNotEmpty) {
                 final existingPairs =
@@ -393,6 +401,7 @@ class SearchFollowUpStore with WidgetsBindingObserver {
                   history: condensedHistory,
                   mode: mode,
                   deepModel: deepModel,
+                  liteModel: liteModel,
                   provider: provider,
                   xgrokLiteModel: xgrokLiteModel,
                   xgrokDeepModel: xgrokDeepModel,
@@ -445,6 +454,7 @@ class SearchFollowUpStore with WidgetsBindingObserver {
           aiService: aiService,
           mode: mode,
           deepModel: deepModel,
+          liteModel: liteModel,
           provider: provider,
           xgrokLiteModel: xgrokLiteModel,
           xgrokDeepModel: xgrokDeepModel,
@@ -755,6 +765,7 @@ class _SearchFollowUpChatState extends ConsumerState<_SearchFollowUpChat>
       aiService: ref.read(tutorAiServiceProvider),
       mode: _useDeepModel ? null : 'lite',
       deepModel: _useDeepModel ? settings.deepModel : null,
+      liteModel: (_useDeepModel || xgrokOn) ? null : settings.liteModel,
       provider: xgrokOn ? 'xgrok' : null,
       xgrokLiteModel: xgrokOn ? settings.xgrokLiteModel : null,
       xgrokDeepModel: xgrokOn ? settings.xgrokDeepModel : null,
@@ -941,6 +952,7 @@ class _SearchFollowUpChatState extends ConsumerState<_SearchFollowUpChat>
       aiService: ref.read(tutorAiServiceProvider),
       mode: _useDeepModel ? null : 'lite',
       deepModel: _useDeepModel ? settings.deepModel : null,
+      liteModel: (_useDeepModel || xgrokOn) ? null : settings.liteModel,
       provider: xgrokOn ? 'xgrok' : null,
       xgrokLiteModel: xgrokOn ? settings.xgrokLiteModel : null,
       xgrokDeepModel: xgrokOn ? settings.xgrokDeepModel : null,
@@ -1020,6 +1032,7 @@ class _SearchFollowUpChatState extends ConsumerState<_SearchFollowUpChat>
     store._summarizingQueries.add(query);
 
     final aiService = ref.read(tutorAiServiceProvider);
+    final liteModel = ref.read(settingsProvider).liteModel;
     unawaited(() async {
       try {
         final messagesToSummarize = <Map<String, String>>[];
@@ -1045,6 +1058,7 @@ class _SearchFollowUpChatState extends ConsumerState<_SearchFollowUpChat>
         final summary = await aiService.summarizeHistory(
           messages: messagesToSummarize,
           articleContext: query,
+          liteModel: liteModel,
         );
         if (summary.isNotEmpty) {
           store.saveSummary(query, summary, totalOldPairCount);

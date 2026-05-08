@@ -8,6 +8,7 @@ import '../../../core/di/injection.dart';
 import '../../../core/services/telegram_logger.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../domain/entities/tutor_entities.dart';
+import '../settings/settings_controller.dart';
 
 /// Standalone rephrase screen that can be pushed on any navigation stack.
 /// Preserves the underlying screen so back-swipe returns to it.
@@ -53,10 +54,12 @@ class _RephraseLookupScreenState extends ConsumerState<RephraseLookupScreen> {
 
     try {
       final platformId = _selectedPlatform.toLowerCase();
+      final liteModel = ref.read(settingsProvider).liteModel;
       final result = await ref.read(tutorAiServiceProvider).rephrase(
             text: widget.text,
             platform: platformId,
             intent: platformId == 'own' ? 'clear and natural' : null,
+            liteModel: liteModel,
           );
       if (!mounted) return;
       setState(() {

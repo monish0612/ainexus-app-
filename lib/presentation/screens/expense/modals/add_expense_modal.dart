@@ -202,6 +202,14 @@ class _AddExpenseSheetState extends State<_AddExpenseSheet>
   bool _voiceParsing = false;
   String _voiceText = '';
 
+  /// Live partial text for the recording display. We use a [ValueNotifier]
+  /// so the small "🔴 transcribed text" container can rebuild on every
+  /// partial result without dragging the whole voice-mode `Container` (with
+  /// its expensive `RadialGradient`) into the rebuild path. Without this
+  /// indirection, every partial → `setState` → repaint of the gradient
+  /// caused visible lag during fast dictation.
+  final ValueNotifier<String> _voiceTextNotifier = ValueNotifier<String>('');
+
   Timer? _debounce;
 
   @override
@@ -246,15 +254,22 @@ class _AddExpenseSheetState extends State<_AddExpenseSheet>
     if (!mounted) return;
     final text = _voice.displayText;
     final listening = _voice.isListening;
-    // Only rebuild when transcript or listening flag actually changed.
-    // Sound-level updates ride a separate ValueListenable on the
-    // [HoldToSpeakController] and the inner mic widget owns its own pulse
-    // animation, so we never need a setState here for audio frames.
-    if (text != _voiceText || listening != _isListening) {
-      setState(() {
-        _voiceText = text;
-        _isListening = listening;
-      });
+
+    // Live partials → push into the ValueNotifier *without* setState. Only
+    // the small `Text(_voiceText)` widget (wrapped in a
+    // [ValueListenableBuilder]) rebuilds. The huge surrounding `Container`
+    // with its `RadialGradient` is unaffected — same trick the tutor
+    // screen gets for free via `TextEditingController`.
+    if (text != _voiceText) {
+      _voiceText = text;
+      _voiceTextNotifier.value = text;
+    }
+
+    // Listening flip drives the gradient color, mic ring, and helper text,
+    // so we still need a setState — but it only happens twice per session
+    // (start + stop) instead of once per partial result.
+    if (listening != _isListening) {
+      setState(() => _isListening = listening);
     }
   }
 
@@ -294,6 +309,7 @@ class _AddExpenseSheetState extends State<_AddExpenseSheet>
   void dispose() {
     _voice.removeListener(_onVoiceUpdate);
     _voice.dispose();
+    _voiceTextNotifier.dispose();
     _debounce?.cancel();
     _shakeCtrl.dispose();
     _descCtrl.removeListener(_onDescriptionChanged);
@@ -339,9 +355,12 @@ class _AddExpenseSheetState extends State<_AddExpenseSheet>
 
   Future<void> _startListening() async {
     if (_voice.isListening) return;
-    setState(() => _voiceText = '');
+    _voiceText = '';
+    _voiceTextNotifier.value = '';
     final ok = await _voice.start();
-    if (!ok && mounted) {
+    // Only log "unavailable" for genuine engine/permission failures, not
+    // fast-tap aborts where the user released before init finished.
+    if (!ok && mounted && _voice.status == HoldToSpeakStatus.unsupported) {
       TLog.w('AddExpense', 'Voice unavailable on this device');
     }
   }
@@ -358,6 +377,7 @@ class _AddExpenseSheetState extends State<_AddExpenseSheet>
 
     final finalText = voiceResult.transcript;
     _voiceText = finalText;
+    _voiceTextNotifier.value = finalText;
 
     TLog.i(
       'AddExpense',
@@ -1044,39 +1064,46 @@ class _AddExpenseSheetState extends State<_AddExpenseSheet>
                       : colors.text5,
                 ),
               ),
-              if (_voiceText.isNotEmpty && _isListening) ...[
-                const SizedBox(height: 16),
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: colors.bg2,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: colors.border),
-                  ),
-                  child: Row(
-                    children: [
-                      Container(
-                        width: 4,
-                        height: 32,
+              if (_isListening)
+                ValueListenableBuilder<String>(
+                  valueListenable: _voiceTextNotifier,
+                  builder: (context, partial, _) {
+                    if (partial.isEmpty) return const SizedBox.shrink();
+                    return Padding(
+                      padding: const EdgeInsets.only(top: 16),
+                      child: Container(
+                        padding: const EdgeInsets.all(12),
                         decoration: BoxDecoration(
-                          color: const Color(0xFFEF4444),
-                          borderRadius: BorderRadius.circular(2),
+                          color: colors.bg2,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: colors.border),
+                        ),
+                        child: Row(
+                          children: [
+                            Container(
+                              width: 4,
+                              height: 32,
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFEF4444),
+                                borderRadius: BorderRadius.circular(2),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Text(
+                                partial,
+                                style: textTheme.bodyMedium?.copyWith(
+                                  color: colors.text,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          _voiceText,
-                          style: textTheme.bodyMedium?.copyWith(
-                            color: colors.text,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
+                    );
+                  },
                 ),
-              ],
               if (!_isListening) ...[
                 const SizedBox(height: 20),
                 Wrap(
@@ -2558,6 +2585,13 @@ class _HoldToRecordMicState extends State<_HoldToRecordMic>
     with SingleTickerProviderStateMixin {
   late final AnimationController _pulseCtrl;
 
+  /// Tracks the user's finger, NOT the engine state. The parent's
+  /// `widget.isListening` flips only after the speech engine reaches its
+  /// `listening` status (~50-200 ms after onHoldStart). On a faster tap,
+  /// gating `onHoldEnd` with `widget.isListening` would skip the stop call
+  /// and leave the engine recording silently forever.
+  bool _userHolding = false;
+
   @override
   void initState() {
     super.initState();
@@ -2585,15 +2619,21 @@ class _HoldToRecordMicState extends State<_HoldToRecordMic>
   }
 
   void _onDown(PointerDownEvent _) {
-    if (!widget.isListening) widget.onHoldStart();
+    if (_userHolding) return;
+    _userHolding = true;
+    widget.onHoldStart();
   }
 
   void _onUp(PointerUpEvent _) {
-    if (widget.isListening) widget.onHoldEnd();
+    if (!_userHolding) return;
+    _userHolding = false;
+    widget.onHoldEnd();
   }
 
   void _onCancel(PointerCancelEvent _) {
-    if (widget.isListening) widget.onHoldEnd();
+    if (!_userHolding) return;
+    _userHolding = false;
+    widget.onHoldEnd();
   }
 
   @override

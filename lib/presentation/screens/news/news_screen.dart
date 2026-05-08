@@ -15,6 +15,7 @@ import '../../../core/theme/app_colors.dart';
 import '../../../domain/entities/news_entities.dart';
 import '../../widgets/compact_header.dart';
 import '../../widgets/news_action_fab.dart';
+import '../settings/settings_controller.dart';
 import '../settings/settings_modal.dart';
 import 'article_detail_modal.dart';
 import 'article_followup_sheet.dart';
@@ -279,11 +280,13 @@ class _NewsScreenState extends ConsumerState<NewsScreen>
   Future<void> _openSummaryReader(List<Article> articles) async {
     final service = ref.read(newsSummarizeServiceProvider);
     final repo = ref.read(newsRepositoryProvider);
+    final liteModel = ref.read(settingsProvider).liteModel;
 
     NewsSummarizeStore.instance.start(
       articles: articles,
       service: service,
       repository: repo,
+      liteModel: liteModel,
     );
 
     if (!mounted) return;

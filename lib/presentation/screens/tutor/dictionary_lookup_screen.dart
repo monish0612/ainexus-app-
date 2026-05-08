@@ -13,6 +13,7 @@ import '../../../core/services/telegram_logger.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../data/local/database/app_database.dart';
 import '../../../domain/entities/tutor_entities.dart';
+import '../settings/settings_controller.dart';
 
 /// Lightweight full-screen dictionary lookup pushed on top of an article.
 /// Swiping back returns to the article underneath.
@@ -42,8 +43,10 @@ class _DictionaryLookupScreenState
 
   Future<void> _lookup() async {
     try {
-      final result =
-          await ref.read(tutorAiServiceProvider).define(word: widget.word);
+      final liteModel = ref.read(settingsProvider).liteModel;
+      final result = await ref
+          .read(tutorAiServiceProvider)
+          .define(word: widget.word, liteModel: liteModel);
       if (!mounted) return;
 
       final db = ref.read(appDatabaseProvider);

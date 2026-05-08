@@ -24,12 +24,18 @@ class _SummarizeParams {
     required this.service,
     this.provider,
     this.xgrokModel,
+    this.liteModel,
   });
 
   final String url;
   final TutorAiService service;
   final String? provider;
   final String? xgrokModel;
+
+  /// Gemini Lite model from Settings — only relevant on the Gemini path
+  /// (provider != 'xgrok'). Forwarded to the backend so the LiteLLM gateway
+  /// pins the user-configured Flash/Lite version (synced cross-device).
+  final String? liteModel;
 }
 
 /// Singleton store that executes URL summarizations in a background-resilient
@@ -94,6 +100,7 @@ class SummarizeStore with WidgetsBindingObserver {
     required TutorAiService service,
     String? provider,
     String? xgrokModel,
+    String? liteModel,
   }) {
     init();
     final key = url;
@@ -107,6 +114,7 @@ class SummarizeStore with WidgetsBindingObserver {
       service: service,
       provider: provider,
       xgrokModel: xgrokModel,
+      liteModel: liteModel,
     );
     _params[key] = params;
 
@@ -186,6 +194,7 @@ class SummarizeStore with WidgetsBindingObserver {
           url: params.url,
           provider: params.provider,
           xgrokModel: params.xgrokModel,
+          liteModel: params.liteModel,
           cancelToken: cancelToken,
         );
 

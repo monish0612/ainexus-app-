@@ -393,14 +393,19 @@ class HoldToSpeakController extends ChangeNotifier {
 
     final started = await _beginEngineSession();
     if (_disposed) return false;
-    if (!started && _holdActive) {
-      // Couldn't start at all — cleanup
+    // Cleanup ANY time we're not actually listening — covers both the
+    // "couldn't start" case AND the rare-but-possible race where stop()
+    // finalized while we were still inside _ensureInitialized() (otherwise
+    // the elapsed timer would run forever).
+    if (!started || !_holdActive) {
       _stopElapsedTimer();
       await _stopAudioRecording(discard: true);
-      _holdActive = false;
-      if (_activeOwner == this) _activeOwner = null;
+      if (_holdActive) {
+        _holdActive = false;
+        if (_activeOwner == this) _activeOwner = null;
+      }
     }
-    return started || _holdActive;
+    return started && _holdActive;
   }
 
   /// Stop listening and return the final transcript. Safe to call when
@@ -549,7 +554,12 @@ class HoldToSpeakController extends ChangeNotifier {
   }
 
   void _onResult(SpeechRecognitionResult result) {
-    if (_disposed || _cancelRequested) return;
+    // Suppress late events that arrive after we've already finalized this
+    // hold (e.g. a stray trailing final the engine emits after `stop()`
+    // returned to the consumer). Without this guard the listener could
+    // write a "longer" transcript into the target [TextEditingController]
+    // *after* the consumer already wrote the final one, causing flicker.
+    if (_disposed || _cancelRequested || _finalizeRan) return;
 
     final words = result.recognizedWords;
     final isFinal = result.finalResult;
@@ -606,7 +616,7 @@ class HoldToSpeakController extends ChangeNotifier {
   }
 
   void _onEngineStatus(String s) {
-    if (_disposed || _cancelRequested) return;
+    if (_disposed || _cancelRequested || _finalizeRan) return;
 
     if (s == 'done' || s == 'notListening') {
       if (_stopRequested) {
@@ -628,7 +638,7 @@ class HoldToSpeakController extends ChangeNotifier {
   }
 
   void _onEngineError(dynamic error) {
-    if (_disposed || _cancelRequested) return;
+    if (_disposed || _cancelRequested || _finalizeRan) return;
 
     final msg = (error?.errorMsg as String?) ?? error.toString();
     final permanent = (error?.permanent as bool?) ?? false;

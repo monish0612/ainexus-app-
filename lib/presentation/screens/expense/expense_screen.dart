@@ -10,6 +10,7 @@ import '../../../core/services/telegram_logger.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../domain/entities/expense_entities.dart';
 import '../../widgets/compact_header.dart';
+import '../settings/settings_controller.dart';
 import '../settings/settings_modal.dart';
 import 'widgets/tracker_tab.dart';
 import 'widgets/insights_tab.dart';
@@ -178,12 +179,14 @@ class _ExpenseScreenState extends ConsumerState<ExpenseScreen>
   void _openAddExpenseModal() {
     final learnings = ref.read(learningsProvider);
     final aiService = ref.read(aiCategorizeServiceProvider);
+    final liteModel = ref.read(settingsProvider).liteModel;
 
     showAddExpenseModal(
       context,
       learnings: learnings,
-      categorize: (description, l) => aiService.categorize(description, l),
-      smartParse: (text) => aiService.smartParse(text),
+      categorize: (description, l) =>
+          aiService.categorize(description, l, liteModel: liteModel),
+      smartParse: (text) => aiService.smartParse(text, liteModel: liteModel),
       onAdd: (payload, isManual, meta) async {
         final expense = Expense(
           id: DateTime.now().millisecondsSinceEpoch.toString(),
@@ -338,12 +341,14 @@ class _ExpenseScreenState extends ConsumerState<ExpenseScreen>
   void _openAddExpenseModalWithImage(String imagePath) {
     final learnings = ref.read(learningsProvider);
     final aiService = ref.read(aiCategorizeServiceProvider);
+    final liteModel = ref.read(settingsProvider).liteModel;
 
     showAddExpenseModal(
       context,
       learnings: learnings,
-      categorize: (description, l) => aiService.categorize(description, l),
-      smartParse: (text) => aiService.smartParse(text),
+      categorize: (description, l) =>
+          aiService.categorize(description, l, liteModel: liteModel),
+      smartParse: (text) => aiService.smartParse(text, liteModel: liteModel),
       initialImagePath: imagePath,
       onAdd: (payload, isManual, meta) async {
         final expense = Expense(

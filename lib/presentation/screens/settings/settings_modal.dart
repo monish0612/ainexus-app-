@@ -123,6 +123,15 @@ class _SettingsSheet extends StatelessWidget {
                       const SizedBox(height: 24),
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 18),
+                        child: _LiteModelSection(
+                          colors: colors,
+                          liteModel: settings.liteModel,
+                          onChanged: (m) => notifier.setLiteModel(m),
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 18),
                         child: _XGrokSection(
                           colors: colors,
                           enabled: settings.xgrokEnabled,
@@ -557,6 +566,182 @@ class _DeepModelSectionState extends State<_DeepModelSection> {
                       )
                     : Padding(
                         key: const ValueKey('edit'),
+                        padding: const EdgeInsets.only(right: 12),
+                        child: Icon(
+                          LucideIcons.pencil,
+                          size: 14,
+                          color: colors.text4,
+                        ),
+                      ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// ── Gemini Lite Model ────────────────────────────────────────────────────────
+
+class _LiteModelSection extends StatefulWidget {
+  const _LiteModelSection({
+    required this.colors,
+    required this.liteModel,
+    required this.onChanged,
+  });
+
+  final AppColors colors;
+  final String liteModel;
+  final void Function(String) onChanged;
+
+  @override
+  State<_LiteModelSection> createState() => _LiteModelSectionState();
+}
+
+class _LiteModelSectionState extends State<_LiteModelSection> {
+  late final TextEditingController _ctrl;
+  bool _editing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = TextEditingController(text: widget.liteModel);
+  }
+
+  @override
+  void didUpdateWidget(_LiteModelSection old) {
+    super.didUpdateWidget(old);
+    if (!_editing && old.liteModel != widget.liteModel) {
+      _ctrl.text = widget.liteModel;
+    }
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  void _save() {
+    final value = _ctrl.text.trim();
+    if (value.isNotEmpty && value != widget.liteModel) {
+      widget.onChanged(value);
+    }
+    setState(() => _editing = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = widget.colors;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          'GEMINI LITE MODEL',
+          style: GoogleFonts.plusJakartaSans(
+            fontSize: 10,
+            fontWeight: FontWeight.w800,
+            color: colors.text3,
+            letterSpacing: 1.6,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          'Gemini model for fast tasks: bill scan, expense categorize, '
+          'news summary, article lite follow-up, tutor (summarizer, '
+          'rephrase, coach, dictionary).',
+          style: GoogleFonts.plusJakartaSans(
+            fontSize: 11,
+            color: colors.text4,
+          ),
+        ),
+        const SizedBox(height: 10),
+        AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOutCubic,
+          decoration: BoxDecoration(
+            color: colors.bg2,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: _editing
+                  ? AppColors.accent.withValues(alpha: 0.5)
+                  : colors.border,
+            ),
+          ),
+          child: Row(
+            children: [
+              Padding(
+                padding: const EdgeInsets.only(left: 14),
+                child: AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 150),
+                  child: Icon(
+                    LucideIcons.zap,
+                    key: ValueKey(_editing),
+                    size: 16,
+                    color: _editing ? AppColors.accent : colors.text3,
+                  ),
+                ),
+              ),
+              Expanded(
+                child: TextField(
+                  controller: _ctrl,
+                  readOnly: !_editing,
+                  onTap: () {
+                    if (!_editing) setState(() => _editing = true);
+                  },
+                  onSubmitted: (_) => _save(),
+                  style: GoogleFonts.plusJakartaSans(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: colors.text,
+                  ),
+                  decoration: InputDecoration(
+                    border: InputBorder.none,
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 13,
+                    ),
+                    hintText: 'e.g. gemini-3.1-flash-lite-preview',
+                    hintStyle: GoogleFonts.plusJakartaSans(
+                      fontSize: 13,
+                      color: colors.text5,
+                    ),
+                  ),
+                ),
+              ),
+              AnimatedSwitcher(
+                duration: const Duration(milliseconds: 200),
+                transitionBuilder: (child, animation) => FadeTransition(
+                  opacity: animation,
+                  child: ScaleTransition(scale: animation, child: child),
+                ),
+                child: _editing
+                    ? GestureDetector(
+                        key: const ValueKey('save-lite'),
+                        onTap: _save,
+                        child: Container(
+                          margin: const EdgeInsets.only(right: 8),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 6,
+                          ),
+                          decoration: BoxDecoration(
+                            color: AppColors.accent,
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Text(
+                            'Save',
+                            style: GoogleFonts.plusJakartaSans(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                      )
+                    : Padding(
+                        key: const ValueKey('edit-lite'),
                         padding: const EdgeInsets.only(right: 12),
                         child: Icon(
                           LucideIcons.pencil,

@@ -43,7 +43,12 @@ class _SummaryReaderScreenState extends ConsumerState<SummaryReaderScreen> {
   @override
   void initState() {
     super.initState();
-    _pageCtrl = PageController();
+    // viewportFraction: 1.0 → no peek of neighbour pages, so each card snaps
+    // perfectly to the screen height. keepPage: false → we always start at
+    // page 0 (the user's first unread article) when the reader is reopened
+    // from the FAB or the "Resume summary" pill rather than restoring a
+    // stale PageStorage index from a previous session.
+    _pageCtrl = PageController(viewportFraction: 1.0, keepPage: false);
     _store.addListener(_onStoreChange);
   }
 
@@ -178,13 +183,33 @@ class _SummaryReaderScreenState extends ConsumerState<SummaryReaderScreen> {
       body: Stack(
         children: [
           // ── Body: vertical PageView ─────────────────────────────────
+          //
+          // Behaviour notes:
+          //   • [BouncingScrollPhysics] makes overscroll at the first/last
+          //     card feel iOS-native (rubber-banding) which reads as
+          //     "buttery" on both platforms.
+          //   • [pageSnapping] is true by default — we name it explicitly
+          //     so future maintainers don't accidentally turn it off.
+          //   • Light haptic on each page change gives a tactile "tick"
+          //     that masks the 300ms snap animation latency.
+          //   • The inner card layout deliberately avoids any nested
+          //     Scrollable on the vertical axis (was a SingleChildScrollView
+          //     before — that stole every drag from the PageView and pinned
+          //     the user to page 1). See [_SummaryCard.build] for details.
           Positioned.fill(
             child: PageView.builder(
               controller: _pageCtrl,
               scrollDirection: Axis.vertical,
-              physics: const PageScrollPhysics(),
+              physics: const PageScrollPhysics(
+                parent: BouncingScrollPhysics(),
+              ),
+              pageSnapping: true,
+              allowImplicitScrolling: true,
               itemCount: live.length,
-              onPageChanged: (i) => setState(() => _currentPage = i),
+              onPageChanged: (i) {
+                HapticFeedback.selectionClick();
+                setState(() => _currentPage = i);
+              },
               itemBuilder: (ctx, i) {
                 final a = live[i];
                 final st = _store.statusOf(a.id);
@@ -194,6 +219,7 @@ class _SummaryReaderScreenState extends ConsumerState<SummaryReaderScreen> {
                   colors: colors,
                   index: i,
                   total: live.length,
+                  pageController: _pageCtrl,
                   onSaveToggle: () => ref
                       .read(newsControllerProvider.notifier)
                       .toggleSaved(a.id),
@@ -550,6 +576,7 @@ class _SummaryCard extends StatelessWidget {
     required this.colors,
     required this.index,
     required this.total,
+    required this.pageController,
     required this.onSaveToggle,
     required this.onReadFull,
     required this.onRetry,
@@ -560,6 +587,7 @@ class _SummaryCard extends StatelessWidget {
   final AppColors colors;
   final int index;
   final int total;
+  final PageController pageController;
   final VoidCallback onSaveToggle;
   final VoidCallback onReadFull;
   final VoidCallback onRetry;
@@ -567,68 +595,118 @@ class _SummaryCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cat = newsCategoryColor(article.category);
-    final size = MediaQuery.sizeOf(context);
-    // Reserve top space for the header and bottom for the Done pill.
+    // Reserve top space for the frosted header and bottom for the Done pill.
     final topInset = MediaQuery.viewPaddingOf(context).top + 84;
     final bottomInset =
         MediaQuery.viewPaddingOf(context).bottom + 16 + 56 + 16;
 
+    // No nested vertical scrollable here — that previously stole drags
+    // from the parent vertical PageView and pinned the user to page 1.
+    // Instead we lay the card out as a Column whose [_SummaryBlock] is
+    // wrapped in [Flexible] so any unusually long summary text shrinks
+    // / fades gracefully rather than overflowing the viewport. The hero
+    // is sized by its inner [AspectRatio(16/10)] so it never grows
+    // beyond its intrinsic height.
     return Padding(
       padding: EdgeInsets.fromLTRB(20, topInset, 20, bottomInset),
-      child: SingleChildScrollView(
-        physics: const ClampingScrollPhysics(),
-        child: ConstrainedBox(
-          constraints: BoxConstraints(
-            minHeight: size.height - topInset - bottomInset,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.max,
+        children: [
+          _ParallaxHero(
+            article: article,
+            cat: cat,
+            index: index,
+            controller: pageController,
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              _HeroImage(article: article, cat: cat),
-              const SizedBox(height: 14),
-              _MetaRow(article: article, cat: cat, colors: colors),
-              const SizedBox(height: 10),
-              Text(
-                article.title,
-                maxLines: 4,
-                overflow: TextOverflow.ellipsis,
-                style: GoogleFonts.plusJakartaSans(
-                  fontSize: 22,
-                  fontWeight: FontWeight.w800,
-                  height: 1.25,
-                  letterSpacing: -0.4,
-                  color: colors.text,
-                ),
-              ),
-              const SizedBox(height: 16),
-              _SummaryBlock(
-                state: state,
-                colors: colors,
-                cat: cat,
-                onRetry: onRetry,
-              ),
-              const SizedBox(height: 18),
-              _ActionsRow(
-                article: article,
-                colors: colors,
-                cat: cat,
-                onSaveToggle: onSaveToggle,
-                onReadFull: onReadFull,
-              ),
-              const SizedBox(height: 10),
-              Text(
-                'Article ${index + 1} of $total',
-                textAlign: TextAlign.center,
-                style: GoogleFonts.plusJakartaSans(
-                  fontSize: 11,
-                  color: colors.text5,
-                  letterSpacing: 0.4,
-                ),
-              ),
-            ],
+          const SizedBox(height: 14),
+          _MetaRow(article: article, cat: cat, colors: colors),
+          const SizedBox(height: 10),
+          Text(
+            article.title,
+            maxLines: 3,
+            overflow: TextOverflow.ellipsis,
+            style: GoogleFonts.plusJakartaSans(
+              fontSize: 22,
+              fontWeight: FontWeight.w800,
+              height: 1.25,
+              letterSpacing: -0.4,
+              color: colors.text,
+            ),
           ),
-        ),
+          const SizedBox(height: 16),
+          Flexible(
+            child: _SummaryBlock(
+              state: state,
+              colors: colors,
+              cat: cat,
+              onRetry: onRetry,
+            ),
+          ),
+          const SizedBox(height: 18),
+          _ActionsRow(
+            article: article,
+            colors: colors,
+            cat: cat,
+            onSaveToggle: onSaveToggle,
+            onReadFull: onReadFull,
+          ),
+          const SizedBox(height: 10),
+          Text(
+            'Article ${index + 1} of $total',
+            textAlign: TextAlign.center,
+            style: GoogleFonts.plusJakartaSans(
+              fontSize: 11,
+              color: colors.text5,
+              letterSpacing: 0.4,
+            ),
+          ),
+        ],
       ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Hero with subtle parallax — translates the image opposite to swipe so
+// the card feels "physical" without distracting from the read.
+// ─────────────────────────────────────────────────────────────────────────
+
+class _ParallaxHero extends StatelessWidget {
+  const _ParallaxHero({
+    required this.article,
+    required this.cat,
+    required this.index,
+    required this.controller,
+  });
+
+  final Article article;
+  final Color cat;
+  final int index;
+  final PageController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: controller,
+      builder: (context, child) {
+        // Compute current page float offset (0.0 → N) so we know how far the
+        // current card is from screen-center. We translate by ~28 px max,
+        // which is just enough to feel alive without making text jitter.
+        var delta = 0.0;
+        if (controller.hasClients &&
+            controller.position.haveDimensions &&
+            controller.position.hasContentDimensions) {
+          delta = (controller.page ?? index.toDouble()) - index;
+        }
+        final dy = (delta.clamp(-1.0, 1.0)) * -28.0;
+        final scale = 1.0 - delta.abs().clamp(0.0, 1.0) * 0.04;
+        return Transform.translate(
+          offset: Offset(0, dy),
+          child: Transform.scale(scale: scale, child: child),
+        );
+      },
+      child: _HeroImage(article: article, cat: cat),
     );
   }
 }
@@ -872,13 +950,20 @@ class _ReadySummary extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 10),
-            Text(
-              summary,
-              style: GoogleFonts.plusJakartaSans(
-                fontSize: 15,
-                height: 1.55,
-                color: colors.text,
-                letterSpacing: -0.1,
+            // [Flexible] + maxLines guards against the rare case where the
+            // model returns >45 words. Without these caps, a wordy summary
+            // would push the Done pill below the screen on small phones.
+            Flexible(
+              child: Text(
+                summary,
+                maxLines: 12,
+                overflow: TextOverflow.fade,
+                style: GoogleFonts.plusJakartaSans(
+                  fontSize: 15,
+                  height: 1.55,
+                  color: colors.text,
+                  letterSpacing: -0.1,
+                ),
               ),
             ),
           ],

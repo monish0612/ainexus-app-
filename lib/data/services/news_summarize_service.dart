@@ -14,11 +14,6 @@ class NewsSummarizeService {
 
   final ApiClient _apiClient;
 
-  /// Default model — Gemini 2.5 Flash Lite via LiteLLM. The backend has its
-  /// own cascading fallback if Lite is unavailable, so callers never need
-  /// to override this in normal operation.
-  static const String defaultModel = 'gemini/gemini-2.5-flash-lite';
-
   /// Per-article content cap on the wire. Matches the server-side Zod limit
   /// (4000 chars). Trimming happens here so callers don't have to worry.
   static const int maxContentChars = 4000;
@@ -31,11 +26,18 @@ class NewsSummarizeService {
   /// if the model dropped one), so the returned map has the same length as
   /// [articles] on success.
   ///
+  /// [liteModel] forwards the user-configured Gemini Lite model from
+  /// Settings (synced cross-device). When provided, the backend pins the
+  /// LiteLLM call to that exact model. When omitted, the backend falls back
+  /// to its auto-discovered model priority list. [model] is the legacy raw
+  /// override and takes precedence — keep it for diagnostics or A/B work.
+  ///
   /// Throws on transport errors, non-2xx responses, or malformed payloads —
   /// caller (the store) handles retry + per-batch error state.
   Future<Map<String, String>> summarizeBatch({
     required List<Article> articles,
     String? model,
+    String? liteModel,
     CancelToken? cancelToken,
   }) async {
     if (articles.isEmpty) return const <String, String>{};
@@ -51,12 +53,19 @@ class NewsSummarizeService {
             'content': _composeContent(a),
           },
       ],
-      'model': model ?? defaultModel,
     };
+    final modelOverride = model?.trim();
+    if (modelOverride != null && modelOverride.isNotEmpty) {
+      payload['model'] = modelOverride;
+    }
+    final liteOverride = liteModel?.trim();
+    if (liteOverride != null && liteOverride.isNotEmpty) {
+      payload['liteModel'] = liteOverride;
+    }
 
     final sw = Stopwatch()..start();
     TLog.d('NewsSummarize',
-        '→ batch size=${articles.length} model=${payload['model']}');
+        '→ batch size=${articles.length} model=${payload['model'] ?? payload['liteModel'] ?? '(backend default)'}');
 
     // 90 s headroom: Android Doze can throttle a backgrounded socket for
     // ~60 s before killing it. With the foreground service running we keep

@@ -43,6 +43,7 @@ class Bank {
 // ── Defaults ─────────────────────────────────────────────────────────────────
 
 const kDefaultDeepModel = 'gemini-3.1-pro-preview';
+const kDefaultLiteModel = 'gemini-3.1-flash-lite-preview';
 const kDefaultXGrokLiteModel = 'grok-4-1-fast-non-reasoning';
 const kDefaultXGrokDeepModel = 'grok-4-0709';
 const kDefaultXGrokThinkingModel = 'grok-4-1-fast-reasoning';
@@ -56,6 +57,7 @@ class SettingsState {
     this.banks = const [],
     this.settingsOpen = false,
     this.deepModel = kDefaultDeepModel,
+    this.liteModel = kDefaultLiteModel,
     this.xgrokEnabled = false,
     this.xgrokLiteModel = kDefaultXGrokLiteModel,
     this.xgrokDeepModel = kDefaultXGrokDeepModel,
@@ -69,6 +71,7 @@ class SettingsState {
   final List<Bank> banks;
   final bool settingsOpen;
   final String deepModel;
+  final String liteModel;
   final bool xgrokEnabled;
   final String xgrokLiteModel;
   final String xgrokDeepModel;
@@ -90,6 +93,7 @@ class SettingsState {
     List<Bank>? banks,
     bool? settingsOpen,
     String? deepModel,
+    String? liteModel,
     bool? xgrokEnabled,
     String? xgrokLiteModel,
     String? xgrokDeepModel,
@@ -103,6 +107,7 @@ class SettingsState {
       banks: banks ?? this.banks,
       settingsOpen: settingsOpen ?? this.settingsOpen,
       deepModel: deepModel ?? this.deepModel,
+      liteModel: liteModel ?? this.liteModel,
       xgrokEnabled: xgrokEnabled ?? this.xgrokEnabled,
       xgrokLiteModel: xgrokLiteModel ?? this.xgrokLiteModel,
       xgrokDeepModel: xgrokDeepModel ?? this.xgrokDeepModel,
@@ -121,6 +126,7 @@ class SettingsState {
 abstract final class _PK {
   static const theme = 'app_theme';
   static const deepModel = 'deep_model';
+  static const liteModel = 'lite_model';
   static const xgrokEnabled = 'xgrok_enabled';
   static const xgrokLiteModel = 'xgrok_lite_model';
   static const xgrokDeepModel = 'xgrok_deep_model';
@@ -129,6 +135,8 @@ abstract final class _PK {
   static const defaultFollowUp = 'default_followup_provider';
   static const onlineSearch = 'online_search_provider';
   static const banks = 'app_banks';
+  // Outbox for unsynced setting changes (survives app kills).
+  static const outbox = '_settings_outbox_v1';
 }
 
 // ── Default banks ────────────────────────────────────────────────────────────
@@ -159,7 +167,12 @@ const _defaultBanks = <Bank>[
 class SettingsController extends StateNotifier<SettingsState> {
   SettingsController(this._prefs, this._remote) : super(const SettingsState()) {
     _hydrateFromPrefs();
+    _loadOutbox();
     unawaited(_syncFromServer());
+    // Drain whatever survived the last app session before doing anything else.
+    if (_pendingPush.isNotEmpty) {
+      unawaited(_flushPush(reason: 'startup-outbox'));
+    }
   }
 
   final SharedPreferences _prefs;
@@ -172,6 +185,7 @@ class SettingsController extends StateNotifier<SettingsState> {
   final Map<String, String> _pendingPush = {};
   Timer? _pushTimer;
   bool _syncing = false;
+  bool _flushing = false;
   DateTime? _lastSyncAt;
 
   // ── Phase 1: instant local hydration ───────────────────────────────────
@@ -179,6 +193,7 @@ class SettingsController extends StateNotifier<SettingsState> {
   void _hydrateFromPrefs() {
     final theme = _prefs.getString(_PK.theme) ?? 'dark';
     final deepModel = _prefs.getString(_PK.deepModel) ?? kDefaultDeepModel;
+    final liteModel = _prefs.getString(_PK.liteModel) ?? kDefaultLiteModel;
     final xgrokEnabled = _prefs.getBool(_PK.xgrokEnabled) ?? false;
     final xgrokLiteModel =
         _prefs.getString(_PK.xgrokLiteModel) ?? kDefaultXGrokLiteModel;
@@ -211,6 +226,7 @@ class SettingsController extends StateNotifier<SettingsState> {
       theme: theme,
       banks: banks,
       deepModel: deepModel,
+      liteModel: liteModel,
       xgrokEnabled: xgrokEnabled,
       xgrokLiteModel: xgrokLiteModel,
       xgrokDeepModel: xgrokDeepModel,
@@ -227,7 +243,12 @@ class SettingsController extends StateNotifier<SettingsState> {
 
   /// Public re-sync entry point — called on app resume and settings sheet open.
   /// Respects a cooldown to avoid hammering the server on rapid lifecycle events.
+  /// Always drains the outbox first so any change that couldn't reach the
+  /// server while offline gets delivered before we pull remote state down.
   void resyncFromServer() {
+    if (_pendingPush.isNotEmpty) {
+      unawaited(_flushPush(reason: 'resume'));
+    }
     if (_syncing) return;
     if (_lastSyncAt != null &&
         DateTime.now().difference(_lastSyncAt!) < _syncCooldown) {
@@ -270,6 +291,7 @@ class SettingsController extends StateNotifier<SettingsState> {
 
       final theme = safeRemote[_PK.theme] ?? state.theme;
       final deepModel = safeRemote[_PK.deepModel] ?? state.deepModel;
+      final liteModel = safeRemote[_PK.liteModel] ?? state.liteModel;
       final xgrokEnabled = safeRemote.containsKey(_PK.xgrokEnabled)
           ? safeRemote[_PK.xgrokEnabled] == 'true'
           : state.xgrokEnabled;
@@ -295,6 +317,7 @@ class SettingsController extends StateNotifier<SettingsState> {
         theme: theme,
         banks: banks,
         deepModel: deepModel,
+        liteModel: liteModel,
         xgrokEnabled: xgrokEnabled,
         xgrokLiteModel: xgrokLiteModel,
         xgrokDeepModel: xgrokDeepModel,
@@ -350,6 +373,14 @@ class SettingsController extends StateNotifier<SettingsState> {
     state = state.copyWith(deepModel: trimmed);
     _prefs.setString(_PK.deepModel, trimmed);
     _queuePush(_PK.deepModel, trimmed);
+  }
+
+  void setLiteModel(String model) {
+    final trimmed = model.trim();
+    if (trimmed.isEmpty) return;
+    state = state.copyWith(liteModel: trimmed);
+    _prefs.setString(_PK.liteModel, trimmed);
+    _queuePush(_PK.liteModel, trimmed);
   }
 
   void setXGrokEnabled(bool enabled) {
@@ -430,23 +461,101 @@ class SettingsController extends StateNotifier<SettingsState> {
     _saveBanks();
   }
 
-  // ── Push queue (debounced batch) ───────────────────────────────────────
+  // ── Push queue (debounced batch + persistent outbox) ───────────────────
+  //
+  // The outbox is a JSON blob in SharedPreferences that mirrors `_pendingPush`.
+  // It survives app kills and process death, so a setting the user changed
+  // while offline is never lost — it gets retried on the next launch and on
+  // every app resume (via [resyncFromServer]). The single inflight guard
+  // (`_flushing`) prevents duplicate concurrent pushes.
 
   void _queuePush(String key, String value) {
     _pendingPush[key] = value;
+    _persistOutbox();
     _pushTimer?.cancel();
-    _pushTimer = Timer(_pushDebounce, () => unawaited(_flushPush()));
+    _pushTimer = Timer(_pushDebounce, () => unawaited(_flushPush(reason: 'debounced')));
   }
 
-  Future<void> _flushPush() async {
+  Future<void> _flushPush({String reason = 'manual'}) async {
     if (_pendingPush.isEmpty) return;
+    if (_flushing) {
+      TLog.d(_tag, 'flush skipped — already in flight (reason=$reason)');
+      return;
+    }
+    _flushing = true;
     final batch = Map<String, String>.from(_pendingPush);
-    _pendingPush.clear();
-    await _remote.pushBatch(batch);
+    final sw = Stopwatch()..start();
+    try {
+      final ok = await _remote.pushBatch(batch);
+      sw.stop();
+      if (ok) {
+        // Only clear keys that haven't been touched while the push was in
+        // flight — otherwise the user's most recent edit would be silently
+        // dropped from the outbox before being delivered.
+        for (final entry in batch.entries) {
+          if (_pendingPush[entry.key] == entry.value) {
+            _pendingPush.remove(entry.key);
+          }
+        }
+        _persistOutbox();
+        TLog.i(_tag,
+            'flush ✓ ${batch.length} keys (${sw.elapsedMilliseconds}ms, reason=$reason)');
+      } else {
+        TLog.w(_tag,
+            'flush FAILED ${batch.length} keys (${sw.elapsedMilliseconds}ms, reason=$reason) — '
+            'kept in outbox, will retry on resume/restart');
+      }
+    } catch (e) {
+      sw.stop();
+      TLog.e(_tag,
+          'flush threw (${sw.elapsedMilliseconds}ms, reason=$reason) — kept in outbox',
+          error: e);
+    } finally {
+      _flushing = false;
+    }
   }
 
   void _pushAllToServer() {
     unawaited(_remote.pushBatch(_buildFullSnapshot()));
+  }
+
+  // ── Outbox persistence (survives app kills) ────────────────────────────
+
+  void _loadOutbox() {
+    final raw = _prefs.getString(_PK.outbox);
+    if (raw == null || raw.isEmpty) return;
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is Map) {
+        for (final entry in decoded.entries) {
+          final v = entry.value;
+          if (v is String) _pendingPush[entry.key.toString()] = v;
+        }
+        if (_pendingPush.isNotEmpty) {
+          TLog.i(_tag,
+              'Restored outbox with ${_pendingPush.length} unsynced keys '
+              '[${_pendingPush.keys.join(', ')}]');
+        }
+      }
+    } catch (e) {
+      TLog.w(_tag, 'Outbox restore failed — clearing corrupted blob', error: e);
+      _prefs.remove(_PK.outbox);
+    }
+  }
+
+  void _persistOutbox() {
+    if (_pendingPush.isEmpty) {
+      _prefs.remove(_PK.outbox);
+    } else {
+      _prefs.setString(_PK.outbox, jsonEncode(_pendingPush));
+    }
+  }
+
+  /// Public hook so the app shell can drain the outbox on resume / network
+  /// recovery, even if no setter has been called recently.
+  void retryPendingPushes() {
+    if (_pendingPush.isEmpty) return;
+    unawaited(_flushPush(reason: 'resume'));
   }
 
   // ── Persistence helpers ────────────────────────────────────────────────
@@ -463,6 +572,7 @@ class SettingsController extends StateNotifier<SettingsState> {
     final s = state;
     _prefs.setString(_PK.theme, s.theme);
     _prefs.setString(_PK.deepModel, s.deepModel);
+    _prefs.setString(_PK.liteModel, s.liteModel);
     _prefs.setBool(_PK.xgrokEnabled, s.xgrokEnabled);
     _prefs.setString(_PK.xgrokLiteModel, s.xgrokLiteModel);
     _prefs.setString(_PK.xgrokDeepModel, s.xgrokDeepModel);
@@ -481,6 +591,7 @@ class SettingsController extends StateNotifier<SettingsState> {
     return {
       _PK.theme: s.theme,
       _PK.deepModel: s.deepModel,
+      _PK.liteModel: s.liteModel,
       _PK.xgrokEnabled: s.xgrokEnabled.toString(),
       _PK.xgrokLiteModel: s.xgrokLiteModel,
       _PK.xgrokDeepModel: s.xgrokDeepModel,
@@ -516,8 +627,10 @@ class SettingsController extends StateNotifier<SettingsState> {
   void dispose() {
     _pushTimer?.cancel();
     if (_pendingPush.isNotEmpty) {
+      // Best-effort flush. Keep the outbox intact so the next app session
+      // can pick up anything that doesn't make it before the process dies.
       final batch = Map<String, String>.from(_pendingPush);
-      _pendingPush.clear();
+      _persistOutbox();
       unawaited(_remote.pushBatch(batch));
     }
     super.dispose();

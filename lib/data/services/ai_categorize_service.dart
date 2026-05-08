@@ -219,8 +219,9 @@ class AICategorizeService {
 
   Future<AICategoryResult> categorize(
     String description,
-    Map<String, String> learnings,
-  ) async {
+    Map<String, String> learnings, {
+    String? liteModel,
+  }) async {
     final trimmed = description.trim();
     if (trimmed.length < 2) {
       return const AICategoryResult(
@@ -241,7 +242,7 @@ class AICategorizeService {
 
     // 3. LLM fallback (if online)
     if (await _hasNetwork()) {
-      final llm = await _categorizeViaBackend(trimmed);
+      final llm = await _categorizeViaBackend(trimmed, liteModel: liteModel);
       if (llm != null) return llm;
     }
 
@@ -273,12 +274,17 @@ class AICategorizeService {
   }
 
   /// Parse freeform text (voice) into structured expense via LLM.
-  Future<SmartParseResult?> smartParse(String text) async {
+  Future<SmartParseResult?> smartParse(
+    String text, {
+    String? liteModel,
+  }) async {
     TLog.d('AICategorize', 'SmartParse → "${text.length > 60 ? '${text.substring(0, 60)}…' : text}"');
     try {
+      final body = <String, dynamic>{'text': text};
+      _addLiteModel(body, liteModel);
       final response = await _apiClient.post<dynamic>(
         ApiEndpoints.aiSmartParse,
-        data: <String, dynamic>{'text': text},
+        data: body,
       );
       final data = response.data;
       if (data is! Map) {
@@ -354,12 +360,29 @@ class AICategorizeService {
     return !result.contains(ConnectivityResult.none);
   }
 
-  Future<AICategoryResult?> _categorizeViaBackend(String description) async {
+  /// Adds the user-configured Gemini Lite model to [body] when [model] is
+  /// non-empty. The backend uses this to pin the LiteLLM call to the exact
+  /// flash/lite version the user selected in Settings (synced cross-device
+  /// via user_preferences). When omitted the backend falls back to its
+  /// auto-discovered model priority list.
+  void _addLiteModel(Map<String, dynamic> body, String? model) {
+    if (model == null) return;
+    final trimmed = model.trim();
+    if (trimmed.isEmpty) return;
+    body['liteModel'] = trimmed;
+  }
+
+  Future<AICategoryResult?> _categorizeViaBackend(
+    String description, {
+    String? liteModel,
+  }) async {
     TLog.d('AICategorize', 'LLM categorize → "${description.length > 50 ? '${description.substring(0, 50)}…' : description}"');
     try {
+      final body = <String, dynamic>{'description': description};
+      _addLiteModel(body, liteModel);
       final response = await _apiClient.post<dynamic>(
         ApiEndpoints.aiCategorize,
-        data: <String, dynamic>{'description': description},
+        data: body,
       );
       final data = response.data;
       if (data is! Map) {
