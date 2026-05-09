@@ -55,6 +55,16 @@ abstract final class ApiEndpoints {
   static String articleChatSummary(String articleId) =>
       '$_base/api/v1/article-chats/$articleId/summary';
 
+  // Saved Searches (InsightAI bookmarked URL-summaries / text searches with
+  // persistent follow-up chats). Mirrors the article-chats wire shape so the
+  // sync semantics are identical and battle-tested.
+  static String get savedSearches => '$_base/api/v1/saved-searches';
+  static String savedSearch(String id) => '$_base/api/v1/saved-searches/$id';
+  static String savedSearchChats(String id) =>
+      '$_base/api/v1/saved-searches/$id/chat';
+  static String savedSearchChatSummary(String id) =>
+      '$_base/api/v1/saved-searches/$id/summary';
+
   // AI Smart Parse (voice expense)
   static String get aiSmartParse => '$_base/api/v1/ai/smart-parse';
 

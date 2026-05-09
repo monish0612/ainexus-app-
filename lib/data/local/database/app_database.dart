@@ -1,4 +1,5 @@
 import 'package:drift/drift.dart';
+import 'package:flutter/foundation.dart' show visibleForTesting;
 
 import 'connection/connection.dart' as connection;
 
@@ -116,6 +117,79 @@ class CategoryLearnings extends Table {
   Set<Column> get primaryKey => {keyword};
 }
 
+/// Persistent snapshot of an InsightAI search or URL summary the user has
+/// explicitly bookmarked. The full DTO is stored as JSON in [responseJson]
+/// keyed by [responseType] so the on-disk shape can absorb future result
+/// kinds (e.g. deep research) without a schema migration.
+class SavedSearches extends Table {
+  TextColumn get id => text()();
+
+  /// 'url' for URL-summarize entries, 'query' for text search entries.
+  TextColumn get kind => text()();
+
+  /// The original input text (URL or query).
+  TextColumn get query => text()();
+
+  /// Display title derived at save time (URL hostname or first 80 chars).
+  TextColumn get title => text()();
+
+  /// Discriminator for [responseJson]: 'summarizer' | 'grounded' | 'tavily'.
+  TextColumn get responseType => text()();
+
+  /// Full serialized response DTO. Kept opaque at the DB layer so result
+  /// shape evolution doesn't require migrations.
+  TextColumn get responseJson => text()();
+
+  TextColumn get model => text().withDefault(const Constant(''))();
+  TextColumn get provider => text().withDefault(const Constant(''))();
+  TextColumn get mode => text().withDefault(const Constant(''))();
+
+  /// ISO-8601 UTC timestamp.
+  TextColumn get savedAt => text()();
+
+  /// ISO-8601 UTC timestamp; bumped whenever a follow-up message is appended
+  /// so the History list can sort by activity.
+  TextColumn get updatedAt => text()();
+
+  /// Reserved for future filter / cleanup logic. Defaults to true on save.
+  BoolColumn get pinned => boolean().withDefault(const Constant(true))();
+
+  /// Soft-delete tombstone — set when the user deletes locally; the row is
+  /// hard-deleted only after the remote DELETE is acknowledged. Lets sync
+  /// be eventual-consistent without losing remote rows on transient errors.
+  TextColumn get deletedAt => text().nullable()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+/// Mirror of [ArticleChatMessages] keyed on [searchId] instead of articleId.
+/// Same shape so the wire format and persistence semantics are identical to
+/// the proven article-chats path.
+class SavedSearchChatMessages extends Table {
+  TextColumn get id => text()();
+  TextColumn get searchId => text()();
+  TextColumn get role => text()();
+  TextColumn get msgText => text()();
+  TextColumn get model => text().withDefault(const Constant(''))();
+  TextColumn get sourcesJson => text().withDefault(const Constant('[]'))();
+  TextColumn get createdAt => text()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+/// Mirror of [ArticleChatSummaries] keyed on [searchId].
+class SavedSearchChatSummaries extends Table {
+  TextColumn get searchId => text()();
+  TextColumn get summaryText => text()();
+  IntColumn get pairsCovered => integer()();
+  TextColumn get updatedAt => text()();
+
+  @override
+  Set<Column> get primaryKey => {searchId};
+}
+
 @DriftDatabase(
   tables: [
     Expenses,
@@ -127,6 +201,9 @@ class CategoryLearnings extends Table {
     CategoryLearnings,
     ArticleChatMessages,
     ArticleChatSummaries,
+    SavedSearches,
+    SavedSearchChatMessages,
+    SavedSearchChatSummaries,
   ],
 )
 class AppDatabase extends _$AppDatabase {
@@ -134,8 +211,15 @@ class AppDatabase extends _$AppDatabase {
 
   AppDatabase.background() : super(connection.openBackgroundConnection());
 
+  /// Test-only constructor that lets unit tests inject an in-memory
+  /// [QueryExecutor]. Production code paths must continue to use
+  /// [AppDatabase] / [AppDatabase.background] so the platform-specific
+  /// connection factories stay the source of truth.
+  @visibleForTesting
+  AppDatabase.forTesting(super.executor);
+
   @override
-  int get schemaVersion => 5;
+  int get schemaVersion => 6;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -151,6 +235,11 @@ class AppDatabase extends _$AppDatabase {
       }
       if (from < 5) {
         await migrator.addColumn(newsArticles, newsArticles.summaryShort);
+      }
+      if (from < 6) {
+        await migrator.createTable(savedSearches);
+        await migrator.createTable(savedSearchChatMessages);
+        await migrator.createTable(savedSearchChatSummaries);
       }
     },
   );

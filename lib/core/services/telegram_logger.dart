@@ -140,7 +140,13 @@ class TLog {
 
     if (immediate || _queue.length >= _maxBatchSize) {
       unawaited(_flush());
-    } else {
+    } else if (_dio != null) {
+      // Only schedule a batch flush if Telegram dispatch is actually wired
+      // up. In tests (and pre-`init()` startup) `_dio` is null, in which
+      // case the periodic flush timer is pure overhead — and worse, it
+      // trips the test framework's "pending timer" guard during widget
+      // disposal. Logs still accumulate in `_queue` and drain naturally
+      // once `init()` runs.
       _scheduleBatch();
     }
   }

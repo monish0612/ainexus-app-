@@ -250,6 +250,22 @@ class SummarizerResult {
       fallback: json['fallback'] == true,
     );
   }
+
+  /// Camel-case JSON form, suitable for both Drift snapshots and the
+  /// saved-search wire body.
+  Map<String, dynamic> toJson() => <String, dynamic>{
+        'title': title,
+        'summary': summary,
+        'keyPoints': keyPoints,
+        'category': category,
+        'readTime': readTime,
+        'source': source,
+        'extractionMethod': extractionMethod,
+        'url': url,
+        'model': model,
+        'providerUsed': providerUsed,
+        'fallback': fallback,
+      };
 }
 
 // ── Tavily Search ────────────────────────────────────────────────────────────
@@ -282,6 +298,12 @@ class TavilySearchResponse {
       results: results,
     );
   }
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+        'answer': answer,
+        'query': query,
+        'results': results.map((r) => r.toJson()).toList(),
+      };
 }
 
 @immutable
@@ -306,6 +328,13 @@ class TavilyResultItem {
       score: (json['score'] is num) ? (json['score'] as num).toDouble() : 0,
     );
   }
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+        'title': title,
+        'url': url,
+        'content': content,
+        'score': score,
+      };
 }
 
 // ── Grounded Search (Gemini + Google Search) ─────────────────────────────────
@@ -361,6 +390,15 @@ class GroundedSearchResponse {
       citations: citations,
     );
   }
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+        'answer': answer,
+        'query': query,
+        'model': model,
+        'searchQueries': searchQueries,
+        'sources': sources.map((s) => s.toJson()).toList(),
+        'citations': citations.map((c) => c.toJson()).toList(),
+      };
 }
 
 @immutable
@@ -382,6 +420,12 @@ class GroundedSource {
       url: _str(json, const ['url', 'uri']),
     );
   }
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+        'index': index,
+        'title': title,
+        'url': url,
+      };
 }
 
 @immutable
@@ -411,6 +455,13 @@ class GroundedCitation {
       sourceIndices: indices,
     );
   }
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+        'text': text,
+        'startIndex': startIndex,
+        'endIndex': endIndex,
+        'sourceIndices': sourceIndices,
+      };
 }
 
 // ── Article Follow-Up ────────────────────────────────────────────────────────

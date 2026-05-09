@@ -18,10 +18,12 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import '../../../core/di/injection.dart';
 import '../../../core/platform/platform_capabilities.dart';
 import '../../../core/services/background_task_coordinator.dart';
+import '../../../core/services/saved_search_store.dart';
 import '../../../core/services/telegram_logger.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../data/services/tutor_ai_service.dart';
 import '../../../domain/entities/tutor_entities.dart';
+import '../../widgets/provider_picker.dart';
 import '../../widgets/voice_input_button.dart';
 import '../../screens/settings/settings_controller.dart';
 
@@ -710,11 +712,19 @@ class SearchFollowUpFab extends StatefulWidget {
     required this.query,
     required this.initialAnswer,
     required this.model,
+    this.savedSearchId,
   });
 
   final String query;
   final String initialAnswer;
   final String model;
+
+  /// When non-null, every finalized chat turn is mirror-written to
+  /// [SavedSearchStore] so it survives app restarts and syncs across
+  /// devices. The in-memory live UI keeps using [SearchFollowUpStore] so
+  /// streaming, retries and cancel semantics stay identical to the
+  /// transient flow.
+  final String? savedSearchId;
 
   @override
   State<SearchFollowUpFab> createState() => _SearchFollowUpFabState();
@@ -768,6 +778,7 @@ class _SearchFollowUpFabState extends State<SearchFollowUpFab>
         query: widget.query,
         initialAnswer: widget.initialAnswer,
         model: widget.model,
+        savedSearchId: widget.savedSearchId,
       ),
     );
   }
@@ -828,11 +839,13 @@ class _SearchFollowUpChat extends ConsumerStatefulWidget {
     required this.query,
     required this.initialAnswer,
     required this.model,
+    this.savedSearchId,
   });
 
   final String query;
   final String initialAnswer;
   final String model;
+  final String? savedSearchId;
 
   @override
   ConsumerState<_SearchFollowUpChat> createState() =>
@@ -966,6 +979,36 @@ class _SearchFollowUpChatState extends ConsumerState<_SearchFollowUpChat>
       _sending = stillPending;
     });
     _scrollToBottom();
+    _maybeMirrorToSavedSearch();
+  }
+
+  /// Per-chat tracking of which message ids have already been forwarded to
+  /// [SavedSearchStore] so the same row isn't persisted twice across the
+  /// many `_onStoreUpdate` ticks a single AI turn produces.
+  final Set<String> _mirroredIds = <String>{};
+
+  /// Mirror finalized (non-loading, non-error) chat messages to the
+  /// saved-search store when a [savedSearchId] is present. Best-effort:
+  /// failures are caught and logged so a transient persistence error
+  /// never poisons the live in-memory UI.
+  void _maybeMirrorToSavedSearch() {
+    final id = widget.savedSearchId;
+    if (id == null) return;
+    final store = ref.read(savedSearchStoreProvider);
+    for (final m in _messages) {
+      if (m.isLoading || m.isError) continue;
+      if (m.text.isEmpty) continue;
+      if (_mirroredIds.contains(m.id)) continue;
+      _mirroredIds.add(m.id);
+      unawaited(store.appendMessage(
+        searchId: id,
+        messageId: m.id,
+        role: m.role,
+        text: m.text,
+        model: m.model,
+        sources: m.sources,
+      ));
+    }
   }
 
   @override
@@ -1894,8 +1937,32 @@ class _SearchFollowUpChatState extends ConsumerState<_SearchFollowUpChat>
             children: [
               _buildModelToggle(colors),
               if (ref.watch(settingsProvider).xgrokEnabled) ...[
-                const SizedBox(width: 6),
-                _buildProviderToggle(colors),
+                const SizedBox(width: 8),
+                ProviderPicker(
+                  options: const <ProviderOption>[
+                    ProviderOption(
+                      id: 'gemini',
+                      label: 'Gemini',
+                      icon: LucideIcons.sparkles,
+                      color: Color(0xFF4285F4),
+                    ),
+                    ProviderOption(
+                      id: 'xgrok',
+                      label: 'xGrok',
+                      icon: LucideIcons.bot,
+                      color: Color(0xFFE8453C),
+                    ),
+                  ],
+                  selectedId: _useXGrok ? 'xgrok' : 'gemini',
+                  onChanged: _sending
+                      ? (_) {}
+                      : (id) {
+                          HapticFeedback.selectionClick();
+                          setState(() => _useXGrok = id == 'xgrok');
+                        },
+                  colors: colors,
+                  heroTag: 'search-followup-provider',
+                ),
               ],
             ],
           ),
@@ -2029,50 +2096,6 @@ class _SearchFollowUpChatState extends ConsumerState<_SearchFollowUpChat>
               icon: LucideIcons.brain,
               active: _useDeepModel,
               color: deepColor,
-              colors: colors,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildProviderToggle(AppColors colors) {
-    const geminiColor = Color(0xFF4285F4);
-    const xgrokColor = Color(0xFFE8453C);
-
-    return GestureDetector(
-      onTap: _sending
-          ? null
-          : () {
-              HapticFeedback.selectionClick();
-              setState(() => _useXGrok = !_useXGrok);
-            },
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 250),
-        curve: Curves.easeOutCubic,
-        padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 3),
-        decoration: BoxDecoration(
-          color: colors.bg2,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: colors.border),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _toggleChip(
-              label: 'Gemini',
-              icon: LucideIcons.sparkles,
-              active: !_useXGrok,
-              color: geminiColor,
-              colors: colors,
-            ),
-            const SizedBox(width: 2),
-            _toggleChip(
-              label: 'xGrok',
-              icon: LucideIcons.bot,
-              active: _useXGrok,
-              color: xgrokColor,
               colors: colors,
             ),
           ],

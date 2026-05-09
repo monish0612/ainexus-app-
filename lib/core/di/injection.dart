@@ -8,7 +8,9 @@ import '../../data/services/ai_categorize_service.dart';
 import '../../data/services/news_summarize_service.dart';
 import '../../data/services/tutor_ai_service.dart';
 import '../../data/services/user_preferences_service.dart';
+import '../../domain/entities/saved_search.dart';
 import '../network/api_client.dart';
+import '../services/saved_search_store.dart';
 
 final sharedPreferencesProvider = Provider<SharedPreferences>(
   (ref) => throw UnimplementedError(
@@ -52,4 +54,23 @@ final newsSummarizeServiceProvider = Provider<NewsSummarizeService>((ref) {
 final userPreferencesServiceProvider =
     Provider<UserPreferencesService>((ref) {
   return UserPreferencesService(ref.watch(apiClientProvider));
+});
+
+/// Singleton store for InsightAI saved searches. The store is `init()`ed
+/// here so any consumer that touches it via this provider is guaranteed to
+/// see a wired-up instance — no per-call `init` ceremony at the call site.
+final savedSearchStoreProvider = Provider<SavedSearchStore>((ref) {
+  final store = SavedSearchStore.instance;
+  store.init(
+    ref.watch(appDatabaseProvider),
+    ref.watch(apiClientProvider),
+  );
+  return store;
+});
+
+/// Live stream of saved-search entries. Drift-backed so any change in the
+/// underlying table propagates to every subscriber on the next tick.
+final savedSearchesStreamProvider =
+    StreamProvider<List<SavedSearchEntry>>((ref) {
+  return ref.watch(savedSearchStoreProvider).watchAll();
 });

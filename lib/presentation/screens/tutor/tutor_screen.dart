@@ -20,6 +20,7 @@ import '../../../core/services/summarize_store.dart';
 import '../../../core/services/telegram_logger.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../data/local/database/app_database.dart';
+import '../../../domain/entities/saved_search.dart';
 import '../../../domain/entities/tutor_entities.dart';
 import '../../widgets/app_shell.dart';
 import '../../widgets/compact_header.dart';
@@ -28,6 +29,8 @@ import '../../widgets/sources_disclosure.dart';
 import '../settings/settings_controller.dart';
 import '../settings/settings_modal.dart';
 import 'deep_research_sheet.dart';
+import 'saved_search_detail_sheet.dart';
+import 'saved_searches_sheet.dart';
 import 'search_followup_sheet.dart';
 
 const int _kMaxRephrase = 5000;
@@ -352,6 +355,21 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
   /// the Lite/Deep toggle in the search follow-up sheet so users get a
   /// consistent experience across the search → follow-up flow.
   bool _searchUseDeepModel = false;
+
+  /// Saved-search id for the currently displayed result. Null until the
+  /// user taps the bookmark icon. Once set, it is reused for the lifetime
+  /// of this result so toggle/save is a stable round-trip and any
+  /// follow-up chat the user kicks off for THIS result is keyed against
+  /// the same id (so persistence is consistent end-to-end). Reset to null
+  /// whenever a new search/summary is initiated.
+  String? _activeSearchId;
+
+  /// Re-entrancy guard for the bookmark toggle. Prevents a rapid double-tap
+  /// from creating two saved-search rows (the first save would still be
+  /// in-flight when the second tap fires, so `_activeSearchId` is still
+  /// null and the second tap reads the stale state). Stays `true` for the
+  /// duration of the snackbar to also serialise the optional Undo path.
+  bool _saveToggleInFlight = false;
 
   // Dictionary
   bool _dictLoading = false;
@@ -753,6 +771,7 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
       _summaryResult = null;
       _tavilyResult = null;
       _groundedResult = null;
+      _activeSearchId = null;
       _summaryStage = _searchUseDeepModel
           ? 'Deep search starting\u2026'
           : 'Searching the web\u2026';
@@ -803,6 +822,7 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
       _summaryResult = null;
       _tavilyResult = null;
       _groundedResult = null;
+      _activeSearchId = null;
       _summaryStage = 'Connecting to URL\u2026';
     });
 
@@ -2609,6 +2629,7 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
             _summaryResult = null;
             _tavilyResult = null;
             _groundedResult = null;
+            _activeSearchId = null;
           }),
           onVoiceDown: () => _startVoice(target: _summaryUrlCtrl),
           onVoiceUp: _stopVoice,
@@ -2616,6 +2637,14 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
                   _summaryUrlCtrl.text.trim().isNotEmpty
               ? _normalizeUrl(_summaryUrlCtrl.text)
               : null,
+          // History pill — purple-accented chip that surfaces the saved-
+          // searches sheet. The badge count comes from the live Drift
+          // stream so it updates in real-time as the user saves/deletes.
+          savedCount: ref.watch(savedSearchesStreamProvider).maybeWhen(
+                data: (rows) => rows.length,
+                orElse: () => 0,
+              ),
+          onOpenHistory: _openSavedSearchesSheet,
         ),
         if (_summaryLoading) _summarizerLoadingWidget(colors),
         if (_summaryResult != null && !_summaryLoading)
@@ -2651,11 +2680,18 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          _searchServiceBadge(
-            colors,
-            'Tavily Search',
-            LucideIcons.sparkles,
-            const Color(0xFFF59E0B),
+          Row(
+            children: [
+              Expanded(
+                child: _searchServiceBadge(
+                  colors,
+                  'Tavily Search',
+                  LucideIcons.sparkles,
+                  const Color(0xFFF59E0B),
+                ),
+              ),
+              _buildSaveResultButton(colors: colors, result: result),
+            ],
           ),
           const SizedBox(height: 10),
           if (result.answer.isNotEmpty) ...[
@@ -2725,6 +2761,7 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
               _tavilyResult = null;
               _groundedResult = null;
               _summaryResult = null;
+              _activeSearchId = null;
             }),
             icon: Icon(LucideIcons.rotateCcw, size: 16, color: colors.text4),
             label: Text('Search Again',
@@ -2771,6 +2808,132 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
         ),
       ],
     );
+  }
+
+  /// Bookmark toggle for a result. Animated outline → filled icon, single
+  /// haptic tick on tap, snackbar with Undo. The `_activeSearchId` field is
+  /// the source of truth: if non-null we're "saved"; tapping while saved
+  /// removes; tapping while unsaved generates a UUID and persists.
+  ///
+  /// While a save is in-flight (`_saveToggleInFlight`), taps are ignored
+  /// and the icon is dimmed to communicate the busy state. This protects
+  /// against duplicate rows from rapid double-taps.
+  Widget _buildSaveResultButton({
+    required AppColors colors,
+    required Object result,
+  }) {
+    final isSaved = _activeSearchId != null;
+    final inFlight = _saveToggleInFlight;
+    return Tooltip(
+      message: isSaved ? 'Remove from history' : 'Save to history',
+      child: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 200),
+        transitionBuilder: (child, anim) =>
+            ScaleTransition(scale: anim, child: child),
+        child: IconButton(
+          key: ValueKey<bool>(isSaved),
+          onPressed: inFlight ? null : () => _toggleSaveResult(result),
+          visualDensity: VisualDensity.compact,
+          padding: const EdgeInsets.all(6),
+          constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+          icon: Opacity(
+            opacity: inFlight ? 0.5 : 1,
+            child: Icon(
+              isSaved ? Icons.bookmark_rounded : Icons.bookmark_outline_rounded,
+              size: 20,
+              color: isSaved ? const Color(0xFFC084FC) : colors.text3,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Opens the saved-searches bottom sheet. Imported lazily to avoid a
+  /// circular import between the sheet (which renders saved entries via
+  /// existing result widgets) and tutor_screen.
+  Future<void> _openSavedSearchesSheet() async {
+    final selected = await showModalBottomSheet<SavedSearchEntry>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => const SavedSearchesSheet(),
+    );
+    if (!mounted || selected == null) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => SavedSearchDetailSheet(entryId: selected.id),
+    );
+  }
+
+  Future<void> _toggleSaveResult(Object result) async {
+    // Re-entrancy guard: ignore taps while a previous toggle is in flight.
+    if (_saveToggleInFlight) return;
+    final store = ref.read(savedSearchStoreProvider);
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    HapticFeedback.lightImpact();
+    setState(() => _saveToggleInFlight = true);
+
+    try {
+      if (_activeSearchId != null) {
+        final removedId = _activeSearchId!;
+        setState(() => _activeSearchId = null);
+        await store.delete(removedId);
+        messenger?.hideCurrentSnackBar();
+        messenger?.showSnackBar(SnackBar(
+          content: const Text('Removed from history'),
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 4),
+          action: SnackBarAction(
+            label: 'Undo',
+            onPressed: () async {
+              await store.undelete(removedId);
+              if (!mounted) return;
+              setState(() => _activeSearchId = removedId);
+            },
+          ),
+        ));
+        return;
+      }
+
+      final query = _summaryUrlCtrl.text.trim();
+      final kind = _isUrl(query) ? SavedSearchKind.url : SavedSearchKind.query;
+      try {
+        final entry = await store.saveResult(
+          kind: kind,
+          query: query,
+          result: result,
+        );
+        if (!mounted) return;
+        setState(() => _activeSearchId = entry.id);
+        messenger?.hideCurrentSnackBar();
+        messenger?.showSnackBar(SnackBar(
+          content: const Text('Saved to history'),
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 3),
+          action: SnackBarAction(
+            label: 'Undo',
+            onPressed: () async {
+              await store.delete(entry.id);
+              if (!mounted) return;
+              setState(() => _activeSearchId = null);
+            },
+          ),
+        ));
+      } catch (e) {
+        TLog.e('Tutor', 'saveResult failed', error: e);
+        if (!mounted) return;
+        messenger?.hideCurrentSnackBar();
+        messenger?.showSnackBar(const SnackBar(
+          content: Text('Could not save — please try again'),
+          behavior: SnackBarBehavior.floating,
+        ));
+      }
+    } finally {
+      if (mounted) setState(() => _saveToggleInFlight = false);
+    }
   }
 
   MarkdownStyleSheet _aiMarkdownStyle(AppColors colors) {
@@ -2890,11 +3053,18 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         const SizedBox(height: 20),
-        _searchServiceBadge(
-          colors,
-          badgeLabel,
-          isXGrokResult ? LucideIcons.bot : LucideIcons.globe,
-          badgeColor,
+        Row(
+          children: [
+            Expanded(
+              child: _searchServiceBadge(
+                colors,
+                badgeLabel,
+                isXGrokResult ? LucideIcons.bot : LucideIcons.globe,
+                badgeColor,
+              ),
+            ),
+            _buildSaveResultButton(colors: colors, result: r),
+          ],
         ),
         const SizedBox(height: 10),
         Container(
@@ -3063,6 +3233,7 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
             _groundedResult = null;
             _tavilyResult = null;
             _summaryResult = null;
+            _activeSearchId = null;
           }),
           icon: Icon(LucideIcons.rotateCcw, size: 16, color: colors.text4),
           label: Text(
@@ -3329,7 +3500,15 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
       children: [
         const SizedBox(height: 20),
         if (badges.isNotEmpty) ...[
-          Wrap(spacing: 6, runSpacing: 6, children: badges),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Wrap(spacing: 6, runSpacing: 6, children: badges),
+              ),
+              _buildSaveResultButton(colors: colors, result: r),
+            ],
+          ),
           const SizedBox(height: 10),
         ],
         if (r.fallback) ...[
@@ -3578,6 +3757,7 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
             _summaryResult = null;
             _tavilyResult = null;
             _groundedResult = null;
+            _activeSearchId = null;
           }),
           icon: Icon(LucideIcons.rotateCcw, size: 16, color: colors.text4),
           label: Text(
@@ -4168,6 +4348,8 @@ class _SearchInputBox extends StatefulWidget {
     this.selectedProviderId,
     this.onProviderChanged,
     this.isListening = false,
+    this.savedCount = 0,
+    this.onOpenHistory,
   });
 
   final TextEditingController controller;
@@ -4211,6 +4393,16 @@ class _SearchInputBox extends StatefulWidget {
   final VoidCallback onVoiceDown;
   final VoidCallback onVoiceUp;
   final String? deepResearchUrl;
+
+  /// Number of saved searches to show on the History badge. The pill is
+  /// rendered only when [onOpenHistory] is non-null; the badge only when
+  /// this count is greater than zero.
+  final int savedCount;
+
+  /// Tap callback for the History pill. The pill is hidden entirely when
+  /// this is null, so callers that don't want history can simply omit it
+  /// — fully backwards compatible with existing usages of this widget.
+  final VoidCallback? onOpenHistory;
 
   @override
   State<_SearchInputBox> createState() => _SearchInputBoxState();
@@ -4596,6 +4788,10 @@ class _SearchInputBoxState extends State<_SearchInputBox> {
             ),
           ),
           const Spacer(),
+          if (widget.onOpenHistory != null) ...[
+            _buildHistoryPill(colors),
+            const SizedBox(width: 8),
+          ],
           if (useInteractivePicker)
             ProviderPicker(
               options: widget.providerOptions!,
@@ -4607,6 +4803,62 @@ class _SearchInputBoxState extends State<_SearchInputBox> {
           else
             _buildProviderChip(colors, isXGrok),
         ],
+      ),
+    );
+  }
+
+  /// History pill — small purple-accented chip that opens the saved-searches
+  /// bottom sheet. Renders a count badge only when there are saved entries.
+  Widget _buildHistoryPill(AppColors colors) {
+    const accent = Color(0xFFC084FC);
+    final count = widget.savedCount;
+    return GestureDetector(
+      onTap: widget.onOpenHistory,
+      behavior: HitTestBehavior.opaque,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        decoration: BoxDecoration(
+          color: accent.withValues(alpha: 0.10),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: accent.withValues(alpha: 0.25)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(LucideIcons.history, size: 12, color: accent),
+            const SizedBox(width: 5),
+            Text(
+              'History',
+              style: GoogleFonts.plusJakartaSans(
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+                color: accent,
+              ),
+            ),
+            if (count > 0) ...[
+              const SizedBox(width: 6),
+              Container(
+                constraints: const BoxConstraints(minWidth: 16),
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 5, vertical: 1),
+                decoration: BoxDecoration(
+                  color: accent,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(
+                  count > 99 ? '99+' : '$count',
+                  textAlign: TextAlign.center,
+                  style: GoogleFonts.plusJakartaSans(
+                    fontSize: 9,
+                    fontWeight: FontWeight.w800,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
       ),
     );
   }

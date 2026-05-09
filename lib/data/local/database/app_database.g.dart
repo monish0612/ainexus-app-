@@ -3246,6 +3246,1333 @@ class ArticleChatSummariesCompanion
   }
 }
 
+class $SavedSearchesTable extends SavedSearches
+    with TableInfo<$SavedSearchesTable, SavedSearche> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $SavedSearchesTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+      'id', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _kindMeta = const VerificationMeta('kind');
+  @override
+  late final GeneratedColumn<String> kind = GeneratedColumn<String>(
+      'kind', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _queryMeta = const VerificationMeta('query');
+  @override
+  late final GeneratedColumn<String> query = GeneratedColumn<String>(
+      'query', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _titleMeta = const VerificationMeta('title');
+  @override
+  late final GeneratedColumn<String> title = GeneratedColumn<String>(
+      'title', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _responseTypeMeta =
+      const VerificationMeta('responseType');
+  @override
+  late final GeneratedColumn<String> responseType = GeneratedColumn<String>(
+      'response_type', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _responseJsonMeta =
+      const VerificationMeta('responseJson');
+  @override
+  late final GeneratedColumn<String> responseJson = GeneratedColumn<String>(
+      'response_json', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _modelMeta = const VerificationMeta('model');
+  @override
+  late final GeneratedColumn<String> model = GeneratedColumn<String>(
+      'model', aliasedName, false,
+      type: DriftSqlType.string,
+      requiredDuringInsert: false,
+      defaultValue: const Constant(''));
+  static const VerificationMeta _providerMeta =
+      const VerificationMeta('provider');
+  @override
+  late final GeneratedColumn<String> provider = GeneratedColumn<String>(
+      'provider', aliasedName, false,
+      type: DriftSqlType.string,
+      requiredDuringInsert: false,
+      defaultValue: const Constant(''));
+  static const VerificationMeta _modeMeta = const VerificationMeta('mode');
+  @override
+  late final GeneratedColumn<String> mode = GeneratedColumn<String>(
+      'mode', aliasedName, false,
+      type: DriftSqlType.string,
+      requiredDuringInsert: false,
+      defaultValue: const Constant(''));
+  static const VerificationMeta _savedAtMeta =
+      const VerificationMeta('savedAt');
+  @override
+  late final GeneratedColumn<String> savedAt = GeneratedColumn<String>(
+      'saved_at', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _updatedAtMeta =
+      const VerificationMeta('updatedAt');
+  @override
+  late final GeneratedColumn<String> updatedAt = GeneratedColumn<String>(
+      'updated_at', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _pinnedMeta = const VerificationMeta('pinned');
+  @override
+  late final GeneratedColumn<bool> pinned = GeneratedColumn<bool>(
+      'pinned', aliasedName, false,
+      type: DriftSqlType.bool,
+      requiredDuringInsert: false,
+      defaultConstraints:
+          GeneratedColumn.constraintIsAlways('CHECK ("pinned" IN (0, 1))'),
+      defaultValue: const Constant(true));
+  static const VerificationMeta _deletedAtMeta =
+      const VerificationMeta('deletedAt');
+  @override
+  late final GeneratedColumn<String> deletedAt = GeneratedColumn<String>(
+      'deleted_at', aliasedName, true,
+      type: DriftSqlType.string, requiredDuringInsert: false);
+  @override
+  List<GeneratedColumn> get $columns => [
+        id,
+        kind,
+        query,
+        title,
+        responseType,
+        responseJson,
+        model,
+        provider,
+        mode,
+        savedAt,
+        updatedAt,
+        pinned,
+        deletedAt
+      ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'saved_searches';
+  @override
+  VerificationContext validateIntegrity(Insertable<SavedSearche> instance,
+      {bool isInserting = false}) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('kind')) {
+      context.handle(
+          _kindMeta, kind.isAcceptableOrUnknown(data['kind']!, _kindMeta));
+    } else if (isInserting) {
+      context.missing(_kindMeta);
+    }
+    if (data.containsKey('query')) {
+      context.handle(
+          _queryMeta, query.isAcceptableOrUnknown(data['query']!, _queryMeta));
+    } else if (isInserting) {
+      context.missing(_queryMeta);
+    }
+    if (data.containsKey('title')) {
+      context.handle(
+          _titleMeta, title.isAcceptableOrUnknown(data['title']!, _titleMeta));
+    } else if (isInserting) {
+      context.missing(_titleMeta);
+    }
+    if (data.containsKey('response_type')) {
+      context.handle(
+          _responseTypeMeta,
+          responseType.isAcceptableOrUnknown(
+              data['response_type']!, _responseTypeMeta));
+    } else if (isInserting) {
+      context.missing(_responseTypeMeta);
+    }
+    if (data.containsKey('response_json')) {
+      context.handle(
+          _responseJsonMeta,
+          responseJson.isAcceptableOrUnknown(
+              data['response_json']!, _responseJsonMeta));
+    } else if (isInserting) {
+      context.missing(_responseJsonMeta);
+    }
+    if (data.containsKey('model')) {
+      context.handle(
+          _modelMeta, model.isAcceptableOrUnknown(data['model']!, _modelMeta));
+    }
+    if (data.containsKey('provider')) {
+      context.handle(_providerMeta,
+          provider.isAcceptableOrUnknown(data['provider']!, _providerMeta));
+    }
+    if (data.containsKey('mode')) {
+      context.handle(
+          _modeMeta, mode.isAcceptableOrUnknown(data['mode']!, _modeMeta));
+    }
+    if (data.containsKey('saved_at')) {
+      context.handle(_savedAtMeta,
+          savedAt.isAcceptableOrUnknown(data['saved_at']!, _savedAtMeta));
+    } else if (isInserting) {
+      context.missing(_savedAtMeta);
+    }
+    if (data.containsKey('updated_at')) {
+      context.handle(_updatedAtMeta,
+          updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta));
+    } else if (isInserting) {
+      context.missing(_updatedAtMeta);
+    }
+    if (data.containsKey('pinned')) {
+      context.handle(_pinnedMeta,
+          pinned.isAcceptableOrUnknown(data['pinned']!, _pinnedMeta));
+    }
+    if (data.containsKey('deleted_at')) {
+      context.handle(_deletedAtMeta,
+          deletedAt.isAcceptableOrUnknown(data['deleted_at']!, _deletedAtMeta));
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  SavedSearche map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return SavedSearche(
+      id: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}id'])!,
+      kind: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}kind'])!,
+      query: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}query'])!,
+      title: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}title'])!,
+      responseType: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}response_type'])!,
+      responseJson: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}response_json'])!,
+      model: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}model'])!,
+      provider: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}provider'])!,
+      mode: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}mode'])!,
+      savedAt: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}saved_at'])!,
+      updatedAt: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}updated_at'])!,
+      pinned: attachedDatabase.typeMapping
+          .read(DriftSqlType.bool, data['${effectivePrefix}pinned'])!,
+      deletedAt: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}deleted_at']),
+    );
+  }
+
+  @override
+  $SavedSearchesTable createAlias(String alias) {
+    return $SavedSearchesTable(attachedDatabase, alias);
+  }
+}
+
+class SavedSearche extends DataClass implements Insertable<SavedSearche> {
+  final String id;
+
+  /// 'url' for URL-summarize entries, 'query' for text search entries.
+  final String kind;
+
+  /// The original input text (URL or query).
+  final String query;
+
+  /// Display title derived at save time (URL hostname or first 80 chars).
+  final String title;
+
+  /// Discriminator for [responseJson]: 'summarizer' | 'grounded' | 'tavily'.
+  final String responseType;
+
+  /// Full serialized response DTO. Kept opaque at the DB layer so result
+  /// shape evolution doesn't require migrations.
+  final String responseJson;
+  final String model;
+  final String provider;
+  final String mode;
+
+  /// ISO-8601 UTC timestamp.
+  final String savedAt;
+
+  /// ISO-8601 UTC timestamp; bumped whenever a follow-up message is appended
+  /// so the History list can sort by activity.
+  final String updatedAt;
+
+  /// Reserved for future filter / cleanup logic. Defaults to true on save.
+  final bool pinned;
+
+  /// Soft-delete tombstone — set when the user deletes locally; the row is
+  /// hard-deleted only after the remote DELETE is acknowledged. Lets sync
+  /// be eventual-consistent without losing remote rows on transient errors.
+  final String? deletedAt;
+  const SavedSearche(
+      {required this.id,
+      required this.kind,
+      required this.query,
+      required this.title,
+      required this.responseType,
+      required this.responseJson,
+      required this.model,
+      required this.provider,
+      required this.mode,
+      required this.savedAt,
+      required this.updatedAt,
+      required this.pinned,
+      this.deletedAt});
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['kind'] = Variable<String>(kind);
+    map['query'] = Variable<String>(query);
+    map['title'] = Variable<String>(title);
+    map['response_type'] = Variable<String>(responseType);
+    map['response_json'] = Variable<String>(responseJson);
+    map['model'] = Variable<String>(model);
+    map['provider'] = Variable<String>(provider);
+    map['mode'] = Variable<String>(mode);
+    map['saved_at'] = Variable<String>(savedAt);
+    map['updated_at'] = Variable<String>(updatedAt);
+    map['pinned'] = Variable<bool>(pinned);
+    if (!nullToAbsent || deletedAt != null) {
+      map['deleted_at'] = Variable<String>(deletedAt);
+    }
+    return map;
+  }
+
+  SavedSearchesCompanion toCompanion(bool nullToAbsent) {
+    return SavedSearchesCompanion(
+      id: Value(id),
+      kind: Value(kind),
+      query: Value(query),
+      title: Value(title),
+      responseType: Value(responseType),
+      responseJson: Value(responseJson),
+      model: Value(model),
+      provider: Value(provider),
+      mode: Value(mode),
+      savedAt: Value(savedAt),
+      updatedAt: Value(updatedAt),
+      pinned: Value(pinned),
+      deletedAt: deletedAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(deletedAt),
+    );
+  }
+
+  factory SavedSearche.fromJson(Map<String, dynamic> json,
+      {ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return SavedSearche(
+      id: serializer.fromJson<String>(json['id']),
+      kind: serializer.fromJson<String>(json['kind']),
+      query: serializer.fromJson<String>(json['query']),
+      title: serializer.fromJson<String>(json['title']),
+      responseType: serializer.fromJson<String>(json['responseType']),
+      responseJson: serializer.fromJson<String>(json['responseJson']),
+      model: serializer.fromJson<String>(json['model']),
+      provider: serializer.fromJson<String>(json['provider']),
+      mode: serializer.fromJson<String>(json['mode']),
+      savedAt: serializer.fromJson<String>(json['savedAt']),
+      updatedAt: serializer.fromJson<String>(json['updatedAt']),
+      pinned: serializer.fromJson<bool>(json['pinned']),
+      deletedAt: serializer.fromJson<String?>(json['deletedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'kind': serializer.toJson<String>(kind),
+      'query': serializer.toJson<String>(query),
+      'title': serializer.toJson<String>(title),
+      'responseType': serializer.toJson<String>(responseType),
+      'responseJson': serializer.toJson<String>(responseJson),
+      'model': serializer.toJson<String>(model),
+      'provider': serializer.toJson<String>(provider),
+      'mode': serializer.toJson<String>(mode),
+      'savedAt': serializer.toJson<String>(savedAt),
+      'updatedAt': serializer.toJson<String>(updatedAt),
+      'pinned': serializer.toJson<bool>(pinned),
+      'deletedAt': serializer.toJson<String?>(deletedAt),
+    };
+  }
+
+  SavedSearche copyWith(
+          {String? id,
+          String? kind,
+          String? query,
+          String? title,
+          String? responseType,
+          String? responseJson,
+          String? model,
+          String? provider,
+          String? mode,
+          String? savedAt,
+          String? updatedAt,
+          bool? pinned,
+          Value<String?> deletedAt = const Value.absent()}) =>
+      SavedSearche(
+        id: id ?? this.id,
+        kind: kind ?? this.kind,
+        query: query ?? this.query,
+        title: title ?? this.title,
+        responseType: responseType ?? this.responseType,
+        responseJson: responseJson ?? this.responseJson,
+        model: model ?? this.model,
+        provider: provider ?? this.provider,
+        mode: mode ?? this.mode,
+        savedAt: savedAt ?? this.savedAt,
+        updatedAt: updatedAt ?? this.updatedAt,
+        pinned: pinned ?? this.pinned,
+        deletedAt: deletedAt.present ? deletedAt.value : this.deletedAt,
+      );
+  SavedSearche copyWithCompanion(SavedSearchesCompanion data) {
+    return SavedSearche(
+      id: data.id.present ? data.id.value : this.id,
+      kind: data.kind.present ? data.kind.value : this.kind,
+      query: data.query.present ? data.query.value : this.query,
+      title: data.title.present ? data.title.value : this.title,
+      responseType: data.responseType.present
+          ? data.responseType.value
+          : this.responseType,
+      responseJson: data.responseJson.present
+          ? data.responseJson.value
+          : this.responseJson,
+      model: data.model.present ? data.model.value : this.model,
+      provider: data.provider.present ? data.provider.value : this.provider,
+      mode: data.mode.present ? data.mode.value : this.mode,
+      savedAt: data.savedAt.present ? data.savedAt.value : this.savedAt,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+      pinned: data.pinned.present ? data.pinned.value : this.pinned,
+      deletedAt: data.deletedAt.present ? data.deletedAt.value : this.deletedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('SavedSearche(')
+          ..write('id: $id, ')
+          ..write('kind: $kind, ')
+          ..write('query: $query, ')
+          ..write('title: $title, ')
+          ..write('responseType: $responseType, ')
+          ..write('responseJson: $responseJson, ')
+          ..write('model: $model, ')
+          ..write('provider: $provider, ')
+          ..write('mode: $mode, ')
+          ..write('savedAt: $savedAt, ')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('pinned: $pinned, ')
+          ..write('deletedAt: $deletedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+      id,
+      kind,
+      query,
+      title,
+      responseType,
+      responseJson,
+      model,
+      provider,
+      mode,
+      savedAt,
+      updatedAt,
+      pinned,
+      deletedAt);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is SavedSearche &&
+          other.id == this.id &&
+          other.kind == this.kind &&
+          other.query == this.query &&
+          other.title == this.title &&
+          other.responseType == this.responseType &&
+          other.responseJson == this.responseJson &&
+          other.model == this.model &&
+          other.provider == this.provider &&
+          other.mode == this.mode &&
+          other.savedAt == this.savedAt &&
+          other.updatedAt == this.updatedAt &&
+          other.pinned == this.pinned &&
+          other.deletedAt == this.deletedAt);
+}
+
+class SavedSearchesCompanion extends UpdateCompanion<SavedSearche> {
+  final Value<String> id;
+  final Value<String> kind;
+  final Value<String> query;
+  final Value<String> title;
+  final Value<String> responseType;
+  final Value<String> responseJson;
+  final Value<String> model;
+  final Value<String> provider;
+  final Value<String> mode;
+  final Value<String> savedAt;
+  final Value<String> updatedAt;
+  final Value<bool> pinned;
+  final Value<String?> deletedAt;
+  final Value<int> rowid;
+  const SavedSearchesCompanion({
+    this.id = const Value.absent(),
+    this.kind = const Value.absent(),
+    this.query = const Value.absent(),
+    this.title = const Value.absent(),
+    this.responseType = const Value.absent(),
+    this.responseJson = const Value.absent(),
+    this.model = const Value.absent(),
+    this.provider = const Value.absent(),
+    this.mode = const Value.absent(),
+    this.savedAt = const Value.absent(),
+    this.updatedAt = const Value.absent(),
+    this.pinned = const Value.absent(),
+    this.deletedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  SavedSearchesCompanion.insert({
+    required String id,
+    required String kind,
+    required String query,
+    required String title,
+    required String responseType,
+    required String responseJson,
+    this.model = const Value.absent(),
+    this.provider = const Value.absent(),
+    this.mode = const Value.absent(),
+    required String savedAt,
+    required String updatedAt,
+    this.pinned = const Value.absent(),
+    this.deletedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  })  : id = Value(id),
+        kind = Value(kind),
+        query = Value(query),
+        title = Value(title),
+        responseType = Value(responseType),
+        responseJson = Value(responseJson),
+        savedAt = Value(savedAt),
+        updatedAt = Value(updatedAt);
+  static Insertable<SavedSearche> custom({
+    Expression<String>? id,
+    Expression<String>? kind,
+    Expression<String>? query,
+    Expression<String>? title,
+    Expression<String>? responseType,
+    Expression<String>? responseJson,
+    Expression<String>? model,
+    Expression<String>? provider,
+    Expression<String>? mode,
+    Expression<String>? savedAt,
+    Expression<String>? updatedAt,
+    Expression<bool>? pinned,
+    Expression<String>? deletedAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (kind != null) 'kind': kind,
+      if (query != null) 'query': query,
+      if (title != null) 'title': title,
+      if (responseType != null) 'response_type': responseType,
+      if (responseJson != null) 'response_json': responseJson,
+      if (model != null) 'model': model,
+      if (provider != null) 'provider': provider,
+      if (mode != null) 'mode': mode,
+      if (savedAt != null) 'saved_at': savedAt,
+      if (updatedAt != null) 'updated_at': updatedAt,
+      if (pinned != null) 'pinned': pinned,
+      if (deletedAt != null) 'deleted_at': deletedAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  SavedSearchesCompanion copyWith(
+      {Value<String>? id,
+      Value<String>? kind,
+      Value<String>? query,
+      Value<String>? title,
+      Value<String>? responseType,
+      Value<String>? responseJson,
+      Value<String>? model,
+      Value<String>? provider,
+      Value<String>? mode,
+      Value<String>? savedAt,
+      Value<String>? updatedAt,
+      Value<bool>? pinned,
+      Value<String?>? deletedAt,
+      Value<int>? rowid}) {
+    return SavedSearchesCompanion(
+      id: id ?? this.id,
+      kind: kind ?? this.kind,
+      query: query ?? this.query,
+      title: title ?? this.title,
+      responseType: responseType ?? this.responseType,
+      responseJson: responseJson ?? this.responseJson,
+      model: model ?? this.model,
+      provider: provider ?? this.provider,
+      mode: mode ?? this.mode,
+      savedAt: savedAt ?? this.savedAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+      pinned: pinned ?? this.pinned,
+      deletedAt: deletedAt ?? this.deletedAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (kind.present) {
+      map['kind'] = Variable<String>(kind.value);
+    }
+    if (query.present) {
+      map['query'] = Variable<String>(query.value);
+    }
+    if (title.present) {
+      map['title'] = Variable<String>(title.value);
+    }
+    if (responseType.present) {
+      map['response_type'] = Variable<String>(responseType.value);
+    }
+    if (responseJson.present) {
+      map['response_json'] = Variable<String>(responseJson.value);
+    }
+    if (model.present) {
+      map['model'] = Variable<String>(model.value);
+    }
+    if (provider.present) {
+      map['provider'] = Variable<String>(provider.value);
+    }
+    if (mode.present) {
+      map['mode'] = Variable<String>(mode.value);
+    }
+    if (savedAt.present) {
+      map['saved_at'] = Variable<String>(savedAt.value);
+    }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<String>(updatedAt.value);
+    }
+    if (pinned.present) {
+      map['pinned'] = Variable<bool>(pinned.value);
+    }
+    if (deletedAt.present) {
+      map['deleted_at'] = Variable<String>(deletedAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('SavedSearchesCompanion(')
+          ..write('id: $id, ')
+          ..write('kind: $kind, ')
+          ..write('query: $query, ')
+          ..write('title: $title, ')
+          ..write('responseType: $responseType, ')
+          ..write('responseJson: $responseJson, ')
+          ..write('model: $model, ')
+          ..write('provider: $provider, ')
+          ..write('mode: $mode, ')
+          ..write('savedAt: $savedAt, ')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('pinned: $pinned, ')
+          ..write('deletedAt: $deletedAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $SavedSearchChatMessagesTable extends SavedSearchChatMessages
+    with TableInfo<$SavedSearchChatMessagesTable, SavedSearchChatMessage> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $SavedSearchChatMessagesTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+      'id', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _searchIdMeta =
+      const VerificationMeta('searchId');
+  @override
+  late final GeneratedColumn<String> searchId = GeneratedColumn<String>(
+      'search_id', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _roleMeta = const VerificationMeta('role');
+  @override
+  late final GeneratedColumn<String> role = GeneratedColumn<String>(
+      'role', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _msgTextMeta =
+      const VerificationMeta('msgText');
+  @override
+  late final GeneratedColumn<String> msgText = GeneratedColumn<String>(
+      'msg_text', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _modelMeta = const VerificationMeta('model');
+  @override
+  late final GeneratedColumn<String> model = GeneratedColumn<String>(
+      'model', aliasedName, false,
+      type: DriftSqlType.string,
+      requiredDuringInsert: false,
+      defaultValue: const Constant(''));
+  static const VerificationMeta _sourcesJsonMeta =
+      const VerificationMeta('sourcesJson');
+  @override
+  late final GeneratedColumn<String> sourcesJson = GeneratedColumn<String>(
+      'sources_json', aliasedName, false,
+      type: DriftSqlType.string,
+      requiredDuringInsert: false,
+      defaultValue: const Constant('[]'));
+  static const VerificationMeta _createdAtMeta =
+      const VerificationMeta('createdAt');
+  @override
+  late final GeneratedColumn<String> createdAt = GeneratedColumn<String>(
+      'created_at', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  @override
+  List<GeneratedColumn> get $columns =>
+      [id, searchId, role, msgText, model, sourcesJson, createdAt];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'saved_search_chat_messages';
+  @override
+  VerificationContext validateIntegrity(
+      Insertable<SavedSearchChatMessage> instance,
+      {bool isInserting = false}) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('search_id')) {
+      context.handle(_searchIdMeta,
+          searchId.isAcceptableOrUnknown(data['search_id']!, _searchIdMeta));
+    } else if (isInserting) {
+      context.missing(_searchIdMeta);
+    }
+    if (data.containsKey('role')) {
+      context.handle(
+          _roleMeta, role.isAcceptableOrUnknown(data['role']!, _roleMeta));
+    } else if (isInserting) {
+      context.missing(_roleMeta);
+    }
+    if (data.containsKey('msg_text')) {
+      context.handle(_msgTextMeta,
+          msgText.isAcceptableOrUnknown(data['msg_text']!, _msgTextMeta));
+    } else if (isInserting) {
+      context.missing(_msgTextMeta);
+    }
+    if (data.containsKey('model')) {
+      context.handle(
+          _modelMeta, model.isAcceptableOrUnknown(data['model']!, _modelMeta));
+    }
+    if (data.containsKey('sources_json')) {
+      context.handle(
+          _sourcesJsonMeta,
+          sourcesJson.isAcceptableOrUnknown(
+              data['sources_json']!, _sourcesJsonMeta));
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(_createdAtMeta,
+          createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta));
+    } else if (isInserting) {
+      context.missing(_createdAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  SavedSearchChatMessage map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return SavedSearchChatMessage(
+      id: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}id'])!,
+      searchId: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}search_id'])!,
+      role: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}role'])!,
+      msgText: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}msg_text'])!,
+      model: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}model'])!,
+      sourcesJson: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}sources_json'])!,
+      createdAt: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}created_at'])!,
+    );
+  }
+
+  @override
+  $SavedSearchChatMessagesTable createAlias(String alias) {
+    return $SavedSearchChatMessagesTable(attachedDatabase, alias);
+  }
+}
+
+class SavedSearchChatMessage extends DataClass
+    implements Insertable<SavedSearchChatMessage> {
+  final String id;
+  final String searchId;
+  final String role;
+  final String msgText;
+  final String model;
+  final String sourcesJson;
+  final String createdAt;
+  const SavedSearchChatMessage(
+      {required this.id,
+      required this.searchId,
+      required this.role,
+      required this.msgText,
+      required this.model,
+      required this.sourcesJson,
+      required this.createdAt});
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['search_id'] = Variable<String>(searchId);
+    map['role'] = Variable<String>(role);
+    map['msg_text'] = Variable<String>(msgText);
+    map['model'] = Variable<String>(model);
+    map['sources_json'] = Variable<String>(sourcesJson);
+    map['created_at'] = Variable<String>(createdAt);
+    return map;
+  }
+
+  SavedSearchChatMessagesCompanion toCompanion(bool nullToAbsent) {
+    return SavedSearchChatMessagesCompanion(
+      id: Value(id),
+      searchId: Value(searchId),
+      role: Value(role),
+      msgText: Value(msgText),
+      model: Value(model),
+      sourcesJson: Value(sourcesJson),
+      createdAt: Value(createdAt),
+    );
+  }
+
+  factory SavedSearchChatMessage.fromJson(Map<String, dynamic> json,
+      {ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return SavedSearchChatMessage(
+      id: serializer.fromJson<String>(json['id']),
+      searchId: serializer.fromJson<String>(json['searchId']),
+      role: serializer.fromJson<String>(json['role']),
+      msgText: serializer.fromJson<String>(json['msgText']),
+      model: serializer.fromJson<String>(json['model']),
+      sourcesJson: serializer.fromJson<String>(json['sourcesJson']),
+      createdAt: serializer.fromJson<String>(json['createdAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'searchId': serializer.toJson<String>(searchId),
+      'role': serializer.toJson<String>(role),
+      'msgText': serializer.toJson<String>(msgText),
+      'model': serializer.toJson<String>(model),
+      'sourcesJson': serializer.toJson<String>(sourcesJson),
+      'createdAt': serializer.toJson<String>(createdAt),
+    };
+  }
+
+  SavedSearchChatMessage copyWith(
+          {String? id,
+          String? searchId,
+          String? role,
+          String? msgText,
+          String? model,
+          String? sourcesJson,
+          String? createdAt}) =>
+      SavedSearchChatMessage(
+        id: id ?? this.id,
+        searchId: searchId ?? this.searchId,
+        role: role ?? this.role,
+        msgText: msgText ?? this.msgText,
+        model: model ?? this.model,
+        sourcesJson: sourcesJson ?? this.sourcesJson,
+        createdAt: createdAt ?? this.createdAt,
+      );
+  SavedSearchChatMessage copyWithCompanion(
+      SavedSearchChatMessagesCompanion data) {
+    return SavedSearchChatMessage(
+      id: data.id.present ? data.id.value : this.id,
+      searchId: data.searchId.present ? data.searchId.value : this.searchId,
+      role: data.role.present ? data.role.value : this.role,
+      msgText: data.msgText.present ? data.msgText.value : this.msgText,
+      model: data.model.present ? data.model.value : this.model,
+      sourcesJson:
+          data.sourcesJson.present ? data.sourcesJson.value : this.sourcesJson,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('SavedSearchChatMessage(')
+          ..write('id: $id, ')
+          ..write('searchId: $searchId, ')
+          ..write('role: $role, ')
+          ..write('msgText: $msgText, ')
+          ..write('model: $model, ')
+          ..write('sourcesJson: $sourcesJson, ')
+          ..write('createdAt: $createdAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode =>
+      Object.hash(id, searchId, role, msgText, model, sourcesJson, createdAt);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is SavedSearchChatMessage &&
+          other.id == this.id &&
+          other.searchId == this.searchId &&
+          other.role == this.role &&
+          other.msgText == this.msgText &&
+          other.model == this.model &&
+          other.sourcesJson == this.sourcesJson &&
+          other.createdAt == this.createdAt);
+}
+
+class SavedSearchChatMessagesCompanion
+    extends UpdateCompanion<SavedSearchChatMessage> {
+  final Value<String> id;
+  final Value<String> searchId;
+  final Value<String> role;
+  final Value<String> msgText;
+  final Value<String> model;
+  final Value<String> sourcesJson;
+  final Value<String> createdAt;
+  final Value<int> rowid;
+  const SavedSearchChatMessagesCompanion({
+    this.id = const Value.absent(),
+    this.searchId = const Value.absent(),
+    this.role = const Value.absent(),
+    this.msgText = const Value.absent(),
+    this.model = const Value.absent(),
+    this.sourcesJson = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  SavedSearchChatMessagesCompanion.insert({
+    required String id,
+    required String searchId,
+    required String role,
+    required String msgText,
+    this.model = const Value.absent(),
+    this.sourcesJson = const Value.absent(),
+    required String createdAt,
+    this.rowid = const Value.absent(),
+  })  : id = Value(id),
+        searchId = Value(searchId),
+        role = Value(role),
+        msgText = Value(msgText),
+        createdAt = Value(createdAt);
+  static Insertable<SavedSearchChatMessage> custom({
+    Expression<String>? id,
+    Expression<String>? searchId,
+    Expression<String>? role,
+    Expression<String>? msgText,
+    Expression<String>? model,
+    Expression<String>? sourcesJson,
+    Expression<String>? createdAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (searchId != null) 'search_id': searchId,
+      if (role != null) 'role': role,
+      if (msgText != null) 'msg_text': msgText,
+      if (model != null) 'model': model,
+      if (sourcesJson != null) 'sources_json': sourcesJson,
+      if (createdAt != null) 'created_at': createdAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  SavedSearchChatMessagesCompanion copyWith(
+      {Value<String>? id,
+      Value<String>? searchId,
+      Value<String>? role,
+      Value<String>? msgText,
+      Value<String>? model,
+      Value<String>? sourcesJson,
+      Value<String>? createdAt,
+      Value<int>? rowid}) {
+    return SavedSearchChatMessagesCompanion(
+      id: id ?? this.id,
+      searchId: searchId ?? this.searchId,
+      role: role ?? this.role,
+      msgText: msgText ?? this.msgText,
+      model: model ?? this.model,
+      sourcesJson: sourcesJson ?? this.sourcesJson,
+      createdAt: createdAt ?? this.createdAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (searchId.present) {
+      map['search_id'] = Variable<String>(searchId.value);
+    }
+    if (role.present) {
+      map['role'] = Variable<String>(role.value);
+    }
+    if (msgText.present) {
+      map['msg_text'] = Variable<String>(msgText.value);
+    }
+    if (model.present) {
+      map['model'] = Variable<String>(model.value);
+    }
+    if (sourcesJson.present) {
+      map['sources_json'] = Variable<String>(sourcesJson.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<String>(createdAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('SavedSearchChatMessagesCompanion(')
+          ..write('id: $id, ')
+          ..write('searchId: $searchId, ')
+          ..write('role: $role, ')
+          ..write('msgText: $msgText, ')
+          ..write('model: $model, ')
+          ..write('sourcesJson: $sourcesJson, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $SavedSearchChatSummariesTable extends SavedSearchChatSummaries
+    with TableInfo<$SavedSearchChatSummariesTable, SavedSearchChatSummary> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $SavedSearchChatSummariesTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _searchIdMeta =
+      const VerificationMeta('searchId');
+  @override
+  late final GeneratedColumn<String> searchId = GeneratedColumn<String>(
+      'search_id', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _summaryTextMeta =
+      const VerificationMeta('summaryText');
+  @override
+  late final GeneratedColumn<String> summaryText = GeneratedColumn<String>(
+      'summary_text', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _pairsCoveredMeta =
+      const VerificationMeta('pairsCovered');
+  @override
+  late final GeneratedColumn<int> pairsCovered = GeneratedColumn<int>(
+      'pairs_covered', aliasedName, false,
+      type: DriftSqlType.int, requiredDuringInsert: true);
+  static const VerificationMeta _updatedAtMeta =
+      const VerificationMeta('updatedAt');
+  @override
+  late final GeneratedColumn<String> updatedAt = GeneratedColumn<String>(
+      'updated_at', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  @override
+  List<GeneratedColumn> get $columns =>
+      [searchId, summaryText, pairsCovered, updatedAt];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'saved_search_chat_summaries';
+  @override
+  VerificationContext validateIntegrity(
+      Insertable<SavedSearchChatSummary> instance,
+      {bool isInserting = false}) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('search_id')) {
+      context.handle(_searchIdMeta,
+          searchId.isAcceptableOrUnknown(data['search_id']!, _searchIdMeta));
+    } else if (isInserting) {
+      context.missing(_searchIdMeta);
+    }
+    if (data.containsKey('summary_text')) {
+      context.handle(
+          _summaryTextMeta,
+          summaryText.isAcceptableOrUnknown(
+              data['summary_text']!, _summaryTextMeta));
+    } else if (isInserting) {
+      context.missing(_summaryTextMeta);
+    }
+    if (data.containsKey('pairs_covered')) {
+      context.handle(
+          _pairsCoveredMeta,
+          pairsCovered.isAcceptableOrUnknown(
+              data['pairs_covered']!, _pairsCoveredMeta));
+    } else if (isInserting) {
+      context.missing(_pairsCoveredMeta);
+    }
+    if (data.containsKey('updated_at')) {
+      context.handle(_updatedAtMeta,
+          updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta));
+    } else if (isInserting) {
+      context.missing(_updatedAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {searchId};
+  @override
+  SavedSearchChatSummary map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return SavedSearchChatSummary(
+      searchId: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}search_id'])!,
+      summaryText: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}summary_text'])!,
+      pairsCovered: attachedDatabase.typeMapping
+          .read(DriftSqlType.int, data['${effectivePrefix}pairs_covered'])!,
+      updatedAt: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}updated_at'])!,
+    );
+  }
+
+  @override
+  $SavedSearchChatSummariesTable createAlias(String alias) {
+    return $SavedSearchChatSummariesTable(attachedDatabase, alias);
+  }
+}
+
+class SavedSearchChatSummary extends DataClass
+    implements Insertable<SavedSearchChatSummary> {
+  final String searchId;
+  final String summaryText;
+  final int pairsCovered;
+  final String updatedAt;
+  const SavedSearchChatSummary(
+      {required this.searchId,
+      required this.summaryText,
+      required this.pairsCovered,
+      required this.updatedAt});
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['search_id'] = Variable<String>(searchId);
+    map['summary_text'] = Variable<String>(summaryText);
+    map['pairs_covered'] = Variable<int>(pairsCovered);
+    map['updated_at'] = Variable<String>(updatedAt);
+    return map;
+  }
+
+  SavedSearchChatSummariesCompanion toCompanion(bool nullToAbsent) {
+    return SavedSearchChatSummariesCompanion(
+      searchId: Value(searchId),
+      summaryText: Value(summaryText),
+      pairsCovered: Value(pairsCovered),
+      updatedAt: Value(updatedAt),
+    );
+  }
+
+  factory SavedSearchChatSummary.fromJson(Map<String, dynamic> json,
+      {ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return SavedSearchChatSummary(
+      searchId: serializer.fromJson<String>(json['searchId']),
+      summaryText: serializer.fromJson<String>(json['summaryText']),
+      pairsCovered: serializer.fromJson<int>(json['pairsCovered']),
+      updatedAt: serializer.fromJson<String>(json['updatedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'searchId': serializer.toJson<String>(searchId),
+      'summaryText': serializer.toJson<String>(summaryText),
+      'pairsCovered': serializer.toJson<int>(pairsCovered),
+      'updatedAt': serializer.toJson<String>(updatedAt),
+    };
+  }
+
+  SavedSearchChatSummary copyWith(
+          {String? searchId,
+          String? summaryText,
+          int? pairsCovered,
+          String? updatedAt}) =>
+      SavedSearchChatSummary(
+        searchId: searchId ?? this.searchId,
+        summaryText: summaryText ?? this.summaryText,
+        pairsCovered: pairsCovered ?? this.pairsCovered,
+        updatedAt: updatedAt ?? this.updatedAt,
+      );
+  SavedSearchChatSummary copyWithCompanion(
+      SavedSearchChatSummariesCompanion data) {
+    return SavedSearchChatSummary(
+      searchId: data.searchId.present ? data.searchId.value : this.searchId,
+      summaryText:
+          data.summaryText.present ? data.summaryText.value : this.summaryText,
+      pairsCovered: data.pairsCovered.present
+          ? data.pairsCovered.value
+          : this.pairsCovered,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('SavedSearchChatSummary(')
+          ..write('searchId: $searchId, ')
+          ..write('summaryText: $summaryText, ')
+          ..write('pairsCovered: $pairsCovered, ')
+          ..write('updatedAt: $updatedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode =>
+      Object.hash(searchId, summaryText, pairsCovered, updatedAt);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is SavedSearchChatSummary &&
+          other.searchId == this.searchId &&
+          other.summaryText == this.summaryText &&
+          other.pairsCovered == this.pairsCovered &&
+          other.updatedAt == this.updatedAt);
+}
+
+class SavedSearchChatSummariesCompanion
+    extends UpdateCompanion<SavedSearchChatSummary> {
+  final Value<String> searchId;
+  final Value<String> summaryText;
+  final Value<int> pairsCovered;
+  final Value<String> updatedAt;
+  final Value<int> rowid;
+  const SavedSearchChatSummariesCompanion({
+    this.searchId = const Value.absent(),
+    this.summaryText = const Value.absent(),
+    this.pairsCovered = const Value.absent(),
+    this.updatedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  SavedSearchChatSummariesCompanion.insert({
+    required String searchId,
+    required String summaryText,
+    required int pairsCovered,
+    required String updatedAt,
+    this.rowid = const Value.absent(),
+  })  : searchId = Value(searchId),
+        summaryText = Value(summaryText),
+        pairsCovered = Value(pairsCovered),
+        updatedAt = Value(updatedAt);
+  static Insertable<SavedSearchChatSummary> custom({
+    Expression<String>? searchId,
+    Expression<String>? summaryText,
+    Expression<int>? pairsCovered,
+    Expression<String>? updatedAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (searchId != null) 'search_id': searchId,
+      if (summaryText != null) 'summary_text': summaryText,
+      if (pairsCovered != null) 'pairs_covered': pairsCovered,
+      if (updatedAt != null) 'updated_at': updatedAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  SavedSearchChatSummariesCompanion copyWith(
+      {Value<String>? searchId,
+      Value<String>? summaryText,
+      Value<int>? pairsCovered,
+      Value<String>? updatedAt,
+      Value<int>? rowid}) {
+    return SavedSearchChatSummariesCompanion(
+      searchId: searchId ?? this.searchId,
+      summaryText: summaryText ?? this.summaryText,
+      pairsCovered: pairsCovered ?? this.pairsCovered,
+      updatedAt: updatedAt ?? this.updatedAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (searchId.present) {
+      map['search_id'] = Variable<String>(searchId.value);
+    }
+    if (summaryText.present) {
+      map['summary_text'] = Variable<String>(summaryText.value);
+    }
+    if (pairsCovered.present) {
+      map['pairs_covered'] = Variable<int>(pairsCovered.value);
+    }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<String>(updatedAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('SavedSearchChatSummariesCompanion(')
+          ..write('searchId: $searchId, ')
+          ..write('summaryText: $summaryText, ')
+          ..write('pairsCovered: $pairsCovered, ')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
@@ -3261,6 +4588,11 @@ abstract class _$AppDatabase extends GeneratedDatabase {
       $ArticleChatMessagesTable(this);
   late final $ArticleChatSummariesTable articleChatSummaries =
       $ArticleChatSummariesTable(this);
+  late final $SavedSearchesTable savedSearches = $SavedSearchesTable(this);
+  late final $SavedSearchChatMessagesTable savedSearchChatMessages =
+      $SavedSearchChatMessagesTable(this);
+  late final $SavedSearchChatSummariesTable savedSearchChatSummaries =
+      $SavedSearchChatSummariesTable(this);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -3274,7 +4606,10 @@ abstract class _$AppDatabase extends GeneratedDatabase {
         syncQueue,
         categoryLearnings,
         articleChatMessages,
-        articleChatSummaries
+        articleChatSummaries,
+        savedSearches,
+        savedSearchChatMessages,
+        savedSearchChatSummaries
       ];
 }
 
@@ -4988,6 +6323,677 @@ typedef $$ArticleChatSummariesTableProcessedTableManager
         ),
         ArticleChatSummary,
         PrefetchHooks Function()>;
+typedef $$SavedSearchesTableCreateCompanionBuilder = SavedSearchesCompanion
+    Function({
+  required String id,
+  required String kind,
+  required String query,
+  required String title,
+  required String responseType,
+  required String responseJson,
+  Value<String> model,
+  Value<String> provider,
+  Value<String> mode,
+  required String savedAt,
+  required String updatedAt,
+  Value<bool> pinned,
+  Value<String?> deletedAt,
+  Value<int> rowid,
+});
+typedef $$SavedSearchesTableUpdateCompanionBuilder = SavedSearchesCompanion
+    Function({
+  Value<String> id,
+  Value<String> kind,
+  Value<String> query,
+  Value<String> title,
+  Value<String> responseType,
+  Value<String> responseJson,
+  Value<String> model,
+  Value<String> provider,
+  Value<String> mode,
+  Value<String> savedAt,
+  Value<String> updatedAt,
+  Value<bool> pinned,
+  Value<String?> deletedAt,
+  Value<int> rowid,
+});
+
+class $$SavedSearchesTableFilterComposer
+    extends Composer<_$AppDatabase, $SavedSearchesTable> {
+  $$SavedSearchesTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+      column: $table.id, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get kind => $composableBuilder(
+      column: $table.kind, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get query => $composableBuilder(
+      column: $table.query, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get title => $composableBuilder(
+      column: $table.title, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get responseType => $composableBuilder(
+      column: $table.responseType, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get responseJson => $composableBuilder(
+      column: $table.responseJson, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get model => $composableBuilder(
+      column: $table.model, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get provider => $composableBuilder(
+      column: $table.provider, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get mode => $composableBuilder(
+      column: $table.mode, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get savedAt => $composableBuilder(
+      column: $table.savedAt, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get updatedAt => $composableBuilder(
+      column: $table.updatedAt, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<bool> get pinned => $composableBuilder(
+      column: $table.pinned, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get deletedAt => $composableBuilder(
+      column: $table.deletedAt, builder: (column) => ColumnFilters(column));
+}
+
+class $$SavedSearchesTableOrderingComposer
+    extends Composer<_$AppDatabase, $SavedSearchesTable> {
+  $$SavedSearchesTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+      column: $table.id, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get kind => $composableBuilder(
+      column: $table.kind, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get query => $composableBuilder(
+      column: $table.query, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get title => $composableBuilder(
+      column: $table.title, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get responseType => $composableBuilder(
+      column: $table.responseType,
+      builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get responseJson => $composableBuilder(
+      column: $table.responseJson,
+      builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get model => $composableBuilder(
+      column: $table.model, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get provider => $composableBuilder(
+      column: $table.provider, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get mode => $composableBuilder(
+      column: $table.mode, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get savedAt => $composableBuilder(
+      column: $table.savedAt, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get updatedAt => $composableBuilder(
+      column: $table.updatedAt, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<bool> get pinned => $composableBuilder(
+      column: $table.pinned, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get deletedAt => $composableBuilder(
+      column: $table.deletedAt, builder: (column) => ColumnOrderings(column));
+}
+
+class $$SavedSearchesTableAnnotationComposer
+    extends Composer<_$AppDatabase, $SavedSearchesTable> {
+  $$SavedSearchesTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get kind =>
+      $composableBuilder(column: $table.kind, builder: (column) => column);
+
+  GeneratedColumn<String> get query =>
+      $composableBuilder(column: $table.query, builder: (column) => column);
+
+  GeneratedColumn<String> get title =>
+      $composableBuilder(column: $table.title, builder: (column) => column);
+
+  GeneratedColumn<String> get responseType => $composableBuilder(
+      column: $table.responseType, builder: (column) => column);
+
+  GeneratedColumn<String> get responseJson => $composableBuilder(
+      column: $table.responseJson, builder: (column) => column);
+
+  GeneratedColumn<String> get model =>
+      $composableBuilder(column: $table.model, builder: (column) => column);
+
+  GeneratedColumn<String> get provider =>
+      $composableBuilder(column: $table.provider, builder: (column) => column);
+
+  GeneratedColumn<String> get mode =>
+      $composableBuilder(column: $table.mode, builder: (column) => column);
+
+  GeneratedColumn<String> get savedAt =>
+      $composableBuilder(column: $table.savedAt, builder: (column) => column);
+
+  GeneratedColumn<String> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+
+  GeneratedColumn<bool> get pinned =>
+      $composableBuilder(column: $table.pinned, builder: (column) => column);
+
+  GeneratedColumn<String> get deletedAt =>
+      $composableBuilder(column: $table.deletedAt, builder: (column) => column);
+}
+
+class $$SavedSearchesTableTableManager extends RootTableManager<
+    _$AppDatabase,
+    $SavedSearchesTable,
+    SavedSearche,
+    $$SavedSearchesTableFilterComposer,
+    $$SavedSearchesTableOrderingComposer,
+    $$SavedSearchesTableAnnotationComposer,
+    $$SavedSearchesTableCreateCompanionBuilder,
+    $$SavedSearchesTableUpdateCompanionBuilder,
+    (
+      SavedSearche,
+      BaseReferences<_$AppDatabase, $SavedSearchesTable, SavedSearche>
+    ),
+    SavedSearche,
+    PrefetchHooks Function()> {
+  $$SavedSearchesTableTableManager(_$AppDatabase db, $SavedSearchesTable table)
+      : super(TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$SavedSearchesTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$SavedSearchesTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$SavedSearchesTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback: ({
+            Value<String> id = const Value.absent(),
+            Value<String> kind = const Value.absent(),
+            Value<String> query = const Value.absent(),
+            Value<String> title = const Value.absent(),
+            Value<String> responseType = const Value.absent(),
+            Value<String> responseJson = const Value.absent(),
+            Value<String> model = const Value.absent(),
+            Value<String> provider = const Value.absent(),
+            Value<String> mode = const Value.absent(),
+            Value<String> savedAt = const Value.absent(),
+            Value<String> updatedAt = const Value.absent(),
+            Value<bool> pinned = const Value.absent(),
+            Value<String?> deletedAt = const Value.absent(),
+            Value<int> rowid = const Value.absent(),
+          }) =>
+              SavedSearchesCompanion(
+            id: id,
+            kind: kind,
+            query: query,
+            title: title,
+            responseType: responseType,
+            responseJson: responseJson,
+            model: model,
+            provider: provider,
+            mode: mode,
+            savedAt: savedAt,
+            updatedAt: updatedAt,
+            pinned: pinned,
+            deletedAt: deletedAt,
+            rowid: rowid,
+          ),
+          createCompanionCallback: ({
+            required String id,
+            required String kind,
+            required String query,
+            required String title,
+            required String responseType,
+            required String responseJson,
+            Value<String> model = const Value.absent(),
+            Value<String> provider = const Value.absent(),
+            Value<String> mode = const Value.absent(),
+            required String savedAt,
+            required String updatedAt,
+            Value<bool> pinned = const Value.absent(),
+            Value<String?> deletedAt = const Value.absent(),
+            Value<int> rowid = const Value.absent(),
+          }) =>
+              SavedSearchesCompanion.insert(
+            id: id,
+            kind: kind,
+            query: query,
+            title: title,
+            responseType: responseType,
+            responseJson: responseJson,
+            model: model,
+            provider: provider,
+            mode: mode,
+            savedAt: savedAt,
+            updatedAt: updatedAt,
+            pinned: pinned,
+            deletedAt: deletedAt,
+            rowid: rowid,
+          ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ));
+}
+
+typedef $$SavedSearchesTableProcessedTableManager = ProcessedTableManager<
+    _$AppDatabase,
+    $SavedSearchesTable,
+    SavedSearche,
+    $$SavedSearchesTableFilterComposer,
+    $$SavedSearchesTableOrderingComposer,
+    $$SavedSearchesTableAnnotationComposer,
+    $$SavedSearchesTableCreateCompanionBuilder,
+    $$SavedSearchesTableUpdateCompanionBuilder,
+    (
+      SavedSearche,
+      BaseReferences<_$AppDatabase, $SavedSearchesTable, SavedSearche>
+    ),
+    SavedSearche,
+    PrefetchHooks Function()>;
+typedef $$SavedSearchChatMessagesTableCreateCompanionBuilder
+    = SavedSearchChatMessagesCompanion Function({
+  required String id,
+  required String searchId,
+  required String role,
+  required String msgText,
+  Value<String> model,
+  Value<String> sourcesJson,
+  required String createdAt,
+  Value<int> rowid,
+});
+typedef $$SavedSearchChatMessagesTableUpdateCompanionBuilder
+    = SavedSearchChatMessagesCompanion Function({
+  Value<String> id,
+  Value<String> searchId,
+  Value<String> role,
+  Value<String> msgText,
+  Value<String> model,
+  Value<String> sourcesJson,
+  Value<String> createdAt,
+  Value<int> rowid,
+});
+
+class $$SavedSearchChatMessagesTableFilterComposer
+    extends Composer<_$AppDatabase, $SavedSearchChatMessagesTable> {
+  $$SavedSearchChatMessagesTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+      column: $table.id, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get searchId => $composableBuilder(
+      column: $table.searchId, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get role => $composableBuilder(
+      column: $table.role, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get msgText => $composableBuilder(
+      column: $table.msgText, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get model => $composableBuilder(
+      column: $table.model, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get sourcesJson => $composableBuilder(
+      column: $table.sourcesJson, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get createdAt => $composableBuilder(
+      column: $table.createdAt, builder: (column) => ColumnFilters(column));
+}
+
+class $$SavedSearchChatMessagesTableOrderingComposer
+    extends Composer<_$AppDatabase, $SavedSearchChatMessagesTable> {
+  $$SavedSearchChatMessagesTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+      column: $table.id, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get searchId => $composableBuilder(
+      column: $table.searchId, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get role => $composableBuilder(
+      column: $table.role, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get msgText => $composableBuilder(
+      column: $table.msgText, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get model => $composableBuilder(
+      column: $table.model, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get sourcesJson => $composableBuilder(
+      column: $table.sourcesJson, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get createdAt => $composableBuilder(
+      column: $table.createdAt, builder: (column) => ColumnOrderings(column));
+}
+
+class $$SavedSearchChatMessagesTableAnnotationComposer
+    extends Composer<_$AppDatabase, $SavedSearchChatMessagesTable> {
+  $$SavedSearchChatMessagesTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get searchId =>
+      $composableBuilder(column: $table.searchId, builder: (column) => column);
+
+  GeneratedColumn<String> get role =>
+      $composableBuilder(column: $table.role, builder: (column) => column);
+
+  GeneratedColumn<String> get msgText =>
+      $composableBuilder(column: $table.msgText, builder: (column) => column);
+
+  GeneratedColumn<String> get model =>
+      $composableBuilder(column: $table.model, builder: (column) => column);
+
+  GeneratedColumn<String> get sourcesJson => $composableBuilder(
+      column: $table.sourcesJson, builder: (column) => column);
+
+  GeneratedColumn<String> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+}
+
+class $$SavedSearchChatMessagesTableTableManager extends RootTableManager<
+    _$AppDatabase,
+    $SavedSearchChatMessagesTable,
+    SavedSearchChatMessage,
+    $$SavedSearchChatMessagesTableFilterComposer,
+    $$SavedSearchChatMessagesTableOrderingComposer,
+    $$SavedSearchChatMessagesTableAnnotationComposer,
+    $$SavedSearchChatMessagesTableCreateCompanionBuilder,
+    $$SavedSearchChatMessagesTableUpdateCompanionBuilder,
+    (
+      SavedSearchChatMessage,
+      BaseReferences<_$AppDatabase, $SavedSearchChatMessagesTable,
+          SavedSearchChatMessage>
+    ),
+    SavedSearchChatMessage,
+    PrefetchHooks Function()> {
+  $$SavedSearchChatMessagesTableTableManager(
+      _$AppDatabase db, $SavedSearchChatMessagesTable table)
+      : super(TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$SavedSearchChatMessagesTableFilterComposer(
+                  $db: db, $table: table),
+          createOrderingComposer: () =>
+              $$SavedSearchChatMessagesTableOrderingComposer(
+                  $db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$SavedSearchChatMessagesTableAnnotationComposer(
+                  $db: db, $table: table),
+          updateCompanionCallback: ({
+            Value<String> id = const Value.absent(),
+            Value<String> searchId = const Value.absent(),
+            Value<String> role = const Value.absent(),
+            Value<String> msgText = const Value.absent(),
+            Value<String> model = const Value.absent(),
+            Value<String> sourcesJson = const Value.absent(),
+            Value<String> createdAt = const Value.absent(),
+            Value<int> rowid = const Value.absent(),
+          }) =>
+              SavedSearchChatMessagesCompanion(
+            id: id,
+            searchId: searchId,
+            role: role,
+            msgText: msgText,
+            model: model,
+            sourcesJson: sourcesJson,
+            createdAt: createdAt,
+            rowid: rowid,
+          ),
+          createCompanionCallback: ({
+            required String id,
+            required String searchId,
+            required String role,
+            required String msgText,
+            Value<String> model = const Value.absent(),
+            Value<String> sourcesJson = const Value.absent(),
+            required String createdAt,
+            Value<int> rowid = const Value.absent(),
+          }) =>
+              SavedSearchChatMessagesCompanion.insert(
+            id: id,
+            searchId: searchId,
+            role: role,
+            msgText: msgText,
+            model: model,
+            sourcesJson: sourcesJson,
+            createdAt: createdAt,
+            rowid: rowid,
+          ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ));
+}
+
+typedef $$SavedSearchChatMessagesTableProcessedTableManager
+    = ProcessedTableManager<
+        _$AppDatabase,
+        $SavedSearchChatMessagesTable,
+        SavedSearchChatMessage,
+        $$SavedSearchChatMessagesTableFilterComposer,
+        $$SavedSearchChatMessagesTableOrderingComposer,
+        $$SavedSearchChatMessagesTableAnnotationComposer,
+        $$SavedSearchChatMessagesTableCreateCompanionBuilder,
+        $$SavedSearchChatMessagesTableUpdateCompanionBuilder,
+        (
+          SavedSearchChatMessage,
+          BaseReferences<_$AppDatabase, $SavedSearchChatMessagesTable,
+              SavedSearchChatMessage>
+        ),
+        SavedSearchChatMessage,
+        PrefetchHooks Function()>;
+typedef $$SavedSearchChatSummariesTableCreateCompanionBuilder
+    = SavedSearchChatSummariesCompanion Function({
+  required String searchId,
+  required String summaryText,
+  required int pairsCovered,
+  required String updatedAt,
+  Value<int> rowid,
+});
+typedef $$SavedSearchChatSummariesTableUpdateCompanionBuilder
+    = SavedSearchChatSummariesCompanion Function({
+  Value<String> searchId,
+  Value<String> summaryText,
+  Value<int> pairsCovered,
+  Value<String> updatedAt,
+  Value<int> rowid,
+});
+
+class $$SavedSearchChatSummariesTableFilterComposer
+    extends Composer<_$AppDatabase, $SavedSearchChatSummariesTable> {
+  $$SavedSearchChatSummariesTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get searchId => $composableBuilder(
+      column: $table.searchId, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get summaryText => $composableBuilder(
+      column: $table.summaryText, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<int> get pairsCovered => $composableBuilder(
+      column: $table.pairsCovered, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get updatedAt => $composableBuilder(
+      column: $table.updatedAt, builder: (column) => ColumnFilters(column));
+}
+
+class $$SavedSearchChatSummariesTableOrderingComposer
+    extends Composer<_$AppDatabase, $SavedSearchChatSummariesTable> {
+  $$SavedSearchChatSummariesTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get searchId => $composableBuilder(
+      column: $table.searchId, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get summaryText => $composableBuilder(
+      column: $table.summaryText, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<int> get pairsCovered => $composableBuilder(
+      column: $table.pairsCovered,
+      builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get updatedAt => $composableBuilder(
+      column: $table.updatedAt, builder: (column) => ColumnOrderings(column));
+}
+
+class $$SavedSearchChatSummariesTableAnnotationComposer
+    extends Composer<_$AppDatabase, $SavedSearchChatSummariesTable> {
+  $$SavedSearchChatSummariesTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get searchId =>
+      $composableBuilder(column: $table.searchId, builder: (column) => column);
+
+  GeneratedColumn<String> get summaryText => $composableBuilder(
+      column: $table.summaryText, builder: (column) => column);
+
+  GeneratedColumn<int> get pairsCovered => $composableBuilder(
+      column: $table.pairsCovered, builder: (column) => column);
+
+  GeneratedColumn<String> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+}
+
+class $$SavedSearchChatSummariesTableTableManager extends RootTableManager<
+    _$AppDatabase,
+    $SavedSearchChatSummariesTable,
+    SavedSearchChatSummary,
+    $$SavedSearchChatSummariesTableFilterComposer,
+    $$SavedSearchChatSummariesTableOrderingComposer,
+    $$SavedSearchChatSummariesTableAnnotationComposer,
+    $$SavedSearchChatSummariesTableCreateCompanionBuilder,
+    $$SavedSearchChatSummariesTableUpdateCompanionBuilder,
+    (
+      SavedSearchChatSummary,
+      BaseReferences<_$AppDatabase, $SavedSearchChatSummariesTable,
+          SavedSearchChatSummary>
+    ),
+    SavedSearchChatSummary,
+    PrefetchHooks Function()> {
+  $$SavedSearchChatSummariesTableTableManager(
+      _$AppDatabase db, $SavedSearchChatSummariesTable table)
+      : super(TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$SavedSearchChatSummariesTableFilterComposer(
+                  $db: db, $table: table),
+          createOrderingComposer: () =>
+              $$SavedSearchChatSummariesTableOrderingComposer(
+                  $db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$SavedSearchChatSummariesTableAnnotationComposer(
+                  $db: db, $table: table),
+          updateCompanionCallback: ({
+            Value<String> searchId = const Value.absent(),
+            Value<String> summaryText = const Value.absent(),
+            Value<int> pairsCovered = const Value.absent(),
+            Value<String> updatedAt = const Value.absent(),
+            Value<int> rowid = const Value.absent(),
+          }) =>
+              SavedSearchChatSummariesCompanion(
+            searchId: searchId,
+            summaryText: summaryText,
+            pairsCovered: pairsCovered,
+            updatedAt: updatedAt,
+            rowid: rowid,
+          ),
+          createCompanionCallback: ({
+            required String searchId,
+            required String summaryText,
+            required int pairsCovered,
+            required String updatedAt,
+            Value<int> rowid = const Value.absent(),
+          }) =>
+              SavedSearchChatSummariesCompanion.insert(
+            searchId: searchId,
+            summaryText: summaryText,
+            pairsCovered: pairsCovered,
+            updatedAt: updatedAt,
+            rowid: rowid,
+          ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ));
+}
+
+typedef $$SavedSearchChatSummariesTableProcessedTableManager
+    = ProcessedTableManager<
+        _$AppDatabase,
+        $SavedSearchChatSummariesTable,
+        SavedSearchChatSummary,
+        $$SavedSearchChatSummariesTableFilterComposer,
+        $$SavedSearchChatSummariesTableOrderingComposer,
+        $$SavedSearchChatSummariesTableAnnotationComposer,
+        $$SavedSearchChatSummariesTableCreateCompanionBuilder,
+        $$SavedSearchChatSummariesTableUpdateCompanionBuilder,
+        (
+          SavedSearchChatSummary,
+          BaseReferences<_$AppDatabase, $SavedSearchChatSummariesTable,
+              SavedSearchChatSummary>
+        ),
+        SavedSearchChatSummary,
+        PrefetchHooks Function()>;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -5010,4 +7016,12 @@ class $AppDatabaseManager {
       $$ArticleChatMessagesTableTableManager(_db, _db.articleChatMessages);
   $$ArticleChatSummariesTableTableManager get articleChatSummaries =>
       $$ArticleChatSummariesTableTableManager(_db, _db.articleChatSummaries);
+  $$SavedSearchesTableTableManager get savedSearches =>
+      $$SavedSearchesTableTableManager(_db, _db.savedSearches);
+  $$SavedSearchChatMessagesTableTableManager get savedSearchChatMessages =>
+      $$SavedSearchChatMessagesTableTableManager(
+          _db, _db.savedSearchChatMessages);
+  $$SavedSearchChatSummariesTableTableManager get savedSearchChatSummaries =>
+      $$SavedSearchChatSummariesTableTableManager(
+          _db, _db.savedSearchChatSummaries);
 }
