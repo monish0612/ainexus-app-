@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 
@@ -356,13 +357,29 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
   /// consistent experience across the search → follow-up flow.
   bool _searchUseDeepModel = false;
 
-  /// Saved-search id for the currently displayed result. Null until the
-  /// user taps the bookmark icon. Once set, it is reused for the lifetime
-  /// of this result so toggle/save is a stable round-trip and any
-  /// follow-up chat the user kicks off for THIS result is keyed against
-  /// the same id (so persistence is consistent end-to-end). Reset to null
-  /// whenever a new search/summary is initiated.
+  /// Stable session id for the currently displayed result. Set the moment
+  /// a result lands (as a hidden DRAFT in [SavedSearchStore]) and reused
+  /// for the lifetime of the result so every follow-up chat turn is keyed
+  /// to the same id from message #1.
+  ///
+  /// State machine:
+  ///   • null                    → no result on screen
+  ///   • non-null, !isSaved      → draft (bookmark outline; row hidden
+  ///                                from History sheet)
+  ///   • non-null, isSaved=true  → user-saved (bookmark filled; row
+  ///                                visible in History sheet)
+  ///
+  /// Reset to null by [_resetSearchSession] (Clear / Search Again) or by
+  /// [_runTavilySearch] / [_runSummarize] when the user kicks off a new
+  /// search without first clearing.
   String? _activeSearchId;
+
+  /// Mirror of `store.isSaved(_activeSearchId)`, refreshed whenever the
+  /// active id changes or the user toggles the bookmark. Drives the
+  /// outlined-vs-filled icon state — relying on `_activeSearchId != null`
+  /// alone would render every draft as "already saved", which is exactly
+  /// the bug we're fixing.
+  bool _activeSearchIsSaved = false;
 
   /// Re-entrancy guard for the bookmark toggle. Prevents a rapid double-tap
   /// from creating two saved-search rows (the first save would still be
@@ -430,6 +447,12 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
       _summarizeErrorShown = true;
       _showMessage(job.error!);
     }
+    // First non-null result for the current job lands → start a draft so
+    // every follow-up turn gets a stable parent id from message #1. Guard
+    // on `_activeSearchId == null` to make this fire exactly once per run.
+    if (job.result != null && _activeSearchId == null && !_draftStartInFlight) {
+      _ensureActiveDraft(result: job.result!);
+    }
   }
 
   bool _searchErrorShown = false;
@@ -450,6 +473,119 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
       _searchErrorShown = true;
       _showMessage(job.error!);
     }
+    // Either result shape (grounded or tavily) signals "search complete";
+    // both go through the same draft path. See [_syncSummarizeFromStore]
+    // for the rationale on starting a draft pre-bookmark.
+    final landed = job.groundedResult ?? job.tavilyResult;
+    if (landed != null && _activeSearchId == null && !_draftStartInFlight) {
+      _ensureActiveDraft(result: landed);
+    }
+  }
+
+  /// Re-entrancy guard for [_ensureActiveDraft]. The Drift insert is
+  /// async; without this guard a rapid second sync tick (e.g. result
+  /// + sources arriving in two listener invocations) could fire two
+  /// inserts and leak an orphan draft row.
+  bool _draftStartInFlight = false;
+
+  /// Persists the freshly-landed result as a DRAFT in [SavedSearchStore]
+  /// and stashes the returned id in [_activeSearchId]. From this point on
+  /// the bookmark icon shows the (unsaved) outline, and the follow-up FAB
+  /// receives the id so every chat turn is mirrored under it. Idempotent
+  /// per result-land — a no-op if a draft already exists or insert fails.
+  /// Single source of truth for the "Clear" / "Search Again" button. Wipes
+  /// the active search session top-to-bottom so the screen reliably ends
+  /// up in a clean state. Idempotent and safe to call multiple times.
+  ///
+  /// Without this helper the bug we saw before was: the visible result
+  /// state was reset, but [SummarizeStore] / [OnlineSearchStore] still
+  /// held the completed job AND `_summarizeKey` / `_onlineSearchKey` still
+  /// pointed at it, so the next [didChangeAppLifecycleState] re-synced
+  /// the stale result back into the screen on app resume.
+  ///
+  /// Order of operations matters:
+  ///   1. Detach listeners FIRST so the in-flight remove() doesn't
+  ///      trigger a final-state callback that would re-set _summaryResult.
+  ///   2. Remove() the underlying job so its in-memory cache is gone — no
+  ///      future sync from the store can repopulate the screen.
+  ///   3. Hard-delete the draft Drift row (and its chat messages) so the
+  ///      DB matches the user's mental model: "I cleared, nothing here".
+  ///   4. Reset all the screen state in a single setState batch.
+  void _resetSearchSession() {
+    if (_summarizeKey != null) {
+      SummarizeStore.instance
+          .removeListener(_summarizeKey!, _onSummarizeStoreUpdate);
+      SummarizeStore.instance.cancel(_summarizeKey!);
+      SummarizeStore.instance.remove(_summarizeKey!);
+    }
+    if (_onlineSearchKey != null) {
+      OnlineSearchStore.instance
+          .removeListener(_onlineSearchKey!, _onSearchStoreUpdate);
+      OnlineSearchStore.instance.cancel(_onlineSearchKey!);
+      OnlineSearchStore.instance.remove(_onlineSearchKey!);
+    }
+    final draftId = _activeSearchId;
+    if (draftId != null) {
+      // discardDraftIfAny() is a no-op if the user already promoted to
+      // saved, so this is safe regardless of the bookmark state.
+      unawaited(
+          ref.read(savedSearchStoreProvider).discardDraftIfAny(draftId));
+    }
+    setState(() {
+      _summaryUrlCtrl.clear();
+      _summaryResult = null;
+      _tavilyResult = null;
+      _groundedResult = null;
+      _activeSearchId = null;
+      _activeSearchIsSaved = false;
+      _summarizeKey = null;
+      _onlineSearchKey = null;
+      _summaryLoading = false;
+      _summaryStage = '';
+      _summarizeErrorShown = false;
+      _searchErrorShown = false;
+      _draftStartInFlight = false;
+    });
+  }
+
+  void _ensureActiveDraft({required Object result}) {
+    if (_activeSearchId != null || _draftStartInFlight) return;
+    final query = _summaryUrlCtrl.text.trim();
+    if (query.isEmpty) return;
+    _draftStartInFlight = true;
+    final settings = ref.read(settingsProvider);
+    final isUrl = _isUrl(query);
+    // Provider/mode are best-effort metadata for the History pill; the
+    // backend doesn't actually consume these on the saved-search write
+    // path so even if we're slightly off (e.g. user toggled mid-flight)
+    // the worst case is a stale-looking chip on the History card.
+    final provider = isUrl
+        ? (settings.summarizeOverride == 'xgrok' ? 'xgrok' : 'gemini')
+        : (settings.onlineSearchProvider == 'xgrok' ? 'xgrok' : 'gemini');
+    final mode = isUrl
+        ? null
+        : (_searchUseDeepModel ? 'deep' : 'lite');
+    unawaited(() async {
+      try {
+        final store = ref.read(savedSearchStoreProvider);
+        final entry = await store.startDraft(
+          kind: isUrl ? SavedSearchKind.url : SavedSearchKind.query,
+          query: query,
+          result: result,
+          provider: provider,
+          mode: mode,
+        );
+        if (!mounted) return;
+        setState(() {
+          _activeSearchId = entry.id;
+          _activeSearchIsSaved = false;
+        });
+      } catch (e) {
+        TLog.e('Tutor', 'startDraft failed', error: e);
+      } finally {
+        if (mounted) _draftStartInFlight = false;
+      }
+    }());
   }
 
   void _consumePendingSubtab() {
@@ -766,12 +902,23 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
     // makes future provider-side fallback decisions more flexible.
     final mode = _searchUseDeepModel ? 'deep' : 'lite';
 
+    // Drop the previous run's draft so DB doesn't accumulate orphans for
+    // power users who chain searches without ever clearing or saving.
+    // Fire-and-forget — the worst case is one orphan that the GC reaps
+    // 24 hours later, but in practice the draft is hard-deleted right now.
+    final priorDraftId = _activeSearchId;
+    if (priorDraftId != null) {
+      unawaited(
+          ref.read(savedSearchStoreProvider).discardDraftIfAny(priorDraftId));
+    }
+
     setState(() {
       _summaryLoading = true;
       _summaryResult = null;
       _tavilyResult = null;
       _groundedResult = null;
       _activeSearchId = null;
+      _activeSearchIsSaved = false;
       _summaryStage = _searchUseDeepModel
           ? 'Deep search starting\u2026'
           : 'Searching the web\u2026';
@@ -817,12 +964,22 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
 
     TLog.d('Tutor', 'Summarize → $url [provider=${useXGrok ? 'xGrok' : 'Gemini'}]');
 
+    // See [_runTavilySearch] for the rationale on discarding the prior
+    // draft when the user kicks off a brand new run without first
+    // clearing or saving the result.
+    final priorDraftId = _activeSearchId;
+    if (priorDraftId != null) {
+      unawaited(
+          ref.read(savedSearchStoreProvider).discardDraftIfAny(priorDraftId));
+    }
+
     setState(() {
       _summaryLoading = true;
       _summaryResult = null;
       _tavilyResult = null;
       _groundedResult = null;
       _activeSearchId = null;
+      _activeSearchIsSaved = false;
       _summaryStage = 'Connecting to URL\u2026';
     });
 
@@ -2624,13 +2781,7 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
           onSubmitted: _handleSummarizerSubmit,
           onCancel: _cancelSummarize,
           onPaste: _pasteUrl,
-          onClear: () => setState(() {
-            _summaryUrlCtrl.clear();
-            _summaryResult = null;
-            _tavilyResult = null;
-            _groundedResult = null;
-            _activeSearchId = null;
-          }),
+          onClear: _resetSearchSession,
           onVoiceDown: () => _startVoice(target: _summaryUrlCtrl),
           onVoiceUp: _stopVoice,
           deepResearchUrl: _isUrl(_summaryUrlCtrl.text) &&
@@ -2668,6 +2819,13 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
           model: _groundedResult?.model ??
               _summaryResult?.model ??
               'tavily',
+          // Always pass the active session id so EVERY follow-up turn is
+          // mirrored to Drift under it from message #1 — including turns
+          // asked before the user taps the bookmark icon. The mirror is a
+          // no-op for already-persisted message ids, so it's safe to be
+          // greedy here. See [SavedSearchStore.startDraft] for the draft
+          // lifecycle that produces this id.
+          savedSearchId: _activeSearchId,
         ),
       ),
       ],
@@ -2756,13 +2914,7 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
             ),
           const SizedBox(height: 16),
           OutlinedButton.icon(
-            onPressed: () => setState(() {
-              _summaryUrlCtrl.clear();
-              _tavilyResult = null;
-              _groundedResult = null;
-              _summaryResult = null;
-              _activeSearchId = null;
-            }),
+            onPressed: _resetSearchSession,
             icon: Icon(LucideIcons.rotateCcw, size: 16, color: colors.text4),
             label: Text('Search Again',
                 style: GoogleFonts.plusJakartaSans(
@@ -2811,18 +2963,21 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
   }
 
   /// Bookmark toggle for a result. Animated outline → filled icon, single
-  /// haptic tick on tap, snackbar with Undo. The `_activeSearchId` field is
-  /// the source of truth: if non-null we're "saved"; tapping while saved
-  /// removes; tapping while unsaved generates a UUID and persists.
+  /// haptic tick on tap, snackbar with Undo.
   ///
-  /// While a save is in-flight (`_saveToggleInFlight`), taps are ignored
+  /// Source of truth is [_activeSearchIsSaved] (mirror of `store.isSaved`)
+  /// — a draft row exists in Drift the moment the result lands, but the
+  /// icon should only render filled once the user has explicitly opted
+  /// the row into History via [SavedSearchStore.promoteToSaved].
+  ///
+  /// While a toggle is in-flight ([_saveToggleInFlight]), taps are ignored
   /// and the icon is dimmed to communicate the busy state. This protects
-  /// against duplicate rows from rapid double-taps.
+  /// against duplicate writes from rapid double-taps.
   Widget _buildSaveResultButton({
     required AppColors colors,
     required Object result,
   }) {
-    final isSaved = _activeSearchId != null;
+    final isSaved = _activeSearchIsSaved;
     final inFlight = _saveToggleInFlight;
     return Tooltip(
       message: isSaved ? 'Remove from history' : 'Save to history',
@@ -2877,9 +3032,13 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
     setState(() => _saveToggleInFlight = true);
 
     try {
-      if (_activeSearchId != null) {
+      // Path A — currently SAVED → soft-delete (remove from History).
+      // The row + chat messages stay in Drift so Undo can revert and any
+      // in-flight follow-up keeps mirroring under the same id; the row is
+      // simply hidden from [watchAll] / [listAll] until [undelete].
+      if (_activeSearchIsSaved && _activeSearchId != null) {
         final removedId = _activeSearchId!;
-        setState(() => _activeSearchId = null);
+        setState(() => _activeSearchIsSaved = false);
         await store.delete(removedId);
         messenger?.hideCurrentSnackBar();
         messenger?.showSnackBar(SnackBar(
@@ -2891,13 +3050,67 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
             onPressed: () async {
               await store.undelete(removedId);
               if (!mounted) return;
-              setState(() => _activeSearchId = removedId);
+              setState(() => _activeSearchIsSaved = true);
             },
           ),
         ));
         return;
       }
 
+      // Path B — DRAFT → promote in place (no new row). [_ensureActiveDraft]
+      // already inserted a pinned=false row when the result landed, so all
+      // we need to do here is flip pinned=true. This keeps the same id —
+      // critical so any chat messages already mirrored under it stay
+      // associated with the now-visible History entry.
+      if (_activeSearchId != null) {
+        final draftId = _activeSearchId!;
+        try {
+          final promoted = await store.promoteToSaved(draftId);
+          if (!mounted) return;
+          if (promoted) {
+            setState(() => _activeSearchIsSaved = true);
+            messenger?.hideCurrentSnackBar();
+            messenger?.showSnackBar(SnackBar(
+              content: const Text('Saved to history'),
+              behavior: SnackBarBehavior.floating,
+              duration: const Duration(seconds: 3),
+              action: SnackBarAction(
+                label: 'Undo',
+                onPressed: () async {
+                  // Undo of save = soft-delete (matches the gold-standard
+                  // article-chat undo). The row stays in DB long enough for
+                  // a follow-up Undo, then GC reaps it after _kHardDeleteTtl.
+                  await store.delete(draftId);
+                  if (!mounted) return;
+                  setState(() => _activeSearchIsSaved = false);
+                },
+              ),
+            ));
+          } else {
+            // Promote returned false — possible races: the draft was
+            // already promoted (e.g. concurrent toggle) or the row was
+            // GC'd. Refresh saved-state from the store so the icon
+            // reconciles to the actual DB state.
+            final actuallySaved = await store.isSaved(draftId);
+            if (mounted) setState(() => _activeSearchIsSaved = actuallySaved);
+          }
+        } catch (e) {
+          TLog.e('Tutor', 'promoteToSaved failed', error: e);
+          if (!mounted) return;
+          messenger?.hideCurrentSnackBar();
+          messenger?.showSnackBar(const SnackBar(
+            content: Text('Could not save — please try again'),
+            behavior: SnackBarBehavior.floating,
+          ));
+        }
+        return;
+      }
+
+      // Path C — fallback: result on screen but the draft insert hasn't
+      // landed yet (race). Take the legacy path of writing a brand-new
+      // saved row directly so the user's tap is never lost. Rare in
+      // practice — the draft insert completes within ~10ms on real
+      // devices.
       final query = _summaryUrlCtrl.text.trim();
       final kind = _isUrl(query) ? SavedSearchKind.url : SavedSearchKind.query;
       try {
@@ -2907,7 +3120,10 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
           result: result,
         );
         if (!mounted) return;
-        setState(() => _activeSearchId = entry.id);
+        setState(() {
+          _activeSearchId = entry.id;
+          _activeSearchIsSaved = true;
+        });
         messenger?.hideCurrentSnackBar();
         messenger?.showSnackBar(SnackBar(
           content: const Text('Saved to history'),
@@ -2918,7 +3134,7 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
             onPressed: () async {
               await store.delete(entry.id);
               if (!mounted) return;
-              setState(() => _activeSearchId = null);
+              setState(() => _activeSearchIsSaved = false);
             },
           ),
         ));
@@ -3228,13 +3444,7 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
           ),
         const SizedBox(height: 12),
         OutlinedButton.icon(
-          onPressed: () => setState(() {
-            _summaryUrlCtrl.clear();
-            _groundedResult = null;
-            _tavilyResult = null;
-            _summaryResult = null;
-            _activeSearchId = null;
-          }),
+          onPressed: _resetSearchSession,
           icon: Icon(LucideIcons.rotateCcw, size: 16, color: colors.text4),
           label: Text(
             'Search Again',
@@ -3752,13 +3962,7 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
         ),
         const SizedBox(height: 12),
         OutlinedButton.icon(
-          onPressed: () => setState(() {
-            _summaryUrlCtrl.clear();
-            _summaryResult = null;
-            _tavilyResult = null;
-            _groundedResult = null;
-            _activeSearchId = null;
-          }),
+          onPressed: _resetSearchSession,
           icon: Icon(LucideIcons.rotateCcw, size: 16, color: colors.text4),
           label: Text(
             'Summarize Another URL',

@@ -59,6 +59,15 @@ class SavedSearchStore with WidgetsBindingObserver {
   static const _kMaxResumeRetries = 3;
   static const _kOrphanTtl = Duration(hours: 1);
   static const _kHardDeleteTtl = Duration(days: 7);
+
+  /// Drafts that have been abandoned (user navigated away / killed app
+  /// without saving or clearing) are hard-deleted after this window. The
+  /// 24-hour value is generous enough that a user who minimises their
+  /// phone overnight won't lose an in-progress draft on the next morning,
+  /// but tight enough that the DB doesn't grow unboundedly with stale
+  /// drafts when a user runs many one-off searches.
+  static const _kDraftTtl = Duration(hours: 24);
+
   static const _uuid = Uuid();
 
   /// Hard cap on the in-flight retry queue. If the user does many writes
@@ -153,8 +162,10 @@ class SavedSearchStore with WidgetsBindingObserver {
 
   // ── Public API ─────────────────────────────────────────────────────────────
 
-  /// Live stream of all non-deleted saved searches, newest activity first.
-  /// Driven by Drift's `.watch()` so UI updates without polling.
+  /// Live stream of SAVED entries (pinned=true), newest activity first.
+  /// Drafts (pinned=false) are intentionally excluded so they never leak
+  /// into the History sheet. Driven by Drift's `.watch()` so UI updates
+  /// without polling.
   Stream<List<SavedSearchEntry>> watchAll() {
     final db = _db;
     if (db == null) {
@@ -162,29 +173,36 @@ class SavedSearchStore with WidgetsBindingObserver {
       return const Stream<List<SavedSearchEntry>>.empty();
     }
     final query = db.select(db.savedSearches)
-      ..where((t) => t.deletedAt.isNull())
+      ..where((t) => t.deletedAt.isNull() & t.pinned.equals(true))
       ..orderBy([(t) => drift.OrderingTerm.desc(t.updatedAt)]);
     return query.watch().map(
         (rows) => rows.map(SavedSearchEntry.fromDrift).toList(growable: false));
   }
 
-  /// One-shot fetch (for non-stream callers).
+  /// One-shot fetch of SAVED entries (for non-stream callers). Mirrors
+  /// the [watchAll] filter so callers see exactly the same list either way.
   Future<List<SavedSearchEntry>> listAll() async {
     final db = _db;
     if (db == null) return const [];
     final rows = await (db.select(db.savedSearches)
-          ..where((t) => t.deletedAt.isNull())
+          ..where((t) => t.deletedAt.isNull() & t.pinned.equals(true))
           ..orderBy([(t) => drift.OrderingTerm.desc(t.updatedAt)]))
         .get();
     return rows.map(SavedSearchEntry.fromDrift).toList(growable: false);
   }
 
-  /// Returns true if a row with [id] exists and is not soft-deleted.
+  /// Returns true ONLY for explicitly saved rows (pinned=true) that are
+  /// not soft-deleted. Drafts return false — the bookmark icon in the UI
+  /// uses this to render the "outline" (unsaved) state for an in-flight
+  /// draft, even though the row already exists in Drift.
   Future<bool> isSaved(String id) async {
     final db = _db;
     if (db == null) return false;
     final row = await (db.select(db.savedSearches)
-          ..where((t) => t.id.equals(id) & t.deletedAt.isNull())
+          ..where((t) =>
+              t.id.equals(id) &
+              t.deletedAt.isNull() &
+              t.pinned.equals(true))
           ..limit(1))
         .getSingleOrNull();
     return row != null;
@@ -254,6 +272,188 @@ class SavedSearchStore with WidgetsBindingObserver {
 
     unawaited(_pushSave(entry));
     return entry;
+  }
+
+  // ── Draft lifecycle ──────────────────────────────────────────────────────
+  //
+  // Every InsightAI search result and URL summary lands in Drift as a draft
+  // BEFORE the user explicitly bookmarks it, so all follow-up chat messages
+  // can be persisted under a stable id from message #1. Drafts have
+  // pinned=false and are excluded from [watchAll] / [listAll] / [isSaved],
+  // so they never leak into the History sheet.
+  //
+  // Lifecycle:
+  //   1. Search/summary result lands  → [startDraft] inserts row,
+  //                                      pinned=false. Caller stores the
+  //                                      returned id as the active session.
+  //   2. User asks follow-up Qs       → [appendMessage] persists each
+  //                                      finalized turn under the draft id.
+  //   3. User taps "Save" (bookmark)  → [promoteToSaved] flips pinned=true.
+  //                                      The same row now appears in History.
+  //   4. User taps "Clear" / "Search  → [discardDraftIfAny] hard-deletes
+  //      Again" without saving             the row + all its chat messages.
+  //   5. App killed mid-draft         → row stays as pinned=false. The
+  //                                      [_runGc] sweeper hard-deletes any
+  //                                      draft older than _kDraftTtl on the
+  //                                      next foreground transition.
+  //
+  // Saved entries are NEVER reachable from this draft API — [promoteToSaved]
+  // is idempotent and [discardDraftIfAny] is a no-op when pinned=true.
+
+  /// Persist a result snapshot as a DRAFT (pinned=false, hidden from the
+  /// History sheet). Returns the entry whose [SavedSearchEntry.id] is the
+  /// stable session id the caller should use as the parent for any
+  /// follow-up chat messages.
+  ///
+  /// Behaviour:
+  ///   • Allocates a fresh UUID id.
+  ///   • Upserts a Drift row with pinned=false.
+  ///   • DOES NOT push to the server. The server only learns about a row
+  ///     when the user explicitly saves it (via [promoteToSaved]); drafts
+  ///     are local-only by design so a user who never saves can't leak
+  ///     their search history into the cloud.
+  Future<SavedSearchEntry> startDraft({
+    required String kind,
+    required String query,
+    required Object result,
+    String? provider,
+    String? mode,
+  }) async {
+    final db = _db;
+    if (db == null) {
+      throw StateError('SavedSearchStore.startDraft called before init()');
+    }
+    final now = DateTime.now().toUtc().toIso8601String();
+    final entryId = _uuid.v4();
+    final responseType = _responseTypeOf(result);
+    final responseJson = _serializeResult(result);
+    final model = _modelOf(result);
+    final title = SavedSearchEntry.deriveTitle(kind: kind, query: query);
+
+    final entry = SavedSearchEntry(
+      id: entryId,
+      kind: kind,
+      query: query,
+      title: title,
+      responseType: responseType,
+      responseJson: responseJson,
+      model: model,
+      provider: provider ?? '',
+      mode: mode ?? '',
+      savedAt: now,
+      updatedAt: now,
+    );
+
+    try {
+      await db.into(db.savedSearches).insert(
+            SavedSearchesCompanion.insert(
+              id: entry.id,
+              kind: entry.kind,
+              query: entry.query,
+              title: entry.title,
+              responseType: entry.responseType,
+              responseJson: entry.responseJson,
+              model: drift.Value(entry.model),
+              provider: drift.Value(entry.provider),
+              mode: drift.Value(entry.mode),
+              savedAt: entry.savedAt,
+              updatedAt: entry.updatedAt,
+              pinned: const drift.Value(false),
+            ),
+          );
+      TLog.d(_tag, 'draft → ${entry.id} ($responseType)');
+    } catch (e) {
+      TLog.e(_tag, 'Drift draft insert failed for ${entry.id}', error: e);
+      rethrow;
+    }
+
+    return entry;
+  }
+
+  /// Promote an existing draft (pinned=false) to a saved entry (pinned=true)
+  /// AND fire-and-forget the server push. Idempotent: if the row is already
+  /// saved (or doesn't exist) this is a no-op. Returns true when a row was
+  /// actually flipped, false otherwise.
+  ///
+  /// The server push is deferred until promotion (rather than at draft
+  /// time) so unsaved local drafts never reach the cloud. This matches the
+  /// privacy model the user expects when they see the bookmark icon as the
+  /// boundary between "ephemeral" and "persisted across devices".
+  Future<bool> promoteToSaved(String id) async {
+    final db = _db;
+    if (db == null) return false;
+    try {
+      final now = DateTime.now().toUtc().toIso8601String();
+      final affected = await (db.update(db.savedSearches)
+            ..where((t) => t.id.equals(id) & t.pinned.equals(false)))
+          .write(SavedSearchesCompanion(
+        pinned: const drift.Value(true),
+        // Bump updatedAt on promote so the History list shows the entry
+        // at the top — it's the most recent user-meaningful event.
+        updatedAt: drift.Value(now),
+        // Clear any soft-delete tombstone left over from a prior cycle
+        // (defensive — in practice promote-then-delete-then-promote is
+        // rare but we want it to behave correctly when it happens).
+        deletedAt: const drift.Value(null),
+      ));
+      if (affected == 0) {
+        TLog.d(_tag, 'promoteToSaved: no draft row to promote ($id)');
+        return false;
+      }
+      TLog.d(_tag, 'promote draft → saved → $id');
+    } catch (e) {
+      TLog.e(_tag, 'promoteToSaved failed for $id', error: e);
+      return false;
+    }
+
+    // Fire-and-forget server push so the saved entry appears on other
+    // devices via the index pull.
+    final entry = await getById(id);
+    if (entry != null) {
+      unawaited(_pushSave(entry));
+    }
+    return true;
+  }
+
+  /// Hard-delete a draft row (pinned=false) AND its chat messages. Called
+  /// when the user taps "Clear" / "Search Again" without saving — leaving
+  /// the draft in Drift would otherwise pollute the local DB until the
+  /// 24-hour GC sweeper picks it up.
+  ///
+  /// Saved rows (pinned=true) are NEVER touched by this method — they go
+  /// through the soft-delete path ([delete]) so the undo-snackbar works.
+  /// Returns true when a draft was actually discarded, false otherwise.
+  Future<bool> discardDraftIfAny(String id) async {
+    final db = _db;
+    if (db == null) return false;
+    try {
+      // Snapshot the draft state BEFORE deleting so we can decide whether
+      // to also nuke chat messages. A non-draft (pinned=true) row should
+      // never be hard-deleted by this method.
+      final row = await (db.select(db.savedSearches)
+            ..where((t) => t.id.equals(id))
+            ..limit(1))
+          .getSingleOrNull();
+      if (row == null || row.pinned) {
+        return false;
+      }
+
+      // Cascade: drop all chat messages + the rolling summary first so
+      // there's never a moment where messages are visible without their
+      // parent row.
+      await (db.delete(db.savedSearchChatMessages)
+            ..where((t) => t.searchId.equals(id)))
+          .go();
+      await (db.delete(db.savedSearchChatSummaries)
+            ..where((t) => t.searchId.equals(id)))
+          .go();
+      await (db.delete(db.savedSearches)..where((t) => t.id.equals(id))).go();
+      TLog.d(_tag, 'discard draft → $id');
+      return true;
+    } catch (e) {
+      TLog.e(_tag, 'discardDraftIfAny failed for $id', error: e);
+      return false;
+    }
   }
 
   /// Soft-delete locally, then DELETE remotely. The local row stays as a
@@ -706,6 +906,36 @@ class SavedSearchStore with WidgetsBindingObserver {
           .go();
       if (stale > 0) {
         TLog.w(_gcTag, 'hard-deleted $stale stale soft-deleted row(s)');
+      }
+
+      // Stale drafts: a draft row (pinned=false) older than [_kDraftTtl]
+      // means the user did a search, never saved, and never explicitly
+      // cleared it (e.g. app got killed, phone died, or they just walked
+      // away). Hard-delete it together with its chat messages + summary so
+      // the local DB doesn't fill up with abandoned sessions on a user
+      // who runs many one-off searches.
+      final cutoffDraft =
+          DateTime.now().toUtc().subtract(_kDraftTtl).toIso8601String();
+      // Snapshot the ids first so we can cascade-delete chats + summaries
+      // before the parent rows go away. Using a single transaction would
+      // be marginally faster but we don't have hard ordering requirements
+      // and three small deletes are perfectly fine.
+      final staleDraftRows = await (db.select(db.savedSearches)
+            ..where((t) =>
+                t.pinned.equals(false) &
+                t.updatedAt.isSmallerThanValue(cutoffDraft)))
+          .get();
+      if (staleDraftRows.isNotEmpty) {
+        final ids = staleDraftRows.map((r) => r.id).toList(growable: false);
+        await (db.delete(db.savedSearchChatMessages)
+              ..where((t) => t.searchId.isIn(ids)))
+            .go();
+        await (db.delete(db.savedSearchChatSummaries)
+              ..where((t) => t.searchId.isIn(ids)))
+            .go();
+        await (db.delete(db.savedSearches)..where((t) => t.id.isIn(ids))).go();
+        TLog.w(_gcTag,
+            'hard-deleted ${ids.length} abandoned draft row(s) (>${_kDraftTtl.inHours}h)');
       }
     } catch (e) {
       TLog.w(_gcTag, 'gc cycle failed', error: e);

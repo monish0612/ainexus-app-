@@ -244,5 +244,271 @@ void main() {
       expect(left.where((r) => r.id == 'old-stub'), isEmpty,
           reason: 'a soft-deleted row older than 7 days should be hard-deleted');
     });
+
+    // ── Draft lifecycle ────────────────────────────────────────────────────
+    //
+    // The "draft" concept is the cornerstone of the Saved Searches UX. A
+    // search result is persisted in Drift the moment it lands on screen,
+    // BEFORE the user explicitly bookmarks it, so all follow-up chat
+    // messages can be keyed under a stable id from message #1. The tests
+    // below cover the full state machine + the contracts the UI relies on.
+
+    test('startDraft inserts a hidden row that watchAll/listAll exclude',
+        () async {
+      const result = TavilySearchResponse(
+        answer: 'answer',
+        query: 'q',
+        results: [],
+      );
+
+      final draft = await store.startDraft(
+        kind: SavedSearchKind.query,
+        query: 'q',
+        result: result,
+      );
+
+      expect(draft.id, isNotEmpty);
+      // listAll / watchAll filter to pinned=true → drafts must NOT appear.
+      expect(await store.listAll(), isEmpty,
+          reason: 'drafts should be hidden from the History sheet');
+      // The row IS in Drift (so chat messages can attach to it).
+      final row = await (db.select(db.savedSearches)
+            ..where((t) => t.id.equals(draft.id))
+            ..limit(1))
+          .getSingleOrNull();
+      expect(row, isNotNull);
+      expect(row!.pinned, isFalse,
+          reason: 'a draft must be pinned=false so promoteToSaved is meaningful');
+    });
+
+    test('isSaved returns false for a draft, true after promoteToSaved',
+        () async {
+      const result = TavilySearchResponse(
+        answer: 'answer',
+        query: 'q',
+        results: [],
+      );
+
+      final draft = await store.startDraft(
+        kind: SavedSearchKind.query,
+        query: 'q',
+        result: result,
+      );
+      expect(await store.isSaved(draft.id), isFalse,
+          reason: 'isSaved must be false for a draft so the bookmark icon '
+              'renders the outlined (unsaved) state');
+
+      final promoted = await store.promoteToSaved(draft.id);
+      expect(promoted, isTrue, reason: 'first promote must return true');
+      expect(await store.isSaved(draft.id), isTrue);
+
+      // Once promoted, the entry IS visible in the History list.
+      final all = await store.listAll();
+      expect(all, hasLength(1));
+      expect(all.first.id, equals(draft.id));
+    });
+
+    test('promoteToSaved is idempotent — second call returns false', () async {
+      const result = TavilySearchResponse(
+        answer: 'answer',
+        query: 'q',
+        results: [],
+      );
+      final draft = await store.startDraft(
+        kind: SavedSearchKind.query,
+        query: 'q',
+        result: result,
+      );
+      expect(await store.promoteToSaved(draft.id), isTrue);
+      expect(await store.promoteToSaved(draft.id), isFalse,
+          reason: 'second promote on an already-saved row is a no-op');
+    });
+
+    test('discardDraftIfAny hard-deletes draft rows + cascades chat messages',
+        () async {
+      const result = TavilySearchResponse(
+        answer: 'answer',
+        query: 'q',
+        results: [],
+      );
+      final draft = await store.startDraft(
+        kind: SavedSearchKind.query,
+        query: 'q',
+        result: result,
+      );
+      // Mirror a couple of chat turns under the draft so we can verify the
+      // cascade-delete of [SavedSearchChatMessages] in the same call.
+      await store.appendMessage(
+        searchId: draft.id,
+        messageId: 'm1',
+        role: 'user',
+        text: 'hello',
+      );
+      await store.appendMessage(
+        searchId: draft.id,
+        messageId: 'm2',
+        role: 'assistant',
+        text: 'world',
+      );
+
+      final discarded = await store.discardDraftIfAny(draft.id);
+      expect(discarded, isTrue);
+
+      // Parent row gone.
+      final row = await (db.select(db.savedSearches)
+            ..where((t) => t.id.equals(draft.id))
+            ..limit(1))
+          .getSingleOrNull();
+      expect(row, isNull);
+
+      // Chat messages must also be gone — leaving them would be an orphan
+      // leak (the GC would reap them eventually but clearing should be
+      // immediate).
+      final msgs = await (db.select(db.savedSearchChatMessages)
+            ..where((t) => t.searchId.equals(draft.id)))
+          .get();
+      expect(msgs, isEmpty,
+          reason: 'discardDraftIfAny must cascade-delete child chat messages');
+    });
+
+    test('discardDraftIfAny is a NO-OP on a saved (pinned=true) row',
+        () async {
+      const result = TavilySearchResponse(
+        answer: 'answer',
+        query: 'q',
+        results: [],
+      );
+      final entry = await store.saveResult(
+        kind: SavedSearchKind.query,
+        query: 'q',
+        result: result,
+      );
+
+      final discarded = await store.discardDraftIfAny(entry.id);
+      expect(discarded, isFalse,
+          reason: 'a user-saved row must never be hard-deleted by discardDraft');
+
+      // Row is still there.
+      expect(await store.isSaved(entry.id), isTrue);
+    });
+
+    test(
+        'appendMessage works on a draft so follow-ups persist before bookmark',
+        () async {
+      const result = TavilySearchResponse(
+        answer: 'answer',
+        query: 'q',
+        results: [],
+      );
+
+      final draft = await store.startDraft(
+        kind: SavedSearchKind.query,
+        query: 'q',
+        result: result,
+      );
+      await store.appendMessage(
+        searchId: draft.id,
+        messageId: 'm1',
+        role: 'user',
+        text: 'hello',
+      );
+      await store.appendMessage(
+        searchId: draft.id,
+        messageId: 'm2',
+        role: 'assistant',
+        text: 'world',
+      );
+
+      final loaded = await store.loadMessages(draft.id);
+      expect(loaded, hasLength(2),
+          reason: 'follow-ups asked BEFORE save must persist under the draft id');
+
+      // After promote, the same messages must still be readable — the row's
+      // id is stable across promote so chats stay attached.
+      await store.promoteToSaved(draft.id);
+      final afterPromote = await store.loadMessages(draft.id);
+      expect(afterPromote, hasLength(2),
+          reason: 'promote must not orphan or duplicate any chat history');
+    });
+
+    test('debugRunGc reaps abandoned drafts older than the draft TTL',
+        () async {
+      const result = TavilySearchResponse(
+        answer: 'answer',
+        query: 'q',
+        results: [],
+      );
+      // Create a draft and back-date it past the 24-hour TTL by bypassing
+      // the public API (it always stamps `now`). This simulates a draft
+      // the user abandoned a day ago.
+      final draft = await store.startDraft(
+        kind: SavedSearchKind.query,
+        query: 'q',
+        result: result,
+      );
+      final stale = DateTime.now()
+          .toUtc()
+          .subtract(const Duration(hours: 25))
+          .toIso8601String();
+      await (db.update(db.savedSearches)
+            ..where((t) => t.id.equals(draft.id)))
+          .write(SavedSearchesCompanion(
+        savedAt: drift.Value(stale),
+        updatedAt: drift.Value(stale),
+      ));
+      // Mirror a chat turn so we also verify cascade.
+      await store.appendMessage(
+        searchId: draft.id,
+        messageId: 'm-stale',
+        role: 'user',
+        text: 'old chatter',
+        createdAt: stale,
+      );
+
+      // Sanity: before GC, both rows exist.
+      expect(
+          await (db.select(db.savedSearches)
+                ..where((t) => t.id.equals(draft.id)))
+              .get(),
+          hasLength(1));
+
+      await store.debugRunGc();
+
+      // Row gone.
+      expect(
+          await (db.select(db.savedSearches)
+                ..where((t) => t.id.equals(draft.id)))
+              .get(),
+          isEmpty,
+          reason: 'abandoned drafts older than 24h must be hard-deleted');
+      // Chats gone too — they would otherwise survive as orphans for an
+      // additional hour before the orphan sweeper picked them up.
+      expect(
+          await (db.select(db.savedSearchChatMessages)
+                ..where((t) => t.searchId.equals(draft.id)))
+              .get(),
+          isEmpty);
+    });
+
+    test('debugRunGc leaves recent drafts alone', () async {
+      const result = TavilySearchResponse(
+        answer: 'answer',
+        query: 'q',
+        results: [],
+      );
+      final draft = await store.startDraft(
+        kind: SavedSearchKind.query,
+        query: 'q',
+        result: result,
+      );
+
+      await store.debugRunGc();
+
+      final still = await (db.select(db.savedSearches)
+            ..where((t) => t.id.equals(draft.id)))
+          .get();
+      expect(still, hasLength(1),
+          reason: 'recent drafts (< 24h) must survive the GC sweeper');
+    });
   });
 }
