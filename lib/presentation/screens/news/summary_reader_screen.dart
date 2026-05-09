@@ -197,22 +197,30 @@ class _SummaryReaderScreenState extends ConsumerState<SummaryReaderScreen> {
           // ── Body: vertical PageView ─────────────────────────────────
           //
           // Behaviour notes:
-          //   • Each card is now internally scrollable (see [_SummaryCard]
-          //     for the rationale — comprehensive ~150-180 word summaries
-          //     don't fit on a single phone screen). The card claims all
-          //     vertical drags within its body, so the PageView's NATIVE
-          //     swipe-to-page gesture is unused. Page navigation happens
-          //     instead via OVERSCROLL: pulling past the top or bottom
-          //     edge of the card by ≥90 px programmatically calls
-          //     [PageController.nextPage] / [previousPage]. This is the
-          //     Apple-News pattern and feels native on both platforms.
+          //   • Each card is internally scrollable (see [_SummaryCard]
+          //     for the rationale — comprehensive 220-280 word
+          //     magazine-formatted summaries don't fit on a single phone
+          //     screen). The card claims all vertical drags within its
+          //     body, so the PageView's NATIVE swipe-to-page gesture is
+          //     unused.
+          //   • Page navigation happens via OVERSCROLL POSITION: when the
+          //     inner scroll's [ScrollMetrics.pixels] exceeds max (or
+          //     drops below min) by ≥28 px, we programmatically call
+          //     [PageController.nextPage] / [previousPage]. The 28 px
+          //     threshold is past kTouchSlop so accidental bounces don't
+          //     fire, while a normal upward swipe at the end of a long
+          //     summary cleanly triggers the next page. (Old per-frame
+          //     accumulator approach got stuck because BouncingScroll-
+          //     Physics rubber-bands deltas to near-zero.)
+          //   • Page snap animation is 220 ms — ultra-fast feel. The
+          //     [HapticFeedback.selectionClick] on [onPageChanged] masks
+          //     the final 30 ms of motion so the page change reads as
+          //     instantaneous.
           //   • [BouncingScrollPhysics] on this PageView is largely
           //     vestigial (inner scroll wins drags) but kept for the
           //     programmatic snap animation feel.
           //   • [pageSnapping] is true by default — we name it explicitly
           //     so future maintainers don't accidentally turn it off.
-          //   • Light haptic on each page change gives a tactile "tick"
-          //     that masks the 320 ms snap animation latency.
           Positioned.fill(
             child: PageView.builder(
               controller: _pageCtrl,
@@ -645,22 +653,39 @@ class _SummaryCard extends StatefulWidget {
 class _SummaryCardState extends State<_SummaryCard> {
   late final ScrollController _scrollCtrl;
 
-  /// Accumulated overscroll in logical pixels for the current gesture.
-  /// Positive = pulling up past bottom (next-page intent).
-  /// Negative = pulling down past top (previous-page intent).
-  /// Reset on [ScrollEndNotification] so each fling is independent.
-  double _overscrollAccum = 0;
-
-  /// Guards against firing nextPage / previousPage twice for the same
-  /// gesture if the model still emits overscroll events while the page
-  /// snap animation is running.
+  /// Guards against firing nextPage / previousPage twice in a row while
+  /// the page-snap animation is still running. Reset on
+  /// [ScrollEndNotification] (inner scroll has settled back to its
+  /// boundary after the rubber-band).
   bool _pageChangeInFlight = false;
 
-  /// Pixels of accumulated overscroll required to trigger a page change.
-  /// 90 px hits the iOS rubber-band sweet spot: an accidental bounce at
-  /// the edge stays a bounce, while a deliberate "swipe up to next" fully
-  /// snaps over.
-  static const double _kPageOverscrollThreshold = 90;
+  /// Pixels the inner scroll position must exceed its min/max boundary
+  /// to trigger a page change.
+  ///
+  /// Why 28 px and NOT a per-frame accumulator (the old approach):
+  ///   The old code summed [OverscrollNotification.overscroll] deltas
+  ///   and triggered at 90 px accumulated. That broke under
+  ///   [BouncingScrollPhysics] because:
+  ///     1. Rubber-band ATTENUATES the per-frame delta — a finger drag of
+  ///        100 px past the edge produces 30-50 px of actual overscroll
+  ///        spread across many frames.
+  ///     2. As the bounce-back phase begins, deltas reverse sign, causing
+  ///        the accumulator to oscillate near zero and never reach 90.
+  ///   Result: a "normal" swipe up at the bottom of a long summary did
+  ///   nothing — user reported being stuck on article 1.
+  ///
+  ///   The new approach reads [ScrollMetrics.pixels] directly. Once the
+  ///   absolute scroll position passes max+28 (or min-28), we trigger.
+  ///   This is deterministic, single-frame, and matches the iOS-native
+  ///   "pull to reveal next" feel. 28 px is just past the kTouchSlop
+  ///   threshold so accidental bounces (where pixels barely exceed the
+  ///   boundary) don't fire, while deliberate swipes do.
+  static const double _kPagePastBoundaryPx = 28;
+
+  /// Snap animation length when overscroll triggers a page change.
+  /// 220 ms reads as "ultra fast" without feeling jerky — the haptic
+  /// click on [PageView.onPageChanged] masks the last 30 ms of motion.
+  static const Duration _kPageSnapDuration = Duration(milliseconds: 220);
 
   @override
   void initState() {
@@ -675,28 +700,37 @@ class _SummaryCardState extends State<_SummaryCard> {
   }
 
   bool _onScrollNotification(ScrollNotification n) {
-    if (n is OverscrollNotification) {
-      _overscrollAccum += n.overscroll;
-      if (_pageChangeInFlight) return false;
-
-      if (_overscrollAccum >= _kPageOverscrollThreshold) {
-        _pageChangeInFlight = true;
-        _overscrollAccum = 0;
-        widget.pageController.nextPage(
-          duration: const Duration(milliseconds: 320),
-          curve: Curves.easeOutCubic,
-        );
-      } else if (_overscrollAccum <= -_kPageOverscrollThreshold) {
-        _pageChangeInFlight = true;
-        _overscrollAccum = 0;
-        widget.pageController.previousPage(
-          duration: const Duration(milliseconds: 320),
-          curve: Curves.easeOutCubic,
-        );
-      }
-    } else if (n is ScrollEndNotification) {
-      _overscrollAccum = 0;
+    // Reset the in-flight guard the moment the inner scroll settles.
+    // We do this BEFORE the early-return below so a settled state
+    // immediately re-enables the next gesture.
+    if (n is ScrollEndNotification) {
       _pageChangeInFlight = false;
+      return false;
+    }
+
+    if (_pageChangeInFlight) return false;
+
+    final m = n.metrics;
+    if (!m.hasContentDimensions) return false;
+
+    // Position-based trigger: how far past the boundary is the user?
+    // [BouncingScrollPhysics] rubber-bands the position, so values are
+    // already attenuated — past=28 corresponds to a deliberate swipe.
+    final pastBottom = m.pixels - m.maxScrollExtent;
+    final pastTop = m.minScrollExtent - m.pixels;
+
+    if (pastBottom >= _kPagePastBoundaryPx) {
+      _pageChangeInFlight = true;
+      widget.pageController.nextPage(
+        duration: _kPageSnapDuration,
+        curve: Curves.easeOutCubic,
+      );
+    } else if (pastTop >= _kPagePastBoundaryPx) {
+      _pageChangeInFlight = true;
+      widget.pageController.previousPage(
+        duration: _kPageSnapDuration,
+        curve: Curves.easeOutCubic,
+      );
     }
     return false;
   }
@@ -1077,6 +1111,121 @@ class _SummaryBlock extends StatelessWidget {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// _ReadySummary: magazine-formatted body of a successful summary.
+//
+// Backend (rev. 4 prompt) returns a structured plain-text string with:
+//   • paragraph 1            → LEDE (1–2 sentence punchy takeaway)
+//   • blank line, paragraph N → BODY paragraphs (context / details / impact)
+//   • optional trailing block where every line starts with "• "
+//                             → KEY FACTS (3–5 bulleted scannable facts)
+//
+// Backward-compatible: if the cached summary is plain (no \n\n), it
+// renders exactly like before (single body paragraph, no lede emphasis).
+// ─────────────────────────────────────────────────────────────────────────
+
+enum _SummaryPartKind { lede, body, bullets }
+
+/// One renderable piece of a structured summary.
+/// (Named `_SummaryPart` to avoid colliding with the existing
+/// `_SummaryBlock` *widget* defined earlier in this file, which
+/// dispatches between ready / error / skeleton states.)
+@immutable
+class _SummaryPart {
+  const _SummaryPart.lede(this.text)
+      : kind = _SummaryPartKind.lede,
+        bullets = const <String>[];
+  const _SummaryPart.body(this.text)
+      : kind = _SummaryPartKind.body,
+        bullets = const <String>[];
+  const _SummaryPart.bullets(this.bullets)
+      : kind = _SummaryPartKind.bullets,
+        text = '';
+
+  final _SummaryPartKind kind;
+  final String text;
+  final List<String> bullets;
+}
+
+/// Splits a structured summary string into renderable parts.
+///
+/// Algorithm:
+///   1. Split on one or more blank lines (`\n\s*\n+`) into paragraphs.
+///   2. For each paragraph, if every non-empty line starts with a bullet
+///      marker (`• `, `- `, or `* `) AND there are 2+ such lines, treat
+///      the paragraph as a bullet block. Otherwise treat it as prose.
+///   3. The FIRST prose paragraph becomes the lede (typographic emphasis).
+///   4. All subsequent prose paragraphs are body paragraphs.
+///   5. Bullet blocks render as a styled list regardless of position
+///      (typically they're last — the KEY FACTS block — but we don't
+///      enforce that).
+///
+/// Edge cases:
+///   • Empty / whitespace-only input → an empty list (caller renders
+///     nothing; defensive — the SummaryBlock dispatcher never feeds an
+///     empty string here).
+///   • Single-paragraph input (legacy / cached pre-rev.4 summaries) →
+///     a single BODY block (NOT lede) so the appearance matches the old
+///     "one giant paragraph" rendering. No visual regression for users
+///     with cached summaries.
+List<_SummaryPart> _parseSummary(String raw) {
+  final trimmed = raw.trim();
+  if (trimmed.isEmpty) return const <_SummaryPart>[];
+
+  // Split on blank lines (one or more). Use a generous regex so we
+  // tolerate the model emitting "\n \n" or "\n\n\n".
+  final paragraphs = trimmed
+      .split(RegExp(r'\n[ \t]*\n+'))
+      .map((p) => p.trim())
+      .where((p) => p.isNotEmpty)
+      .toList();
+
+  if (paragraphs.length == 1) {
+    // Legacy single-paragraph (or model collapsed to one): render as
+    // a body paragraph. No lede emphasis to avoid surprising users
+    // looking at cached summaries.
+    return [_SummaryPart.body(paragraphs.single)];
+  }
+
+  final parts = <_SummaryPart>[];
+  var ledeAssigned = false;
+  for (final p in paragraphs) {
+    // Note: we deliberately do NOT trimRight here — a line like "• "
+    // (bullet marker + space, an empty bullet the model occasionally
+    // emits) needs its trailing space preserved so the prefix check
+    // below still recognises it as a bullet line. The empty bullet
+    // text gets filtered out further down via `.isNotEmpty`.
+    final lines = p
+        .split('\n')
+        .where((l) => l.trim().isNotEmpty)
+        .toList();
+    final isBulletBlock = lines.length >= 2 &&
+        lines.every((l) {
+          final t = l.trimLeft();
+          return t.startsWith('• ') ||
+              t.startsWith('- ') ||
+              t.startsWith('* ');
+        });
+
+    if (isBulletBlock) {
+      final bullets = lines
+          .map((l) => l.trimLeft().substring(2).trim())
+          .where((b) => b.isNotEmpty)
+          .toList();
+      if (bullets.isNotEmpty) {
+        parts.add(_SummaryPart.bullets(bullets));
+      }
+    } else if (!ledeAssigned) {
+      parts.add(_SummaryPart.lede(p));
+      ledeAssigned = true;
+    } else {
+      parts.add(_SummaryPart.body(p));
+    }
+  }
+
+  return parts;
+}
+
 class _ReadySummary extends StatelessWidget {
   const _ReadySummary({
     required this.summary,
@@ -1090,6 +1239,8 @@ class _ReadySummary extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final parts = _parseSummary(summary);
+
     return TweenAnimationBuilder<double>(
       tween: Tween(begin: 0, end: 1),
       duration: const Duration(milliseconds: 280),
@@ -1161,26 +1312,165 @@ class _ReadySummary extends StatelessWidget {
                 ),
               ],
             ),
-            const SizedBox(height: 12),
-            // No maxLines / Flexible cap any more — the parent
-            // [_SummaryCard] is now a [SingleChildScrollView], so the
-            // full ~150-180 word comprehensive summary always renders
-            // and the user scrolls to read the rest. 16 px / 1.6
-            // line-height is the long-form mobile-reading sweet spot
-            // (Material 3 guidelines).
+            const SizedBox(height: 14),
+            // Render parsed parts with appropriate typography per part.
+            // Spacing between parts is generous (16-18 px) so paragraphs
+            // and bullet lists feel like a real magazine layout, not a
+            // wall of text.
+            for (var i = 0; i < parts.length; i++) ...[
+              if (i > 0) SizedBox(height: _gapBefore(parts[i])),
+              _SummaryPartView(
+                part: parts[i],
+                colors: colors,
+                cat: cat,
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Gap to insert BEFORE each part (after the previous one). Bullet
+  /// blocks get a slightly larger top gap because they introduce a
+  /// distinct "key facts" section.
+  double _gapBefore(_SummaryPart part) {
+    switch (part.kind) {
+      case _SummaryPartKind.lede:
+        return 16;
+      case _SummaryPartKind.body:
+        return 16;
+      case _SummaryPartKind.bullets:
+        return 18;
+    }
+  }
+}
+
+/// Renders a single parsed [_SummaryPart] with the right typography.
+///   • LEDE    → 17.5 px, w700, slightly tighter line-height. The reader
+///               reads the lede first; we make it visually heavier so it
+///               stands out as the "TL;DR" of the story.
+///   • BODY    → 15.5 px, w500, line-height 1.62. Long-form sweet spot.
+///   • BULLETS → 14 px, w600, with a coloured bullet, hanging indent for
+///               wrapped lines, and 8 px row spacing.
+class _SummaryPartView extends StatelessWidget {
+  const _SummaryPartView({
+    required this.part,
+    required this.colors,
+    required this.cat,
+  });
+
+  final _SummaryPart part;
+  final AppColors colors;
+  final Color cat;
+
+  @override
+  Widget build(BuildContext context) {
+    switch (part.kind) {
+      case _SummaryPartKind.lede:
+        return Text(
+          part.text,
+          style: GoogleFonts.plusJakartaSans(
+            fontSize: 17.5,
+            height: 1.45,
+            color: colors.text,
+            letterSpacing: -0.2,
+            fontWeight: FontWeight.w700,
+          ),
+        );
+      case _SummaryPartKind.body:
+        return Text(
+          part.text,
+          style: GoogleFonts.plusJakartaSans(
+            fontSize: 15.5,
+            height: 1.62,
+            color: colors.text2,
+            letterSpacing: -0.05,
+            fontWeight: FontWeight.w500,
+          ),
+        );
+      case _SummaryPartKind.bullets:
+        return _KeyFactsList(bullets: part.bullets, colors: colors, cat: cat);
+    }
+  }
+}
+
+/// Renders the optional KEY FACTS bullet block with a coloured bullet,
+/// hanging indent, and a faint section header so the user knows it's a
+/// distinct scannable list, not just continuation prose.
+class _KeyFactsList extends StatelessWidget {
+  const _KeyFactsList({
+    required this.bullets,
+    required this.colors,
+    required this.cat,
+  });
+
+  final List<String> bullets;
+  final AppColors colors;
+  final Color cat;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // Tiny section header — sets the bullet block visually apart.
+        Row(
+          children: [
+            Container(
+              width: 4,
+              height: 12,
+              decoration: BoxDecoration(
+                color: cat,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(width: 8),
             Text(
-              summary,
+              'KEY FACTS',
               style: GoogleFonts.plusJakartaSans(
-                fontSize: 16,
-                height: 1.6,
-                color: colors.text,
-                letterSpacing: -0.1,
-                fontWeight: FontWeight.w500,
+                fontSize: 10,
+                fontWeight: FontWeight.w800,
+                color: cat,
+                letterSpacing: 1.4,
               ),
             ),
           ],
         ),
-      ),
+        const SizedBox(height: 10),
+        for (var i = 0; i < bullets.length; i++) ...[
+          if (i > 0) const SizedBox(height: 8),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Coloured bullet — slightly larger and bolder than a plain
+              // "• " character so it visually anchors the row.
+              Container(
+                width: 5,
+                height: 5,
+                margin: const EdgeInsets.only(top: 8, right: 10),
+                decoration: BoxDecoration(
+                  color: cat,
+                  shape: BoxShape.circle,
+                ),
+              ),
+              Expanded(
+                child: Text(
+                  bullets[i],
+                  style: GoogleFonts.plusJakartaSans(
+                    fontSize: 14,
+                    height: 1.5,
+                    color: colors.text,
+                    letterSpacing: -0.05,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ],
     );
   }
 }

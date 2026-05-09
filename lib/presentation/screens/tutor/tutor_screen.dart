@@ -23,6 +23,7 @@ import '../../../data/local/database/app_database.dart';
 import '../../../domain/entities/tutor_entities.dart';
 import '../../widgets/app_shell.dart';
 import '../../widgets/compact_header.dart';
+import '../../widgets/provider_picker.dart';
 import '../../widgets/sources_disclosure.dart';
 import '../settings/settings_controller.dart';
 import '../settings/settings_modal.dart';
@@ -2502,6 +2503,44 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
             _summaryResult != null ||
             _tavilyResult != null);
 
+    // Watch settings here so the search-tab provider picker reactively
+    // reflects toggles made in the settings modal without a full rebuild
+    // of this screen. Exposed to _SearchInputBox via the providerOptions /
+    // selectedProviderId / onProviderChanged trio. When xGrok is disabled
+    // the trio resolves to a 1-option list, which the picker renders as the
+    // legacy read-only chip — preserving the previous UX bit-for-bit.
+    final settings = ref.watch(settingsProvider);
+    final providerOptions = settings.xgrokEnabled
+        ? const <ProviderOption>[
+            ProviderOption(
+              id: 'gemini',
+              label: 'Gemini',
+              icon: LucideIcons.globe,
+              color: Color(0xFF4285F4),
+            ),
+            ProviderOption(
+              id: 'xgrok',
+              label: 'xGrok',
+              icon: LucideIcons.bot,
+              color: Color(0xFFE8453C),
+            ),
+          ]
+        : const <ProviderOption>[
+            ProviderOption(
+              id: 'gemini',
+              label: 'Gemini',
+              icon: LucideIcons.globe,
+              color: Color(0xFF4285F4),
+            ),
+          ];
+    // Stale-state guard: if the persisted provider is xGrok but xGrok was
+    // disabled in settings, the picker still shows Gemini until the user
+    // re-enables xGrok. Search routing already gates on `xgrokEnabled` via
+    // `onlineSearchIsXGrok`, so behaviour stays correct either way.
+    final selectedProviderId = settings.xgrokEnabled
+        ? settings.onlineSearchProvider
+        : 'gemini';
+
     return Stack(
       children: [
         ListView(
@@ -2541,13 +2580,19 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
           isLoading: _summaryLoading,
           isListening: _isListening && _voiceTarget == _summaryUrlCtrl,
           onlineSearchProvider: _isUrl(_summaryUrlCtrl.text)
-              ? (ref.watch(settingsProvider).xgrokEnabled &&
-                      ref.watch(settingsProvider).summarizeOverride == 'xgrok'
+              ? (settings.xgrokEnabled &&
+                      settings.summarizeOverride == 'xgrok'
                   ? 'xGrok'
                   : 'Gemini')
-              : (ref.watch(settingsProvider).onlineSearchIsXGrok
-                  ? 'xGrok'
-                  : 'Gemini'),
+              : (settings.onlineSearchIsXGrok ? 'xGrok' : 'Gemini'),
+          providerOptions: providerOptions,
+          selectedProviderId: selectedProviderId,
+          onProviderChanged: (id) {
+            // Persist immediately. setOnlineSearchProvider already syncs to
+            // SharedPreferences and queues a remote push, so the choice
+            // survives restarts and propagates to the settings page.
+            ref.read(settingsProvider.notifier).setOnlineSearchProvider(id);
+          },
           searchUseDeepModel: _searchUseDeepModel,
           onSearchModeToggle: () {
             // Allow toggling at any time except mid-flight; the chip itself
@@ -4108,7 +4153,6 @@ class _SearchInputBox extends StatefulWidget {
     required this.isUrl,
     required this.hasText,
     required this.isLoading,
-    required this.isListening,
     required this.onlineSearchProvider,
     required this.searchUseDeepModel,
     required this.onSearchModeToggle,
@@ -4120,6 +4164,10 @@ class _SearchInputBox extends StatefulWidget {
     required this.onVoiceDown,
     required this.onVoiceUp,
     this.deepResearchUrl,
+    this.providerOptions,
+    this.selectedProviderId,
+    this.onProviderChanged,
+    this.isListening = false,
   });
 
   final TextEditingController controller;
@@ -4129,7 +4177,23 @@ class _SearchInputBox extends StatefulWidget {
   final bool hasText;
   final bool isLoading;
   final bool isListening;
+
+  /// Legacy display-only label used by the URL/summarize header — kept so the
+  /// summarize path keeps showing its provider chip without touching it.
+  /// In search mode the picker below takes over and this string is ignored.
   final String onlineSearchProvider;
+
+  /// When provided AND contains 2+ entries, an interactive [ProviderPicker]
+  /// is rendered in the header. With a single entry (or null) the legacy
+  /// static `_buildProviderChip` is shown instead — fully backwards
+  /// compatible.
+  final List<ProviderOption>? providerOptions;
+
+  /// Currently-selected provider id; required when [providerOptions] is set.
+  final String? selectedProviderId;
+
+  /// Fired with the picked provider id when the user changes selection.
+  final ValueChanged<String>? onProviderChanged;
 
   /// Whether the Lite/Deep toggle is set to Deep. Only meaningful in search
   /// (non-URL) mode. The toggle is always rendered Lite-first so users see
@@ -4489,6 +4553,16 @@ class _SearchInputBoxState extends State<_SearchInputBox> {
   // ── Header ─────────────────────────────────────────────────────────────────
 
   Widget _buildHeader(AppColors colors, bool isXGrok) {
+    // Two header surfaces share this widget: the URL/summarize flow and the
+    // search flow. The interactive provider picker is only meaningful for
+    // search; in URL mode we keep the legacy read-only chip so visual
+    // language stays consistent across both surfaces.
+    final useInteractivePicker = !widget.isUrl &&
+        widget.providerOptions != null &&
+        widget.providerOptions!.length > 1 &&
+        widget.selectedProviderId != null &&
+        widget.onProviderChanged != null;
+
     return AnimatedSwitcher(
       duration: const Duration(milliseconds: 250),
       switchInCurve: Curves.easeOutCubic,
@@ -4522,7 +4596,16 @@ class _SearchInputBoxState extends State<_SearchInputBox> {
             ),
           ),
           const Spacer(),
-          _buildProviderChip(colors, isXGrok),
+          if (useInteractivePicker)
+            ProviderPicker(
+              options: widget.providerOptions!,
+              selectedId: widget.selectedProviderId!,
+              onChanged: widget.onProviderChanged!,
+              colors: colors,
+              heroTag: 'tutor-search',
+            )
+          else
+            _buildProviderChip(colors, isXGrok),
         ],
       ),
     );
