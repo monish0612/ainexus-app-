@@ -45,6 +45,18 @@ class TLog {
   static int _consecutiveFailures = 0;
   static final _random = Random();
 
+  /// Test-only synchronous observer fired for every log entry as soon as it
+  /// is enqueued, BEFORE any batching / dispatch. Lets unit tests assert on
+  /// log severity + payload without dealing with the throttled debugPrint
+  /// stream or the Telegram dispatcher. Production code never sets this.
+  @visibleForTesting
+  static void Function(
+    String level,
+    String tag,
+    String message, {
+    Object? error,
+  })? debugOnLog;
+
   // ── Public API ──────────────────────────────────────────────────────────
 
   static void init() {
@@ -120,6 +132,15 @@ class TLog {
     if (kDebugMode) {
       debugPrint('[$emoji $tag] $message'
           '${error != null ? '\n  ⤷ $error' : ''}');
+    }
+
+    // Test-only synchronous tap. Wrapped in try/catch so an observer
+    // throwing can never break the production logging pipeline.
+    final observer = debugOnLog;
+    if (observer != null) {
+      try {
+        observer(level.name, tag, message, error: error);
+      } catch (_) {/* never propagate test-observer errors */}
     }
 
     if (_queue.length >= _maxQueueSize) {

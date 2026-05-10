@@ -24,7 +24,7 @@ class ApiClient {
     );
 
     _dio.interceptors.addAll([
-      _LoggingInterceptor(),
+      LoggingInterceptor(),
       _RetryInterceptor(_dio),
     ]);
   }
@@ -57,7 +57,17 @@ class ApiClient {
   Future<Response<T>> delete<T>(String path) => _dio.delete<T>(path);
 }
 
-class _LoggingInterceptor extends Interceptor {
+/// HTTP request/response logger that funnels everything through [TLog].
+///
+/// Severity policy (kept in sync with `test/core/network/api_client_logging_test.dart`):
+///   • cancel       → no log (control-flow signal, not an error)
+///   • 4xx          → TLog.w with status + URL + elapsed (NO `error:` payload)
+///   • 5xx          → TLog.e with status + URL + elapsed + full DioException
+///   • network err  → TLog.e with type + URL + elapsed + full DioException
+///
+/// Made non-private so unit tests can compose a Dio that has only this
+/// interceptor (and skip the retry loop) when asserting on log shape.
+class LoggingInterceptor extends Interceptor {
   @override
   void onRequest(RequestOptions options, RequestInterceptorHandler handler) {
     options.extra['_requestStartMs'] = DateTime.now().millisecondsSinceEpoch;
@@ -81,6 +91,30 @@ class _LoggingInterceptor extends Interceptor {
         err.requestOptions.extra['_requestStartMs'] as int? ?? 0;
     final elapsed = DateTime.now().millisecondsSinceEpoch - startMs;
     final status = err.response?.statusCode;
+
+    // Cancellation is a normal control-flow signal, not an error.
+    if (err.type == DioExceptionType.cancel) {
+      handler.next(err);
+      return;
+    }
+
+    // 4xx are client errors and almost always either expected (404 "not
+    // found", 400 from validation) or actionable in the calling code.
+    // Logging them as ERROR with the full DioException body floods
+    // Telegram with stack-trace-shaped noise (e.g. when the backend has
+    // not yet deployed an endpoint). Downgrade to WARN and skip the
+    // verbose `error:` payload — the URL + status code + message are
+    // already enough to triage.
+    if (status != null && status >= 400 && status < 500) {
+      TLog.w(
+        'HTTP',
+        '✖ ${err.requestOptions.method} ${err.requestOptions.uri} '
+            '[$status] (${elapsed}ms)',
+      );
+      handler.next(err);
+      return;
+    }
+
     TLog.e(
       'HTTP',
       '✖ ${err.requestOptions.method} ${err.requestOptions.uri} '
