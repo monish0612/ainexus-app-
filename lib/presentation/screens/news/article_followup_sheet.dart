@@ -18,6 +18,7 @@ import '../../../core/network/api_client.dart';
 import '../../../core/network/api_endpoints.dart';
 import '../../../core/platform/platform_capabilities.dart';
 import '../../../core/services/background_task_coordinator.dart';
+import '../../../core/services/followup_history.dart';
 import '../../../core/services/telegram_logger.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../data/local/database/app_database.dart';
@@ -121,11 +122,37 @@ class ArticleFollowUpStore with WidgetsBindingObserver {
   static const kSummarizeThreshold = 10;
   static const kRecentPairsToKeep = 5;
 
+  /// When the chat reaches this many completed user/assistant pairs, the
+  /// UI auto-upgrades the request from Lite → Deep. The threshold matches
+  /// [kSummarizeThreshold] so the very same turn that triggers the first
+  /// summarization also gets a deep model — i.e. once long-term memory
+  /// becomes lossy, the answering model is also upgraded to compensate.
+  static const kAutoDeepThreshold = 10;
+
+  /// Recent-verbatim window when the current request is in Deep mode.
+  /// Larger than [kRecentPairsToKeep] because deep models have more
+  /// context budget AND deep is when the user typically wants the model
+  /// to actually re-read several recent exchanges instead of relying on
+  /// the compressed summary.
+  static const kRecentPairsToKeepDeep = 12;
+
+  /// Hard cap on the number of unique source URLs from prior turns we
+  /// inject as a "reference list" each request. Bounded to keep the
+  /// payload small (~20 lines, <2 KB).
+  static const kSourceMemoryMax = 20;
+
   final _cache = <String, List<_ChatMessage>>{};
   final _summaries = <String, _ConversationSummary>{};
   AppDatabase? _db;
   ApiClient? _api;
   bool _observerBound = false;
+
+  /// Per-article guard so a second consolidation can't fire while the
+  /// first one is still in flight. Independent of [_summarizingArticleIds]
+  /// because consolidation is the heavier "redo with deep model"
+  /// variant — it must run even when a fresh routine summary already
+  /// exists.
+  final _consolidatingArticleIds = <String>{};
 
   /// Per-article UI refresh callbacks (registered by the chat sheet widget).
   final _listeners = <String, VoidCallback>{};
@@ -661,17 +688,27 @@ class ArticleFollowUpStore with WidgetsBindingObserver {
             TLog.w('FollowUp',
                 'Context limit hit (400) — force-summarizing ${history.length} entries and retrying');
             try {
-              const recentCount = kRecentPairsToKeep * 2;
+              // Use the wider deep window when the active turn is deep —
+              // matches what [_buildHistoryWithSummary] would have built.
+              final isDeep = mode != 'lite';
+              final pairsToKeep = isDeep
+                  ? kRecentPairsToKeepDeep
+                  : kRecentPairsToKeep;
+              final recentCount = pairsToKeep * 2;
               final splitAt = history.length > recentCount
                   ? history.length - recentCount
                   : (history.length ~/ 2);
               final oldPairs = history.sublist(0, splitAt);
               final recentPairs = history.sublist(splitAt);
 
+              // Recovery summarization tracks the active mode: deep turns
+              // get a deep-grade summary so the retry payload reasons over
+              // a high-fidelity memory blob, not a lossy lite digest.
               final summaryText = await aiService.summarizeHistory(
                 messages: oldPairs,
                 articleContext: articleTitle,
                 liteModel: liteModel,
+                summaryModel: isDeep ? deepModel : null,
               );
               if (summaryText.isNotEmpty) {
                 final existingPairs =
@@ -1251,6 +1288,28 @@ class _ArticleFollowUpChatState extends ConsumerState<_ArticleFollowUpChat>
   String _elapsedText = '';
   int _idSeq = 0;
 
+  /// Set true once the 10-pair threshold has caused an automatic Lite →
+  /// Deep switch in the current sheet session. Sticky: we never auto-
+  /// switch a second time within the same session, so the user keeps
+  /// full manual control after the upgrade. Fresh sheet open re-arms.
+  bool _autoSwitchedToDeep = false;
+
+  /// Pure history-shaping logic. Stateless and `const`-instantiable —
+  /// constructed once on State init and reused for every turn. All the
+  /// tricky decisions (pair extraction, source memory, mode-mismatch
+  /// hint, layered summary composition, auto-switch eligibility) live
+  /// in the builder and are exhaustively unit-tested in
+  /// `test/core/services/followup_history_test.dart`.
+  static const _historyBuilder = FollowUpHistoryBuilder(
+    config: FollowUpHistoryConfig(
+      summarizeThreshold: ArticleFollowUpStore.kSummarizeThreshold,
+      recentPairsLite: ArticleFollowUpStore.kRecentPairsToKeep,
+      recentPairsDeep: ArticleFollowUpStore.kRecentPairsToKeepDeep,
+      sourceMemoryMax: ArticleFollowUpStore.kSourceMemoryMax,
+      autoDeepThreshold: ArticleFollowUpStore.kAutoDeepThreshold,
+    ),
+  );
+
   late final AnimationController _entryAnim;
 
   String _nextId() =>
@@ -1304,9 +1363,6 @@ class _ArticleFollowUpChatState extends ConsumerState<_ArticleFollowUpChat>
   }
 
   void _autoRetryOrphan(ArticleFollowUpStore store) {
-    final providerTag = _useXGrok ? 'xGrok' : 'Gemini';
-    final modeTag = _useDeepModel ? 'Deep' : 'Lite';
-    TLog.i('ArticleChat', 'Auto-retrying orphaned question [$providerTag/$modeTag]');
     final orphanedUserMsg = _messages.last;
     final aiMsg = _ChatMessage(
       id: _nextId(),
@@ -1315,19 +1371,21 @@ class _ArticleFollowUpChatState extends ConsumerState<_ArticleFollowUpChat>
       isLoading: true,
     );
 
-    final allPairs = <Map<String, String>>[];
-    for (var i = 0; i < _messages.length - 1; i++) {
-      final m = _messages[i];
-      if (m.isLoading || m.isError) continue;
-      if (m.role == 'user' && i + 1 < _messages.length - 1) {
-        final next = _messages[i + 1];
-        if (next.role == 'assistant' && !next.isError && !next.isLoading) {
-          allPairs.add({'role': 'user', 'text': m.text});
-          allPairs.add({'role': 'assistant', 'text': next.text});
-          i++;
-        }
-      }
-    }
+    // Build pairs from messages BEFORE the orphaned tail (the last user
+    // message has no assistant counterpart yet). The builder's
+    // [excludeOrphanTail] flag enforces this look-ahead bound — same
+    // semantics as the previous inline loop.
+    final allPairs = _historyBuilder.collectCompletedPairs(
+      _asFollowUpMessages(),
+      excludeOrphanTail: true,
+    );
+
+    _maybeAutoSwitchToDeep(store, allPairs);
+
+    final providerTag = _useXGrok ? 'xGrok' : 'Gemini';
+    final modeTag = _useDeepModel ? 'Deep' : 'Lite';
+    TLog.i('ArticleChat',
+        'Auto-retrying orphaned question [$providerTag/$modeTag] (pairs=${allPairs.length ~/ 2})');
 
     final history = _buildHistoryWithSummary(store, allPairs);
 
@@ -1491,28 +1549,19 @@ class _ArticleFollowUpChatState extends ConsumerState<_ArticleFollowUpChat>
     final text = _ctrl.text.trim();
     if (text.isEmpty || _sending) return;
 
+    final store = ArticleFollowUpStore.instance;
+
+    final allPairs = _collectCompletedPairs();
+    _maybeAutoSwitchToDeep(store, allPairs);
+
     final providerTag = _useXGrok ? 'xGrok' : 'Gemini';
     final modeTag = _useDeepModel ? 'Deep' : 'Lite';
-    TLog.i('ArticleChat', 'Sending [$providerTag/$modeTag]: "${text.length > 60 ? '${text.substring(0, 60)}…' : text}"');
+    TLog.i('ArticleChat',
+        'Sending [$providerTag/$modeTag]: "${text.length > 60 ? '${text.substring(0, 60)}…' : text}" '
+        '(pairs=${allPairs.length ~/ 2})');
 
     _ctrl.clear();
     _focusNode.requestFocus();
-
-    final store = ArticleFollowUpStore.instance;
-
-    final allPairs = <Map<String, String>>[];
-    for (var i = 0; i < _messages.length; i++) {
-      final m = _messages[i];
-      if (m.isLoading || m.isError) continue;
-      if (m.role == 'user' && i + 1 < _messages.length) {
-        final next = _messages[i + 1];
-        if (next.role == 'assistant' && !next.isError && !next.isLoading) {
-          allPairs.add({'role': 'user', 'text': m.text});
-          allPairs.add({'role': 'assistant', 'text': next.text});
-          i++;
-        }
-      }
-    }
 
     final history = _buildHistoryWithSummary(store, allPairs);
 
@@ -1550,74 +1599,275 @@ class _ArticleFollowUpChatState extends ConsumerState<_ArticleFollowUpChat>
     );
   }
 
-  /// Builds the history payload, using a cached summary for older pairs when
-  /// the conversation exceeds [ArticleFollowUpStore.kSummarizeThreshold].
-  ///
-  /// Layout sent to API:
-  ///   [summary-context pair]  ← condensed digest of pairs 1…(N-K)
-  ///   [recent K full pairs]   ← verbatim for conversational coherence
-  ///   [new user question]     ← appended by the caller
-  ///
-  /// The summary always covers ALL old pairs (cumulative). When the old-pair
-  /// count grows beyond what the cached summary covers, a background
-  /// re-summarization is triggered that includes the previous summary text
-  /// plus the new "graduated" pairs — so context is never lost.
-  List<Map<String, String>> _buildHistoryWithSummary(
+  /// Adapter: snapshots [_messages] into the neutral DTO type consumed
+  /// by [_historyBuilder]. Cheap (one pass, small allocation) and
+  /// called at most once per turn.
+  List<FollowUpMessage> _asFollowUpMessages() {
+    return [
+      for (final m in _messages)
+        FollowUpMessage(
+          role: m.role,
+          text: m.text,
+          isLoading: m.isLoading,
+          isError: m.isError,
+          model: m.model,
+          sources: [
+            for (final s in m.sources)
+              FollowUpSourceRef(url: s.url, title: s.title),
+          ],
+        ),
+    ];
+  }
+
+  /// Pairs up every finalized (user, assistant) tuple in [_messages].
+  /// Thin wrapper around [_historyBuilder.collectCompletedPairs] — kept
+  /// as a method so call sites keep their existing semantics.
+  List<Map<String, String>> _collectCompletedPairs() {
+    return _historyBuilder.collectCompletedPairs(_asFollowUpMessages());
+  }
+
+  /// One-time automatic upgrade Lite → Deep once the conversation has
+  /// crossed [ArticleFollowUpStore.kAutoDeepThreshold] completed pairs.
+  /// Provider (Gemini / xGrok) is left untouched — the user's choice is
+  /// preserved. After the upgrade fires, we also kick off a memory
+  /// consolidation pass so the persisted summary is regenerated with
+  /// the deep model. Sticky for the rest of this sheet session: if the
+  /// user manually flips back to Lite afterwards, we respect that and
+  /// do NOT auto-flip again until the sheet is reopened.
+  void _maybeAutoSwitchToDeep(
       ArticleFollowUpStore store, List<Map<String, String>> allPairs) {
     final pairCount = allPairs.length ~/ 2;
-    if (pairCount <= ArticleFollowUpStore.kSummarizeThreshold) {
-      return allPairs;
-    }
+    final shouldSwitch = _historyBuilder.shouldAutoSwitchToDeep(
+      pairCount: pairCount,
+      currentIsDeep: _useDeepModel,
+      alreadyAutoSwitched: _autoSwitchedToDeep,
+    );
+    if (!shouldSwitch) return;
 
+    setState(() {
+      _useDeepModel = true;
+      _autoSwitchedToDeep = true;
+    });
+    final providerTag = _useXGrok ? 'xGrok' : 'Gemini';
+    TLog.i('ArticleChat',
+        'Auto-switched Lite → Deep at $pairCount pairs [$providerTag] '
+        '— provider unchanged, deep summarizer enabled');
+    _showAutoSwitchBanner();
+    _consolidateMemoryWithDeep(store, allPairs);
+  }
+
+  void _showAutoSwitchBanner() {
+    if (!mounted) return;
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    if (messenger == null) return;
+    messenger.hideCurrentSnackBar();
+    messenger.showSnackBar(SnackBar(
+      duration: const Duration(seconds: 4),
+      behavior: SnackBarBehavior.floating,
+      backgroundColor: const Color(0xFF1E1B4B),
+      content: Row(
+        children: [
+          const Icon(LucideIcons.brain, size: 16, color: Color(0xFFC084FC)),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'Switched to Deep — richer recall after 10+ messages',
+              style: GoogleFonts.plusJakartaSans(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w600,
+                color: Colors.white,
+              ),
+            ),
+          ),
+        ],
+      ),
+    ));
+  }
+
+  /// One-shot deep-grade re-summarization of the current "old pairs"
+  /// window. Runs in parallel with the active question — so the very
+  /// next turn benefits from a higher-fidelity summary even if the
+  /// current turn beats it to the network. Resilient: 2 attempts with
+  /// exponential backoff, cancellable, and safely no-ops when another
+  /// consolidation is already in flight for the same article.
+  void _consolidateMemoryWithDeep(
+      ArticleFollowUpStore store, List<Map<String, String>> allPairs) {
+    final articleId = widget.articleId;
+    if (store._consolidatingArticleIds.contains(articleId)) {
+      TLog.d('ArticleChat',
+          'Memory consolidation already in flight for $articleId — skipping');
+      return;
+    }
     const recentCount = ArticleFollowUpStore.kRecentPairsToKeep * 2;
-    final recentStart = allPairs.length - recentCount;
-    final oldPairs = allPairs.sublist(0, recentStart);
-    final recentPairs = allPairs.sublist(recentStart);
+    if (allPairs.length <= recentCount) return;
+    final oldPairs = allPairs.sublist(0, allPairs.length - recentCount);
     final oldPairCount = oldPairs.length ~/ 2;
+    if (oldPairCount == 0) return;
 
-    final summary = store.getSummary(widget.articleId);
+    final aiService = ref.read(tutorAiServiceProvider);
+    final settings = ref.read(settingsProvider);
+    final articleTitle = widget.articleTitle;
+    final deepModel = settings.deepModel;
+    final liteModel = settings.liteModel;
 
-    if (summary != null && summary.pairsCovered >= oldPairCount) {
-      TLog.d('ArticleChat',
-          'Using cached summary (${summary.pairsCovered} pairs) + ${ArticleFollowUpStore.kRecentPairsToKeep} recent');
-      return [
-        {
-          'role': 'user',
-          'text':
-              '[Summary of our earlier conversation (${summary.pairsCovered} exchanges)]:\n${summary.text}',
-        },
-        {
-          'role': 'assistant',
-          'text':
-              'I have context from our earlier discussion and will use it to answer your questions.',
-        },
-        ...recentPairs,
-      ];
+    final existing = store.getSummary(articleId);
+    final messagesToSummarize = <Map<String, String>>[];
+    if (existing != null) {
+      messagesToSummarize.add({
+        'role': 'user',
+        'text': '[Previous lite-grade summary covering '
+            '${existing.pairsCovered} exchanges]:\n${existing.text}',
+      });
+      messagesToSummarize.add({
+        'role': 'assistant',
+        'text': 'Understood — I will refine this with full detail.',
+      });
+      final alreadyCovered = existing.pairsCovered * 2;
+      if (alreadyCovered < oldPairs.length) {
+        messagesToSummarize.addAll(oldPairs.sublist(alreadyCovered));
+      }
+    } else {
+      messagesToSummarize.addAll(oldPairs);
     }
 
-    if (summary != null) {
-      TLog.d('ArticleChat',
-          'Stale summary (${summary.pairsCovered}/$oldPairCount pairs) — using it + recent, re-summarizing in background');
-      _triggerBackgroundSummarization(store, summary, oldPairs, oldPairCount);
-      return [
-        {
-          'role': 'user',
-          'text':
-              '[Summary of our earlier conversation (${summary.pairsCovered} exchanges)]:\n${summary.text}',
-        },
-        {
-          'role': 'assistant',
-          'text':
-              'I have context from our earlier discussion and will use it to answer your questions.',
-        },
-        ...recentPairs,
-      ];
+    store._consolidatingArticleIds.add(articleId);
+    TLog.i('ArticleChat',
+        'Memory consolidation → $oldPairCount pairs with deep model "$deepModel"');
+
+    unawaited(() async {
+      Object? lastError;
+      for (var attempt = 0; attempt < 2; attempt++) {
+        try {
+          if (attempt > 0) {
+            await Future<void>.delayed(Duration(seconds: (attempt + 1) * 4));
+          }
+          final summary = await aiService.summarizeHistory(
+            messages: messagesToSummarize,
+            articleContext: articleTitle,
+            // Forward-looking field (preferred by upgraded backends).
+            summaryModel: deepModel,
+            // Legacy field — keeps lite as a safe fallback if the backend
+            // does not yet honour [summaryModel].
+            liteModel: liteModel,
+          );
+          if (summary.isNotEmpty) {
+            // Coverage guard: if a parallel writer (e.g. routine
+            // summarization that fired in the same window) already
+            // saved a summary covering MORE pairs, do not regress
+            // [pairsCovered]. We still save the new (deep) text but
+            // tagged with the maximum seen pair count, so the next
+            // turn treats it as fresh.
+            final priorPairs =
+                store.getSummary(articleId)?.pairsCovered ?? 0;
+            final safePairs =
+                priorPairs > oldPairCount ? priorPairs : oldPairCount;
+            await store.saveSummary(articleId, summary, safePairs);
+            TLog.i('ArticleChat',
+                'Memory consolidation ✓ $safePairs pairs → ${summary.length} chars [deep]'
+                '${priorPairs > oldPairCount ? ' (clamped from $oldPairCount; existing covered $priorPairs)' : ''}');
+            return;
+          }
+          TLog.w('ArticleChat',
+              'Memory consolidation returned empty (attempt ${attempt + 1}/2)');
+        } catch (e) {
+          lastError = e;
+          TLog.w('ArticleChat',
+              'Memory consolidation attempt ${attempt + 1}/2 failed (${e.runtimeType})',
+              error: e);
+        }
+      }
+      if (lastError != null) {
+        TLog.e('ArticleChat', 'Memory consolidation gave up after 2 attempts',
+            error: lastError);
+      }
+    }()
+        .whenComplete(() => store._consolidatingArticleIds.remove(articleId)));
+  }
+
+  /// Builds the history payload sent to the backend on every follow-up.
+  ///
+  /// Layered structure (top → bottom):
+  ///   1. [summary-context pseudo-pair]      ← cumulative digest of pairs
+  ///                                            1…(N-K). Only emitted when
+  ///                                            pair count > threshold.
+  ///   2. [source-memory pseudo-pair]        ← deduped list of every URL
+  ///                                            cited in prior assistant
+  ///                                            turns (capped). Lets the
+  ///                                            model re-ground in known
+  ///                                            sources without bloating
+  ///                                            context with snippets.
+  ///   3. [mode-mismatch pseudo-pair]        ← only when the current turn
+  ///                                            is Deep AND the recent
+  ///                                            verbatim window contains
+  ///                                            answers produced with a
+  ///                                            Lite/Flash model. Tells
+  ///                                            the deep model to verify
+  ///                                            and elaborate rather than
+  ///                                            treating prior brevity as
+  ///                                            its own thoroughness.
+  ///   4. [recent K full pairs]              ← verbatim for short-range
+  ///                                            coherence. K adapts to
+  ///                                            mode: 5 (Lite) or 12
+  ///                                            (Deep) — deep turns get a
+  ///                                            wider verbatim window.
+  ///   5. [new user question]                ← appended by the caller.
+  ///
+  /// The summary covers ALL old pairs cumulatively. When the cached
+  /// summary lags the current old-pair count, a background re-
+  /// summarization is triggered that prepends the previous summary plus
+  /// the newly-graduated pairs — so context is never lost.
+  List<Map<String, String>> _buildHistoryWithSummary(
+      ArticleFollowUpStore store, List<Map<String, String>> allPairs) {
+    final cached = store.getSummary(widget.articleId);
+    final cachedAsBuilder = cached == null
+        ? null
+        : FollowUpSummary(
+            text: cached.text,
+            pairsCovered: cached.pairsCovered,
+          );
+
+    final result = _historyBuilder.build(
+      messages: _asFollowUpMessages(),
+      allPairs: allPairs,
+      currentIsDeep: _useDeepModel,
+      cachedSummary: cachedAsBuilder,
+    );
+
+    final recentToKeep = _useDeepModel
+        ? ArticleFollowUpStore.kRecentPairsToKeepDeep
+        : ArticleFollowUpStore.kRecentPairsToKeep;
+    final srcCount = result.history
+        .where((e) => e['text']?.startsWith('[Sources cited earlier') ?? false)
+        .length;
+    final hintCount = result.history
+        .where((e) => e['text']?.startsWith('[Note:') ?? false)
+        .length;
+
+    if (cached != null && !result.shouldTriggerSummarization) {
+      TLog.d(
+        'ArticleChat',
+        'Cached summary (${cached.pairsCovered} pairs) + $recentToKeep recent + '
+            '$srcCount src + $hintCount hint',
+      );
+    } else if (cached != null) {
+      TLog.d(
+        'ArticleChat',
+        'Stale summary (${cached.pairsCovered}/${result.oldPairCount} pairs) — '
+            'using it + recent, re-summarizing in background',
+      );
+      _triggerBackgroundSummarization(
+          store, cached, result.oldPairs, result.oldPairCount);
+    } else if (result.shouldTriggerSummarization) {
+      TLog.d(
+        'ArticleChat',
+        'No summary — sending $recentToKeep recent + $srcCount src + '
+            '$hintCount hint, triggering background summarization',
+      );
+      _triggerBackgroundSummarization(
+          store, null, result.oldPairs, result.oldPairCount);
     }
 
-    TLog.d('ArticleChat',
-        'No summary — sending ${recentPairs.length ~/ 2} recent pairs, triggering background summarization');
-    _triggerBackgroundSummarization(store, null, oldPairs, oldPairCount);
-    return recentPairs;
+    return result.history;
   }
 
   /// Summarizes old conversation pairs in the background.
@@ -1639,7 +1889,13 @@ class _ArticleFollowUpChatState extends ConsumerState<_ArticleFollowUpChat>
 
     final aiService = ref.read(tutorAiServiceProvider);
     final articleTitle = widget.articleTitle;
-    final liteModel = ref.read(settingsProvider).liteModel;
+    final settings = ref.read(settingsProvider);
+    // When the user is currently in Deep mode (manual or auto-switched),
+    // upgrade the summarizer to the deep model. Lite turns keep using
+    // the lite model so cost/latency stays bounded for short chats.
+    final useDeepSummarizer = _useDeepModel;
+    final summaryModel = useDeepSummarizer ? settings.deepModel : null;
+    final liteModel = settings.liteModel;
     unawaited(() async {
       try {
         final messagesToSummarize = <Map<String, String>>[];
@@ -1666,11 +1922,22 @@ class _ArticleFollowUpChatState extends ConsumerState<_ArticleFollowUpChat>
           messages: messagesToSummarize,
           articleContext: articleTitle,
           liteModel: liteModel,
+          summaryModel: summaryModel,
         );
         if (summary.isNotEmpty) {
-          await store.saveSummary(articleId, summary, totalOldPairCount);
+          // Coverage guard: never regress [pairsCovered] if a parallel
+          // deep consolidation already saved a higher-coverage summary
+          // for this article in the same window.
+          final priorPairs =
+              store.getSummary(articleId)?.pairsCovered ?? 0;
+          final safePairs = priorPairs > totalOldPairCount
+              ? priorPairs
+              : totalOldPairCount;
+          await store.saveSummary(articleId, summary, safePairs);
           TLog.i('ArticleChat',
-              'Background summarization complete for $articleId ($totalOldPairCount pairs)');
+              'Background summarization ✓ $articleId ($safePairs pairs) '
+              '${useDeepSummarizer ? '[deep]' : '[lite]'}'
+              '${priorPairs > totalOldPairCount ? ' (clamped from $totalOldPairCount)' : ''}');
         } else {
           TLog.w('ArticleChat',
               'Background summarization returned empty for $articleId');

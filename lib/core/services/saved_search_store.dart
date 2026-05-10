@@ -135,6 +135,15 @@ class SavedSearchStore with WidgetsBindingObserver {
       });
       if (!_initialFetchDone) {
         _initialFetchDone = true;
+        // Eager sweep on cold launch. The lifecycle observer's `resumed`
+        // path only fires on a foreground TRANSITION — when the user
+        // re-launches the app after Android killed the process, there's
+        // no transition to observe, so abandoned drafts from the prior
+        // session would otherwise sit in Drift for up to 30 min until
+        // the periodic timer fires. Running GC here closes that gap so
+        // a "close → reopen 25h later" cold launch leaves the local DB
+        // exactly as clean as the user's mental model expects.
+        unawaited(_runGc());
         unawaited(_pullIndexFromServer());
       }
     }
@@ -525,6 +534,27 @@ class SavedSearchStore with WidgetsBindingObserver {
         : jsonEncode(sources.map((s) => s.toJson()).toList());
 
     try {
+      // ── Defensive guard ────────────────────────────────────────────────
+      // If a row with this messageId already exists under a DIFFERENT
+      // searchId, refuse to overwrite. This protects saved entries from
+      // having their chat history "stolen" if the in-memory FAB cache is
+      // mirror-written to a brand-new draft for the same query (e.g.
+      // user does: search X → save → clear → re-search X → opens FAB →
+      // cache replays the same message ids against the new draft id).
+      // Without this guard, `insertOnConflictUpdate` would atomically
+      // move every prior message off the saved entry, leaving it empty.
+      final existing = await (db.select(db.savedSearchChatMessages)
+            ..where((t) => t.id.equals(messageId))
+            ..limit(1))
+          .getSingleOrNull();
+      if (existing != null && existing.searchId != searchId) {
+        TLog.w(
+            _tag,
+            'append skipped: $messageId already belongs to '
+            '${existing.searchId} (got $searchId)');
+        return;
+      }
+
       await db.into(db.savedSearchChatMessages).insertOnConflictUpdate(
             SavedSearchChatMessagesCompanion.insert(
               id: messageId,
@@ -543,6 +573,7 @@ class SavedSearchStore with WidgetsBindingObserver {
       TLog.d(_tag, 'append → $searchId:$messageId ($role)');
     } catch (e) {
       TLog.e(_tag, 'append failed for $messageId', error: e);
+      return;
     }
 
     unawaited(_pushAppend(searchId, messageId, role, text, model, sourcesJson, ts));

@@ -18,6 +18,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import '../../../core/di/injection.dart';
 import '../../../core/platform/platform_capabilities.dart';
 import '../../../core/services/background_task_coordinator.dart';
+import '../../../core/services/followup_history.dart';
 import '../../../core/services/saved_search_store.dart';
 import '../../../core/services/telegram_logger.dart';
 import '../../../core/theme/app_colors.dart';
@@ -131,6 +132,20 @@ class SearchFollowUpStore with WidgetsBindingObserver {
   static const kSummarizeThreshold = 10;
   static const kRecentPairsToKeep = 5;
 
+  /// When the chat reaches this many completed user/assistant pairs, the
+  /// UI auto-upgrades the request from Lite → Deep. Mirrors the news
+  /// flow — see [ArticleFollowUpStore.kAutoDeepThreshold] for rationale.
+  static const kAutoDeepThreshold = 10;
+
+  /// Recent-verbatim window in Deep mode (vs [kRecentPairsToKeep] in
+  /// Lite). Larger window because deep models afford more context AND
+  /// because deep is the mode users reach for when they want the model
+  /// to actually re-read several recent exchanges.
+  static const kRecentPairsToKeepDeep = 12;
+
+  /// Hard cap on unique source URLs we re-inject from prior turns.
+  static const kSourceMemoryMax = 20;
+
   final _cache = <String, List<_ChatMessage>>{};
   final _initialAnswers = <String, String>{};
   final _summaries = <String, _SearchConversationSummary>{};
@@ -143,6 +158,10 @@ class SearchFollowUpStore with WidgetsBindingObserver {
 
   /// Prevents concurrent background summarizations for the same query.
   final _summarizingQueries = <String>{};
+
+  /// Per-query guard so a second consolidation can't fire while the
+  /// first one is still in flight.
+  final _consolidatingQueries = <String>{};
 
   /// Tracks whether the host app is currently in the background, so the
   /// completion notification can fire only when the user can't see the
@@ -516,17 +535,27 @@ class SearchFollowUpStore with WidgetsBindingObserver {
             TLog.w('SearchFollowUp',
                 'Context limit hit (400) — force-summarizing ${history.length} entries and retrying');
             try {
-              const recentCount = kRecentPairsToKeep * 2;
+              // Mirror [_buildHistoryWithSummary]: keep a wider verbatim
+              // window when the active turn is deep.
+              final isDeep = mode != 'lite';
+              final pairsToKeep = isDeep
+                  ? kRecentPairsToKeepDeep
+                  : kRecentPairsToKeep;
+              final recentCount = pairsToKeep * 2;
               final splitAt = history.length > recentCount
                   ? history.length - recentCount
                   : (history.length ~/ 2);
               final oldPairs = history.sublist(0, splitAt);
               final recentPairs = history.sublist(splitAt);
 
+              // Recovery summarization tracks active mode: deep turns
+              // get a deep-grade summary so the retry payload reasons
+              // over a high-fidelity blob, not a lossy lite digest.
               final summaryText = await aiService.summarizeHistory(
                 messages: oldPairs,
                 articleContext: query,
                 liteModel: liteModel,
+                summaryModel: isDeep ? deepModel : null,
               );
               if (summaryText.isNotEmpty) {
                 final existingPairs =
@@ -870,6 +899,24 @@ class _SearchFollowUpChatState extends ConsumerState<_SearchFollowUpChat>
   String _elapsedText = '';
   int _idSeq = 0;
 
+  /// Sticky once the 10-pair threshold has triggered an auto Lite → Deep
+  /// upgrade in the current sheet session. Prevents repeated flips after
+  /// the user manually goes back to Lite. Resets on fresh sheet open.
+  bool _autoSwitchedToDeep = false;
+
+  /// Pure history-shaping logic (pair extraction, source memory, mode
+  /// hint, layered summary composition, auto-switch decision). Fully
+  /// covered by `test/core/services/followup_history_test.dart`.
+  static const _historyBuilder = FollowUpHistoryBuilder(
+    config: FollowUpHistoryConfig(
+      summarizeThreshold: SearchFollowUpStore.kSummarizeThreshold,
+      recentPairsLite: SearchFollowUpStore.kRecentPairsToKeep,
+      recentPairsDeep: SearchFollowUpStore.kRecentPairsToKeepDeep,
+      sourceMemoryMax: SearchFollowUpStore.kSourceMemoryMax,
+      autoDeepThreshold: SearchFollowUpStore.kAutoDeepThreshold,
+    ),
+  );
+
   late final AnimationController _entryAnim;
 
   String _nextId() =>
@@ -914,9 +961,6 @@ class _SearchFollowUpChatState extends ConsumerState<_SearchFollowUpChat>
   }
 
   void _autoRetryOrphan(SearchFollowUpStore store) {
-    final providerTag = _useXGrok ? 'xGrok' : 'Gemini';
-    final modeTag = _useDeepModel ? 'Deep' : 'Lite';
-    TLog.i('SearchChat', 'Auto-retrying orphaned question [$providerTag/$modeTag]');
     final orphanedUserMsg = _messages.last;
     final aiMsg = _ChatMessage(
       id: _nextId(),
@@ -925,19 +969,20 @@ class _SearchFollowUpChatState extends ConsumerState<_SearchFollowUpChat>
       isLoading: true,
     );
 
-    final allPairs = <Map<String, String>>[];
-    for (var i = 0; i < _messages.length - 1; i++) {
-      final m = _messages[i];
-      if (m.isLoading || m.isError) continue;
-      if (m.role == 'user' && i + 1 < _messages.length - 1) {
-        final next = _messages[i + 1];
-        if (next.role == 'assistant' && !next.isError && !next.isLoading) {
-          allPairs.add({'role': 'user', 'text': m.text});
-          allPairs.add({'role': 'assistant', 'text': next.text});
-          i++;
-        }
-      }
-    }
+    // Pair up everything before the orphaned user tail. The
+    // [excludeOrphanTail] flag enforces the same look-ahead bound as
+    // the previous inline loop.
+    final allPairs = _historyBuilder.collectCompletedPairs(
+      _asFollowUpMessages(),
+      excludeOrphanTail: true,
+    );
+
+    _maybeAutoSwitchToDeep(store, allPairs);
+
+    final providerTag = _useXGrok ? 'xGrok' : 'Gemini';
+    final modeTag = _useDeepModel ? 'Deep' : 'Lite';
+    TLog.i('SearchChat',
+        'Auto-retrying orphaned question [$providerTag/$modeTag] (pairs=${allPairs.length ~/ 2})');
 
     final history = _buildHistoryWithSummary(store, allPairs);
 
@@ -1127,28 +1172,18 @@ class _SearchFollowUpChatState extends ConsumerState<_SearchFollowUpChat>
     final text = _ctrl.text.trim();
     if (text.isEmpty || _sending) return;
 
+    final store = SearchFollowUpStore.instance;
+    final allPairs = _collectCompletedPairs();
+    _maybeAutoSwitchToDeep(store, allPairs);
+
     final providerTag = _useXGrok ? 'xGrok' : 'Gemini';
     final modeTag = _useDeepModel ? 'Deep' : 'Lite';
-    TLog.i('SearchChat', 'Sending [$providerTag/$modeTag]: "${text.length > 60 ? '${text.substring(0, 60)}…' : text}"');
+    TLog.i('SearchChat',
+        'Sending [$providerTag/$modeTag]: "${text.length > 60 ? '${text.substring(0, 60)}…' : text}" '
+        '(pairs=${allPairs.length ~/ 2})');
 
     _ctrl.clear();
     _focusNode.requestFocus();
-
-    final store = SearchFollowUpStore.instance;
-
-    final allPairs = <Map<String, String>>[];
-    for (var i = 0; i < _messages.length; i++) {
-      final m = _messages[i];
-      if (m.isLoading || m.isError) continue;
-      if (m.role == 'user' && i + 1 < _messages.length) {
-        final next = _messages[i + 1];
-        if (next.role == 'assistant' && !next.isError && !next.isLoading) {
-          allPairs.add({'role': 'user', 'text': m.text});
-          allPairs.add({'role': 'assistant', 'text': next.text});
-          i++;
-        }
-      }
-    }
 
     final history = _buildHistoryWithSummary(store, allPairs);
 
@@ -1185,62 +1220,226 @@ class _SearchFollowUpChatState extends ConsumerState<_SearchFollowUpChat>
     );
   }
 
-  List<Map<String, String>> _buildHistoryWithSummary(
+  /// Adapter from the chat-sheet's private [_ChatMessage] type to the
+  /// neutral DTO consumed by [_historyBuilder]. One pass, called at
+  /// most once per turn.
+  List<FollowUpMessage> _asFollowUpMessages() {
+    return [
+      for (final m in _messages)
+        FollowUpMessage(
+          role: m.role,
+          text: m.text,
+          isLoading: m.isLoading,
+          isError: m.isError,
+          model: m.model,
+          sources: [
+            for (final s in m.sources)
+              FollowUpSourceRef(url: s.url, title: s.title),
+          ],
+        ),
+    ];
+  }
+
+  /// Pairs up every finalized (user, assistant) tuple in [_messages].
+  /// Thin delegation to [_historyBuilder.collectCompletedPairs].
+  List<Map<String, String>> _collectCompletedPairs() {
+    return _historyBuilder.collectCompletedPairs(_asFollowUpMessages());
+  }
+
+  /// One-time automatic upgrade Lite → Deep at the threshold. Provider
+  /// (Gemini / xGrok) is left exactly as the user picked it. Sticky for
+  /// the rest of this sheet session.
+  void _maybeAutoSwitchToDeep(
       SearchFollowUpStore store, List<Map<String, String>> allPairs) {
     final pairCount = allPairs.length ~/ 2;
-    if (pairCount <= SearchFollowUpStore.kSummarizeThreshold) {
-      return allPairs;
-    }
+    final shouldSwitch = _historyBuilder.shouldAutoSwitchToDeep(
+      pairCount: pairCount,
+      currentIsDeep: _useDeepModel,
+      alreadyAutoSwitched: _autoSwitchedToDeep,
+    );
+    if (!shouldSwitch) return;
 
+    setState(() {
+      _useDeepModel = true;
+      _autoSwitchedToDeep = true;
+    });
+    final providerTag = _useXGrok ? 'xGrok' : 'Gemini';
+    TLog.i('SearchChat',
+        'Auto-switched Lite → Deep at $pairCount pairs [$providerTag] '
+        '— provider unchanged, deep summarizer enabled');
+    _showAutoSwitchBanner();
+    _consolidateMemoryWithDeep(store, allPairs);
+  }
+
+  void _showAutoSwitchBanner() {
+    if (!mounted) return;
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    if (messenger == null) return;
+    messenger.hideCurrentSnackBar();
+    messenger.showSnackBar(SnackBar(
+      duration: const Duration(seconds: 4),
+      behavior: SnackBarBehavior.floating,
+      backgroundColor: const Color(0xFF1E1B4B),
+      content: Row(
+        children: [
+          const Icon(LucideIcons.brain, size: 16, color: Color(0xFFC084FC)),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'Switched to Deep — richer recall after 10+ messages',
+              style: GoogleFonts.plusJakartaSans(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w600,
+                color: Colors.white,
+              ),
+            ),
+          ),
+        ],
+      ),
+    ));
+  }
+
+  /// Deep-grade re-summarization run in parallel with the active turn.
+  /// 2 attempts with backoff; failures are logged but never interrupt
+  /// the user-facing answer flow.
+  void _consolidateMemoryWithDeep(
+      SearchFollowUpStore store, List<Map<String, String>> allPairs) {
+    final query = widget.query;
+    if (store._consolidatingQueries.contains(query)) {
+      TLog.d('SearchChat',
+          'Memory consolidation already in flight for "$query" — skipping');
+      return;
+    }
     const recentCount = SearchFollowUpStore.kRecentPairsToKeep * 2;
-    final recentStart = allPairs.length - recentCount;
-    final oldPairs = allPairs.sublist(0, recentStart);
-    final recentPairs = allPairs.sublist(recentStart);
+    if (allPairs.length <= recentCount) return;
+    final oldPairs = allPairs.sublist(0, allPairs.length - recentCount);
     final oldPairCount = oldPairs.length ~/ 2;
+    if (oldPairCount == 0) return;
 
-    final summary = store.getSummary(widget.query);
+    final aiService = ref.read(tutorAiServiceProvider);
+    final settings = ref.read(settingsProvider);
+    final deepModel = settings.deepModel;
+    final liteModel = settings.liteModel;
 
-    if (summary != null && summary.pairsCovered >= oldPairCount) {
-      TLog.d('SearchChat',
-          'Using cached summary (${summary.pairsCovered} pairs) + ${SearchFollowUpStore.kRecentPairsToKeep} recent');
-      return [
-        {
-          'role': 'user',
-          'text':
-              '[Summary of our earlier conversation (${summary.pairsCovered} exchanges)]:\n${summary.text}',
-        },
-        {
-          'role': 'assistant',
-          'text':
-              'I have context from our earlier discussion and will use it to answer your questions.',
-        },
-        ...recentPairs,
-      ];
+    final existing = store.getSummary(query);
+    final messagesToSummarize = <Map<String, String>>[];
+    if (existing != null) {
+      messagesToSummarize.add({
+        'role': 'user',
+        'text': '[Previous lite-grade summary covering '
+            '${existing.pairsCovered} exchanges]:\n${existing.text}',
+      });
+      messagesToSummarize.add({
+        'role': 'assistant',
+        'text': 'Understood — I will refine this with full detail.',
+      });
+      final alreadyCovered = existing.pairsCovered * 2;
+      if (alreadyCovered < oldPairs.length) {
+        messagesToSummarize.addAll(oldPairs.sublist(alreadyCovered));
+      }
+    } else {
+      messagesToSummarize.addAll(oldPairs);
     }
 
-    if (summary != null) {
-      TLog.d('SearchChat',
-          'Stale summary (${summary.pairsCovered}/$oldPairCount pairs) — using it + recent, re-summarizing in background');
-      _triggerBackgroundSummarization(store, summary, oldPairs, oldPairCount);
-      return [
-        {
-          'role': 'user',
-          'text':
-              '[Summary of our earlier conversation (${summary.pairsCovered} exchanges)]:\n${summary.text}',
-        },
-        {
-          'role': 'assistant',
-          'text':
-              'I have context from our earlier discussion and will use it to answer your questions.',
-        },
-        ...recentPairs,
-      ];
+    store._consolidatingQueries.add(query);
+    TLog.i('SearchChat',
+        'Memory consolidation → $oldPairCount pairs with deep model "$deepModel"');
+
+    unawaited(() async {
+      Object? lastError;
+      for (var attempt = 0; attempt < 2; attempt++) {
+        try {
+          if (attempt > 0) {
+            await Future<void>.delayed(Duration(seconds: (attempt + 1) * 4));
+          }
+          final summary = await aiService.summarizeHistory(
+            messages: messagesToSummarize,
+            articleContext: query,
+            summaryModel: deepModel,
+            liteModel: liteModel,
+          );
+          if (summary.isNotEmpty) {
+            // Coverage guard: never regress [pairsCovered] if a
+            // parallel routine summarization already wrote a higher-
+            // coverage summary in the same window.
+            final priorPairs = store.getSummary(query)?.pairsCovered ?? 0;
+            final safePairs =
+                priorPairs > oldPairCount ? priorPairs : oldPairCount;
+            store.saveSummary(query, summary, safePairs);
+            TLog.i('SearchChat',
+                'Memory consolidation ✓ $safePairs pairs → ${summary.length} chars [deep]'
+                '${priorPairs > oldPairCount ? ' (clamped from $oldPairCount; existing covered $priorPairs)' : ''}');
+            return;
+          }
+          TLog.w('SearchChat',
+              'Memory consolidation returned empty (attempt ${attempt + 1}/2)');
+        } catch (e) {
+          lastError = e;
+          TLog.w('SearchChat',
+              'Memory consolidation attempt ${attempt + 1}/2 failed (${e.runtimeType})',
+              error: e);
+        }
+      }
+      if (lastError != null) {
+        TLog.e('SearchChat', 'Memory consolidation gave up after 2 attempts',
+            error: lastError);
+      }
+    }()
+        .whenComplete(() => store._consolidatingQueries.remove(query)));
+  }
+
+  List<Map<String, String>> _buildHistoryWithSummary(
+      SearchFollowUpStore store, List<Map<String, String>> allPairs) {
+    final cached = store.getSummary(widget.query);
+    final cachedAsBuilder = cached == null
+        ? null
+        : FollowUpSummary(
+            text: cached.text,
+            pairsCovered: cached.pairsCovered,
+          );
+
+    final result = _historyBuilder.build(
+      messages: _asFollowUpMessages(),
+      allPairs: allPairs,
+      currentIsDeep: _useDeepModel,
+      cachedSummary: cachedAsBuilder,
+    );
+
+    final recentToKeep = _useDeepModel
+        ? SearchFollowUpStore.kRecentPairsToKeepDeep
+        : SearchFollowUpStore.kRecentPairsToKeep;
+    final srcCount = result.history
+        .where((e) => e['text']?.startsWith('[Sources cited earlier') ?? false)
+        .length;
+    final hintCount = result.history
+        .where((e) => e['text']?.startsWith('[Note:') ?? false)
+        .length;
+
+    if (cached != null && !result.shouldTriggerSummarization) {
+      TLog.d(
+        'SearchChat',
+        'Cached summary (${cached.pairsCovered} pairs) + $recentToKeep recent + '
+            '$srcCount src + $hintCount hint',
+      );
+    } else if (cached != null) {
+      TLog.d(
+        'SearchChat',
+        'Stale summary (${cached.pairsCovered}/${result.oldPairCount} pairs) — '
+            'using it + recent, re-summarizing in background',
+      );
+      _triggerBackgroundSummarization(
+          store, cached, result.oldPairs, result.oldPairCount);
+    } else if (result.shouldTriggerSummarization) {
+      TLog.d(
+        'SearchChat',
+        'No summary — sending $recentToKeep recent + $srcCount src + '
+            '$hintCount hint, triggering background summarization',
+      );
+      _triggerBackgroundSummarization(
+          store, null, result.oldPairs, result.oldPairCount);
     }
 
-    TLog.d('SearchChat',
-        'No summary — sending ${recentPairs.length ~/ 2} recent pairs, triggering background summarization');
-    _triggerBackgroundSummarization(store, null, oldPairs, oldPairCount);
-    return recentPairs;
+    return result.history;
   }
 
   void _triggerBackgroundSummarization(
@@ -1257,7 +1456,12 @@ class _SearchFollowUpChatState extends ConsumerState<_SearchFollowUpChat>
     store._summarizingQueries.add(query);
 
     final aiService = ref.read(tutorAiServiceProvider);
-    final liteModel = ref.read(settingsProvider).liteModel;
+    final settings = ref.read(settingsProvider);
+    // Match the active turn's depth — deep turns get a deep summary so
+    // long-conversation memory keeps the same fidelity as the answer.
+    final useDeepSummarizer = _useDeepModel;
+    final summaryModel = useDeepSummarizer ? settings.deepModel : null;
+    final liteModel = settings.liteModel;
     unawaited(() async {
       try {
         final messagesToSummarize = <Map<String, String>>[];
@@ -1284,11 +1488,21 @@ class _SearchFollowUpChatState extends ConsumerState<_SearchFollowUpChat>
           messages: messagesToSummarize,
           articleContext: query,
           liteModel: liteModel,
+          summaryModel: summaryModel,
         );
         if (summary.isNotEmpty) {
-          store.saveSummary(query, summary, totalOldPairCount);
+          // Coverage guard: never regress [pairsCovered] if a parallel
+          // deep consolidation already wrote a higher-coverage summary
+          // in the same window.
+          final priorPairs = store.getSummary(query)?.pairsCovered ?? 0;
+          final safePairs = priorPairs > totalOldPairCount
+              ? priorPairs
+              : totalOldPairCount;
+          store.saveSummary(query, summary, safePairs);
           TLog.i('SearchChat',
-              'Background summarization complete for "$query" ($totalOldPairCount pairs)');
+              'Background summarization ✓ "$query" ($safePairs pairs) '
+              '${useDeepSummarizer ? '[deep]' : '[lite]'}'
+              '${priorPairs > totalOldPairCount ? ' (clamped from $totalOldPairCount)' : ''}');
         } else {
           TLog.w('SearchChat',
               'Background summarization returned empty for "$query"');

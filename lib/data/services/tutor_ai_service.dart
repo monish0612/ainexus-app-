@@ -463,13 +463,38 @@ class TutorAiService {
 
   // ── Conversation History Summarization ───────────────────────────────────
 
+  /// Summarize prior chat history into a compact memory blob.
+  ///
+  /// Backwards-compatible model selection:
+  ///   • [liteModel]    — the historical "summarizer model" slot. Backend
+  ///                      reads this as the model id to invoke. Always
+  ///                      passed through when set.
+  ///   • [summaryModel] — forward-looking explicit override. When set, the
+  ///                      same id is also written to `summaryModel` on the
+  ///                      wire so a backend that prefers an explicit field
+  ///                      can pick it up; the legacy `liteModel` slot is
+  ///                      simultaneously upgraded to this id so today's
+  ///                      backend (which reads `liteModel`) actually uses
+  ///                      the deep model when the caller asks for it. This
+  ///                      is how long-conversation memory consolidation
+  ///                      gets a deep-grade summary without requiring a
+  ///                      backend change.
   Future<String> summarizeHistory({
     required List<Map<String, String>> messages,
     String? articleContext,
     String? liteModel,
+    String? summaryModel,
     CancelToken? cancelToken,
   }) async {
-    TLog.d('TutorAI', 'Summarize history → ${messages.length} msgs, ctx="${articleContext ?? ''}"');
+    final summaryModelTrimmed = summaryModel?.trim();
+    final hasSummaryOverride =
+        summaryModelTrimmed != null && summaryModelTrimmed.isNotEmpty;
+    final modelTag = hasSummaryOverride ? summaryModelTrimmed : (liteModel ?? '');
+    TLog.d(
+      'TutorAI',
+      'Summarize history → ${messages.length} msgs, ctx="${articleContext ?? ''}", '
+          'model="$modelTag"${hasSummaryOverride ? ' (deep)' : ''}',
+    );
     try {
       final body = <String, dynamic>{
         'messages': messages,
@@ -477,11 +502,20 @@ class TutorAiService {
       if (articleContext != null && articleContext.isNotEmpty) {
         body['articleContext'] = articleContext;
       }
-      _addLiteModel(body, liteModel);
+      // When a summary-specific model is provided, route both the new
+      // explicit field AND the legacy liteModel slot to it so old + new
+      // backends both honour the upgrade. Otherwise behave exactly as
+      // before — liteModel-only.
+      if (hasSummaryOverride) {
+        body['summaryModel'] = summaryModelTrimmed;
+        body['liteModel'] = summaryModelTrimmed;
+      } else {
+        _addLiteModel(body, liteModel);
+      }
       final response = await _apiClient.post<Object?>(
         ApiEndpoints.aiSummarizeHistory,
         data: body,
-        options: Options(receiveTimeout: const Duration(seconds: 45)),
+        options: Options(receiveTimeout: const Duration(seconds: 60)),
         cancelToken: cancelToken,
       );
       final data = _asMap(response.data);
@@ -489,7 +523,11 @@ class TutorAiService {
       if (summary.isEmpty) {
         TLog.w('TutorAI', 'Empty summarize-history response');
       } else {
-        TLog.i('TutorAI', 'SummarizeHistory ✓ model=${data?['model']} ${summary.length} chars');
+        TLog.i(
+          'TutorAI',
+          'SummarizeHistory ✓ model=${data?['model']} ${summary.length} chars'
+              '${hasSummaryOverride ? ' [deep-override]' : ''}',
+        );
       }
       return summary;
     } catch (e) {

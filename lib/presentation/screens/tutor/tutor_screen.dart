@@ -576,6 +576,15 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
           mode: mode,
         );
         if (!mounted) return;
+        // Race-safe assignment: only adopt this draft id if no other
+        // path (e.g. Path C in [_toggleSaveResult] firing on a rapid
+        // tap) has already populated _activeSearchId. If we lost the
+        // race, immediately discard the draft so it doesn't pollute
+        // History or wait 24 h for GC.
+        if (_activeSearchId != null) {
+          unawaited(store.discardDraftIfAny(entry.id));
+          return;
+        }
         setState(() {
           _activeSearchId = entry.id;
           _activeSearchIsSaved = false;
