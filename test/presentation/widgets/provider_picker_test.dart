@@ -492,4 +492,343 @@ void main() {
       expect(find.text('Claude'), findsOneWidget);
     });
   });
+
+  // ── Smart up/down anchoring (regression guard) ───────────────────────────
+  //
+  // Real-world bug the user hit: in both the saved-search detail sheet and
+  // the FAB follow-up chat, the provider chip lives in the BOTTOM input bar.
+  // The popover used to always drop DOWN, which either pushed it off-screen
+  // or made it visually overlap the input field (looked broken). The fix:
+  // measure available space below the chip vs above it and flip direction
+  // when the chip is sitting in the bottom of the visible area.
+  group('ProviderPicker — smart up/down anchoring', () {
+    testWidgets(
+        'menu opens UPWARD when the chip lives at the bottom of the screen',
+        (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: ThemeData(extensions: const [AppColors.dark]),
+          home: Scaffold(
+            // Mount the picker near the bottom edge — exactly where the
+            // input-bar chip lives in our two bottom-sheet flows.
+            body: Stack(
+              children: [
+                Positioned(
+                  right: 16,
+                  bottom: 24,
+                  child: ProviderPicker(
+                    options: const [_gemini, _xgrok],
+                    selectedId: 'gemini',
+                    onChanged: (_) {},
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Open the popover.
+      await tester.tap(find.byIcon(LucideIcons.chevronDown));
+      await tester.pumpAndSettle();
+
+      // Chip rect uses the FIRST 'Gemini' (the chip itself); menu is
+      // located via 'xGrok' which only exists inside the popover.
+      final chipRect = tester.getRect(find.text('Gemini').first);
+      final menuItemRect = tester.getRect(find.text('xGrok'));
+
+      // The "xGrok" menu item must sit ABOVE the chip's top edge — i.e.
+      // the popover flipped upward instead of dropping over the bottom
+      // safe area / off-screen.
+      expect(menuItemRect.bottom, lessThanOrEqualTo(chipRect.top),
+          reason:
+              'menu should flip upward when chip is in the bottom of the screen');
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets(
+        'menu opens DOWNWARD (default) when the chip is in the top of the screen',
+        (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: ThemeData(extensions: const [AppColors.dark]),
+          home: Scaffold(
+            body: Stack(
+              children: [
+                Positioned(
+                  right: 16,
+                  top: 24,
+                  child: ProviderPicker(
+                    options: const [_gemini, _xgrok],
+                    selectedId: 'gemini',
+                    onChanged: (_) {},
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byIcon(LucideIcons.chevronDown));
+      await tester.pumpAndSettle();
+
+      final chipRect = tester.getRect(find.text('Gemini').first);
+      final menuItemRect = tester.getRect(find.text('xGrok'));
+
+      // Default direction: menu sits BELOW the chip's bottom edge.
+      expect(menuItemRect.top, greaterThanOrEqualTo(chipRect.bottom),
+          reason: 'menu should drop downward when chip has room below');
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets(
+        'menu fits inside a tall option list by scrolling rather than '
+        'overflowing the visible area', (tester) async {
+      const claude = ProviderOption(
+        id: 'claude',
+        label: 'Claude',
+        icon: LucideIcons.sparkles,
+        color: Color(0xFFD97757),
+      );
+      const opus = ProviderOption(
+        id: 'opus',
+        label: 'Opus',
+        icon: LucideIcons.brain,
+        color: Color(0xFFA855F7),
+      );
+      const o1 = ProviderOption(
+        id: 'o1',
+        label: 'o1-pro',
+        icon: LucideIcons.bot,
+        color: Color(0xFF10A37F),
+      );
+
+      // 5 options on a 400x600 viewport — without scrolling, the menu
+      // would be ~256 px tall and could overflow the smaller half.
+      tester.view.physicalSize = const Size(400 * 3, 600 * 3);
+      tester.view.devicePixelRatio = 3.0;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: ThemeData(extensions: const [AppColors.dark]),
+          home: Scaffold(
+            body: Stack(
+              children: [
+                Positioned(
+                  right: 16,
+                  top: 280,
+                  child: ProviderPicker(
+                    options: const [_gemini, _xgrok, claude, opus, o1],
+                    selectedId: 'gemini',
+                    onChanged: (_) {},
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Gemini'));
+      await tester.pumpAndSettle();
+
+      // All five labels are findable in the menu (the SingleChildScrollView
+      // builds them eagerly; only painting is virtualised on overflow).
+      expect(find.text('Gemini'), findsAtLeastNWidgets(1));
+      expect(find.text('xGrok'), findsOneWidget);
+      expect(find.text('Claude'), findsOneWidget);
+      expect(find.text('Opus'), findsOneWidget);
+      expect(find.text('o1-pro'), findsOneWidget);
+
+      // The menu's painted bounds must fit within the screen — the
+      // picker auto-bounded its max-height and gave the inner column a
+      // SingleChildScrollView so excess content scrolls.
+      final firstItem = tester.getRect(find.text('xGrok'));
+      final lastItem = tester.getRect(find.text('o1-pro'));
+      expect(firstItem.top, greaterThanOrEqualTo(0.0));
+      expect(lastItem.bottom, lessThanOrEqualTo(600.0),
+          reason: 'menu must clip to viewport on a 600 px tall screen');
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets(
+        'menu does NOT crash on a tiny viewport too small to fit it (defensive '
+        'safe-clamp branch — split-screen / foldable / robustness)',
+        (tester) async {
+      // Sub-180 px viewport: smaller than our base 172 px menu width
+      // plus the 8 px insets. Real phones are never this small but this
+      // exercises the [_safeClamp] degenerate branch so a synthetic
+      // window resize can never throw a clamp assertion in production.
+      tester.view.physicalSize = const Size(160 * 3, 320 * 3);
+      tester.view.devicePixelRatio = 3.0;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: ThemeData(extensions: const [AppColors.dark]),
+          home: Scaffold(
+            body: Center(
+              child: ProviderPicker(
+                options: const [_gemini, _xgrok],
+                selectedId: 'gemini',
+                onChanged: (_) {},
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Gemini'));
+      await tester.pumpAndSettle();
+
+      // No clamp / layout exception thrown — menu adapted to the
+      // available width via the menuWidth ceiling clamp.
+      expect(tester.takeException(), isNull);
+      // Menu still renders the alternate option so the user can pick.
+      expect(find.text('xGrok'), findsOneWidget);
+    });
+
+    testWidgets(
+        'extremely long labels truncate with ellipsis instead of pushing '
+        'the menu wider than the chip anchor', (tester) async {
+      const longLabel = ProviderOption(
+        id: 'extralong',
+        label: 'A Very Long Provider Name That Should Get Ellipsised',
+        icon: LucideIcons.bot,
+        color: Color(0xFFFF8800),
+      );
+      await tester.pumpWidget(
+        _wrap(
+          ProviderPicker(
+            options: const [_gemini, longLabel],
+            selectedId: 'gemini',
+            onChanged: (_) {},
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Gemini'));
+      await tester.pumpAndSettle();
+
+      // Find the long-label Text inside the menu. It must be marked
+      // with overflow=ellipsis; otherwise a wrapping label would inflate
+      // the menu height beyond our 48 px-per-row geometry estimate.
+      final longText = find.byWidgetPredicate((w) =>
+          w is Text &&
+          w.data == 'A Very Long Provider Name That Should Get Ellipsised');
+      expect(longText, findsOneWidget);
+      final widget = tester.widget<Text>(longText);
+      expect(widget.overflow, TextOverflow.ellipsis);
+      expect(widget.maxLines, 1);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets(
+        'chip in the screen MIDDLE keeps the conventional drop-down '
+        'direction (no spurious flips)', (tester) async {
+      tester.view.physicalSize = const Size(400 * 3, 800 * 3);
+      tester.view.devicePixelRatio = 3.0;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: ThemeData(extensions: const [AppColors.dark]),
+          home: Scaffold(
+            body: Stack(
+              children: [
+                Positioned(
+                  right: 16,
+                  // Dead centre of an 800 px viewport.
+                  top: 380,
+                  child: ProviderPicker(
+                    options: const [_gemini, _xgrok],
+                    selectedId: 'gemini',
+                    onChanged: (_) {},
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Gemini'));
+      await tester.pumpAndSettle();
+
+      final chipRect = tester.getRect(find.text('Gemini').first);
+      final menuItemRect = tester.getRect(find.text('xGrok'));
+      expect(menuItemRect.top, greaterThanOrEqualTo(chipRect.bottom),
+          reason:
+              'mid-screen chips must drop DOWN, not flip up — no spurious flips');
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets(
+        'menu stays inside the visible area when the keyboard is open',
+        (tester) async {
+      // Set the test viewport AND its window insets so the picker —
+      // which reads MediaQuery from the popup route's own context (root
+      // overlay, not our Builder) — sees a realistic keyboard inset.
+      tester.view.physicalSize = const Size(400 * 3, 800 * 3);
+      tester.view.devicePixelRatio = 3.0;
+      tester.view.viewInsets = const FakeViewPadding(bottom: 380 * 3);
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+        tester.view.resetViewInsets();
+      });
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: ThemeData(extensions: const [AppColors.dark]),
+          home: Scaffold(
+            body: Stack(
+              children: [
+                Positioned(
+                  right: 16,
+                  // Just above the keyboard's top edge — exactly where
+                  // the input-bar chip sits when the keyboard is up in
+                  // production.
+                  top: 380,
+                  child: ProviderPicker(
+                    options: const [_gemini, _xgrok],
+                    selectedId: 'gemini',
+                    onChanged: (_) {},
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Gemini'));
+      await tester.pumpAndSettle();
+
+      // The 'xGrok' item must be ABOVE the keyboard's top edge (y ≤ 420
+      // — screen height 800 minus keyboard 380).
+      final menuItemRect = tester.getRect(find.text('xGrok'));
+      expect(menuItemRect.bottom, lessThanOrEqualTo(420.0),
+          reason: 'menu must not extend below the keyboard inset');
+      expect(tester.takeException(), isNull);
+    });
+  });
 }

@@ -304,6 +304,12 @@ class _ProviderMenuRoute extends PopupRoute<String> {
   final String selectedId;
   final AppColors colors;
 
+  /// True when the menu was placed ABOVE the chip because there wasn't
+  /// enough room below (e.g. the chip lives in a bottom-sheet input
+  /// bar). Drives the scale-in transition origin so the menu always
+  /// appears to grow OUT of the chip, never from the screen centre.
+  bool _openedUpward = false;
+
   @override
   Color? get barrierColor => null;
 
@@ -329,26 +335,115 @@ class _ProviderMenuRoute extends PopupRoute<String> {
   }
 
   Widget _positioned(BuildContext context) {
-    // Match the chip's right edge, drop down by chip-height + 6px gap.
-    // We use the dynamic overlay size so rotation / window-resize on
-    // tablets is handled correctly without re-anchoring code.
-    const menuWidth = 168.0;
+    // ── Geometry ──────────────────────────────────────────────────────
+    // Match the chip's right edge horizontally so the menu reads as a
+    // direct continuation of the chip. Vertically, prefer to drop DOWN
+    // (the conventional direction users expect), but flip UP whenever
+    // the chip is sitting in the bottom of the visible area — exactly
+    // the situation in our two bottom-sheet input bars (saved-search
+    // detail + FAB chat) and in the Tutor screen's main result page
+    // when the keyboard is up.
+    const baseMenuWidth = 172.0;
     const gap = 6.0;
-    final right = (overlaySize.width - (anchor.dx + anchorSize.width))
-        .clamp(8.0, double.infinity);
-    final top = (anchor.dy + anchorSize.height + gap)
-        .clamp(0.0, overlaySize.height - 1);
+    const sideInset = 8.0;
 
+    // Adapt menu width to extreme viewports so we never try to pin a
+    // 172 px panel on a 160 px window. Real phones never hit this; it's
+    // a defensive guard for split-screen / foldable / tiny-tablet edge
+    // cases so the geometry math below stays valid.
+    final menuWidth = baseMenuWidth.clamp(
+      120.0,
+      (overlaySize.width - sideInset * 2).clamp(120.0, double.infinity),
+    );
+
+    // Per-option visual height: 22 line + 18 vertical padding. With the
+    // outer card's 4 px padding-top + 4 px padding-bottom that's exactly
+    // 48 px per row. We bias slightly above the visual minimum so a
+    // line-wrap (extra-long label) still fits inside our flip threshold.
+    final estimatedHeight = options.length * 48.0 + 16.0;
+
+    final mq = MediaQuery.of(context);
+    final visibleBottom = overlaySize.height - mq.viewInsets.bottom;
+    final visibleTop = mq.padding.top;
+
+    // Space measured from the chip edge in each direction, ignoring the
+    // keyboard / system insets so the menu always lands inside the
+    // user-visible window.
+    final chipBottomOnScreen = anchor.dy + anchorSize.height;
+    final spaceBelow = (visibleBottom - chipBottomOnScreen - gap)
+        .clamp(0.0, double.infinity);
+    final spaceAbove = (anchor.dy - visibleTop - gap)
+        .clamp(0.0, double.infinity);
+
+    // Flip up when below is too cramped for the menu AND above has more
+    // room. The strict `>` against `spaceBelow` prevents flicker when
+    // both spaces are close (we keep the conventional drop-down).
+    _openedUpward = spaceBelow < estimatedHeight && spaceAbove > spaceBelow;
+
+    // Right-edge alignment, defended against degenerate widths.
+    final desiredRight =
+        overlaySize.width - (anchor.dx + anchorSize.width);
+    final maxRight = overlaySize.width - menuWidth - sideInset;
+    final right = _safeClamp(desiredRight, sideInset, maxRight);
+
+    // Bound the menu to the larger visible half so a 5-option list
+    // scrolls inside the card instead of overflowing the screen.
+    final maxHeight = _safeClamp(
+      _openedUpward ? spaceAbove : spaceBelow,
+      80.0,
+      overlaySize.height,
+    );
+
+    if (_openedUpward) {
+      // Position by `bottom` so the menu's bottom edge sits gap-px
+      // above the chip's top edge — this is what makes it visually
+      // "grow out of" the chip even when the keyboard is up.
+      final bottomFromOverlay =
+          (overlaySize.height - anchor.dy + gap).clamp(0.0, double.infinity);
+      return Positioned(
+        right: right,
+        bottom: bottomFromOverlay,
+        width: menuWidth,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: maxHeight),
+          child: _MenuCard(
+            options: options,
+            selectedId: selectedId,
+            colors: colors,
+          ),
+        ),
+      );
+    }
+
+    // Drop-down. Cap the top position so the menu's bottom edge always
+    // lands inside the visible area; if the menu is taller than the
+    // viewport we simply start it at the chip and let the inner
+    // SingleChildScrollView handle the overflow.
+    final maxTop = overlaySize.height - estimatedHeight - sideInset;
+    final top = _safeClamp(chipBottomOnScreen + gap, 0.0, maxTop);
     return Positioned(
       right: right,
       top: top,
       width: menuWidth,
-      child: _MenuCard(
-        options: options,
-        selectedId: selectedId,
-        colors: colors,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxHeight: maxHeight),
+        child: _MenuCard(
+          options: options,
+          selectedId: selectedId,
+          colors: colors,
+        ),
       ),
     );
+  }
+
+  /// Saturating clamp — when [lower] exceeds [upper] (degenerate viewport
+  /// where the screen is too small to fit the menu and the safe inset),
+  /// pin to [lower] instead of throwing. Real production devices never
+  /// trigger this branch; it's a defensive guard for split-screen /
+  /// foldable / unit-test edge cases.
+  static double _safeClamp(double value, double lower, double upper) {
+    if (lower > upper) return lower;
+    return value.clamp(lower, upper);
   }
 
   @override
@@ -366,9 +461,11 @@ class _ProviderMenuRoute extends PopupRoute<String> {
     return FadeTransition(
       opacity: curved,
       child: ScaleTransition(
-        // Scale from the top-right (where the chip lives) so the menu
-        // appears to "drop" out of the chip rather than pop from centre.
-        alignment: Alignment.topRight,
+        // Origin flips with the open direction: drop-down scales from
+        // top-right (under the chip), drop-up scales from bottom-right
+        // (above the chip). Either way it grows out of the chip itself.
+        alignment:
+            _openedUpward ? Alignment.bottomRight : Alignment.topRight,
         scale: Tween<double>(begin: 0.92, end: 1.0).animate(curved),
         child: child,
       ),
@@ -398,24 +495,31 @@ class _MenuCard extends StatelessWidget {
           border: Border.all(color: colors.border),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: 0.18),
+              color: Colors.black.withValues(alpha: 0.22),
               blurRadius: 24,
               offset: const Offset(0, 10),
             ),
           ],
         ),
         padding: const EdgeInsets.all(4),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            for (final option in options)
-              _MenuItem(
-                option: option,
-                selected: option.id == selectedId,
-                colors: colors,
-                onTap: () => Navigator.of(context).pop(option.id),
-              ),
-          ],
+        // SingleChildScrollView with shrinkWrap'd Column lets the card
+        // gracefully scroll when the parent ConstrainedBox limits its
+        // max-height below the natural content height (rare, only with
+        // 4+ providers + keyboard up). For the common 1-2 option case
+        // it's a free no-op.
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (final option in options)
+                _MenuItem(
+                  option: option,
+                  selected: option.id == selectedId,
+                  colors: colors,
+                  onTap: () => Navigator.of(context).pop(option.id),
+                ),
+            ],
+          ),
         ),
       ),
     );
@@ -486,6 +590,8 @@ class _MenuItemState extends State<_MenuItem> {
                 Expanded(
                   child: Text(
                     option.label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: GoogleFonts.plusJakartaSans(
                       fontSize: 12.5,
                       fontWeight:
