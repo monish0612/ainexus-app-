@@ -10,6 +10,7 @@ import '../../../core/di/injection.dart';
 import '../../../core/services/telegram_logger.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../domain/entities/saved_search.dart';
+import '../../widgets/app_toast.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  SavedSearchesSheet — bottom-sheet history view for InsightAI saved items
@@ -424,36 +425,18 @@ class _SavedSearchesSheetState extends ConsumerState<SavedSearchesSheet> {
 
   Future<void> _onDelete(SavedSearchEntry entry) async {
     final store = ref.read(savedSearchStoreProvider);
-    final messenger = ScaffoldMessenger.maybeOf(context);
     HapticFeedback.lightImpact();
     await store.delete(entry.id);
+    if (!mounted) return;
     final label = entry.title.isEmpty ? entry.query : entry.title;
-    final shortLabel = label.length > 36 ? '${label.substring(0, 33)}\u2026' : label;
-    messenger?.hideCurrentSnackBar();
-    messenger?.showSnackBar(SnackBar(
-      content: Text(
-        'Removed "$shortLabel"',
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: GoogleFonts.plusJakartaSans(
-          fontSize: 13,
-          fontWeight: FontWeight.w600,
-          color: Colors.white,
-        ),
-      ),
-      backgroundColor: const Color(0xFF1F2937),
-      behavior: SnackBarBehavior.floating,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(14),
-      ),
-      margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-      duration: const Duration(milliseconds: 2200),
-      action: SnackBarAction(
-        label: 'Undo',
-        textColor: const Color(0xFFC084FC),
-        onPressed: () => store.undelete(entry.id),
-      ),
-    ));
+    final shortLabel =
+        label.length > 36 ? '${label.substring(0, 33)}\u2026' : label;
+    AppToast.show(
+      context,
+      message: 'Removed "$shortLabel"',
+      action: 'Undo',
+      onAction: () => store.undelete(entry.id),
+    );
   }
 
   // ── Grouping ──────────────────────────────────────────────────────────────

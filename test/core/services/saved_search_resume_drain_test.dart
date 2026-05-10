@@ -34,6 +34,7 @@ import 'package:dio/dio.dart';
 import 'package:drift/native.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class _ProgrammableApi extends ApiClient {
   /// Per-call response sequence keyed by "METHOD path" prefix.
@@ -156,12 +157,18 @@ void main() {
     late _LogSpy logs;
 
     setUp(() {
+      // Mock SharedPreferences so the tombstone watermark read inside the
+      // store's _pullTombstonesFromServer doesn't log a "watermark read
+      // failed" warning during tests that don't care about delete-sync.
+      SharedPreferences.setMockInitialValues({});
       db = AppDatabase.forTesting(NativeDatabase.memory());
       api = _ProgrammableApi();
-      // Pre-seed the eager index pull (init() fires it unawaited).
-      // We let it succeed (empty list); test bodies clear the call log
-      // afterwards if they need a clean slate.
+      // Pre-seed the eager index pull + tombstones pull (init() fires
+      // both unawaited). We let them succeed (empty list); test bodies
+      // clear the call log afterwards if they need a clean slate.
       api.behaviours['GET /api/v1/saved-searches'] = [_Behavior.ok()];
+      api.behaviours['GET /api/v1/saved-searches/tombstones'] =
+          [_Behavior.ok()];
       logs = _LogSpy()..install();
       store = SavedSearchStore.instance;
       store.debugResetForTests();

@@ -24,6 +24,7 @@ import '../../../data/local/database/app_database.dart';
 import '../../../domain/entities/saved_search.dart';
 import '../../../domain/entities/tutor_entities.dart';
 import '../../widgets/app_shell.dart';
+import '../../widgets/app_toast.dart';
 import '../../widgets/compact_header.dart';
 import '../../widgets/provider_picker.dart';
 import '../../widgets/sources_disclosure.dart';
@@ -3017,12 +3018,10 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
   /// circular import between the sheet (which renders saved entries via
   /// existing result widgets) and tutor_screen.
   ///
-  /// Pending save/remove snackbars are dismissed before the sheet opens
-  /// so a "Saved to history" toast doesn't trail across routes and end up
-  /// floating over the detail sheet's input bar (which used to look like
-  /// the toast was "stuck").
+  /// Any in-flight save/remove [AppToast] is dismissed before the sheet
+  /// opens so a "Saved to history" toast doesn't trail across routes.
   Future<void> _openSavedSearchesSheet() async {
-    ScaffoldMessenger.maybeOf(context)?.hideCurrentSnackBar();
+    AppToast.hide();
     final selected = await showModalBottomSheet<SavedSearchEntry>(
       context: context,
       isScrollControlled: true,
@@ -3030,7 +3029,7 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
       builder: (_) => const SavedSearchesSheet(),
     );
     if (!mounted || selected == null) return;
-    ScaffoldMessenger.maybeOf(context)?.hideCurrentSnackBar();
+    AppToast.hide();
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -3039,42 +3038,10 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
     );
   }
 
-  /// Compact, dark-themed snackbar used for save/remove toasts. Forces
-  /// a short duration (1.8 s — short enough that it doesn't trail across
-  /// navigation, long enough that Undo is still reachable) and a tight
-  /// `floating` margin so it never sits flush against the bottom edge
-  /// where bottom-sheet input bars live.
-  SnackBar _saveSnack({
-    required String message,
-    SnackBarAction? action,
-    bool error = false,
-  }) {
-    return SnackBar(
-      content: Text(
-        message,
-        style: GoogleFonts.plusJakartaSans(
-          fontSize: 13,
-          fontWeight: FontWeight.w600,
-          color: Colors.white,
-        ),
-      ),
-      backgroundColor:
-          error ? const Color(0xFF991B1B) : const Color(0xFF1F2937),
-      behavior: SnackBarBehavior.floating,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(14),
-      ),
-      margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-      duration: const Duration(milliseconds: 1800),
-      action: action,
-    );
-  }
-
   Future<void> _toggleSaveResult(Object result) async {
     // Re-entrancy guard: ignore taps while a previous toggle is in flight.
     if (_saveToggleInFlight) return;
     final store = ref.read(savedSearchStoreProvider);
-    final messenger = ScaffoldMessenger.maybeOf(context);
     HapticFeedback.lightImpact();
     setState(() => _saveToggleInFlight = true);
 
@@ -3087,19 +3054,17 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
         final removedId = _activeSearchId!;
         setState(() => _activeSearchIsSaved = false);
         await store.delete(removedId);
-        messenger?.hideCurrentSnackBar();
-        messenger?.showSnackBar(_saveSnack(
+        if (!mounted) return;
+        AppToast.show(
+          context,
           message: 'Removed from history',
-          action: SnackBarAction(
-            label: 'Undo',
-            textColor: const Color(0xFFC084FC),
-            onPressed: () async {
-              await store.undelete(removedId);
-              if (!mounted) return;
-              setState(() => _activeSearchIsSaved = true);
-            },
-          ),
-        ));
+          action: 'Undo',
+          onAction: () async {
+            await store.undelete(removedId);
+            if (!mounted) return;
+            setState(() => _activeSearchIsSaved = true);
+          },
+        );
         return;
       }
 
@@ -3115,22 +3080,19 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
           if (!mounted) return;
           if (promoted) {
             setState(() => _activeSearchIsSaved = true);
-            messenger?.hideCurrentSnackBar();
-            messenger?.showSnackBar(_saveSnack(
+            AppToast.show(
+              context,
               message: 'Saved to history',
-              action: SnackBarAction(
-                label: 'Undo',
-                textColor: const Color(0xFFC084FC),
-                onPressed: () async {
-                  // Undo of save = soft-delete (matches the gold-standard
-                  // article-chat undo). The row stays in DB long enough for
-                  // a follow-up Undo, then GC reaps it after _kHardDeleteTtl.
-                  await store.delete(draftId);
-                  if (!mounted) return;
-                  setState(() => _activeSearchIsSaved = false);
-                },
-              ),
-            ));
+              action: 'Undo',
+              onAction: () async {
+                // Undo of save = soft-delete (matches the gold-standard
+                // article-chat undo). The row stays in DB long enough for
+                // a follow-up Undo, then GC reaps it after _kHardDeleteTtl.
+                await store.delete(draftId);
+                if (!mounted) return;
+                setState(() => _activeSearchIsSaved = false);
+              },
+            );
           } else {
             // Promote returned false — possible races: the draft was
             // already promoted (e.g. concurrent toggle) or the row was
@@ -3142,11 +3104,11 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
         } catch (e) {
           TLog.e('Tutor', 'promoteToSaved failed', error: e);
           if (!mounted) return;
-          messenger?.hideCurrentSnackBar();
-          messenger?.showSnackBar(_saveSnack(
+          AppToast.show(
+            context,
             message: 'Could not save — please try again',
-            error: true,
-          ));
+            variant: AppToastVariant.error,
+          );
         }
         return;
       }
@@ -3169,27 +3131,24 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
           _activeSearchId = entry.id;
           _activeSearchIsSaved = true;
         });
-        messenger?.hideCurrentSnackBar();
-        messenger?.showSnackBar(_saveSnack(
+        AppToast.show(
+          context,
           message: 'Saved to history',
-          action: SnackBarAction(
-            label: 'Undo',
-            textColor: const Color(0xFFC084FC),
-            onPressed: () async {
-              await store.delete(entry.id);
-              if (!mounted) return;
-              setState(() => _activeSearchIsSaved = false);
-            },
-          ),
-        ));
+          action: 'Undo',
+          onAction: () async {
+            await store.delete(entry.id);
+            if (!mounted) return;
+            setState(() => _activeSearchIsSaved = false);
+          },
+        );
       } catch (e) {
         TLog.e('Tutor', 'saveResult failed', error: e);
         if (!mounted) return;
-        messenger?.hideCurrentSnackBar();
-        messenger?.showSnackBar(_saveSnack(
+        AppToast.show(
+          context,
           message: 'Could not save — please try again',
-          error: true,
-        ));
+          variant: AppToastVariant.error,
+        );
       }
     } finally {
       if (mounted) setState(() => _saveToggleInFlight = false);

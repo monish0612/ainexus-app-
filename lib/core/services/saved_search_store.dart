@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:drift/drift.dart' as drift;
 import 'package:flutter/widgets.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../data/local/database/app_database.dart';
@@ -60,6 +61,19 @@ class SavedSearchStore with WidgetsBindingObserver {
   static const _kOrphanTtl = Duration(hours: 1);
   static const _kHardDeleteTtl = Duration(days: 7);
 
+  /// SharedPreferences key for the cross-device delete-sync watermark.
+  /// Stores the ISO-8601 timestamp of the most recent tombstone seen so
+  /// the next /tombstones GET only returns the delta. Persisted across
+  /// app restarts.
+  static const _kTombstoneWatermarkKey =
+      'savedSearchStore.lastTombstonePullAt';
+
+  /// In-memory mirror of the watermark, populated lazily on first pull.
+  /// Falls back to null (i.e. "give me all tombstones since the dawn of
+  /// time, capped at server-side LIMIT 1000") when SharedPreferences
+  /// hasn't been initialized yet.
+  String? _tombstoneWatermark;
+
   /// Drafts that have been abandoned (user navigated away / killed app
   /// without saving or clearing) are hard-deleted after this window. The
   /// 24-hour value is generous enough that a user who minimises their
@@ -98,6 +112,7 @@ class SavedSearchStore with WidgetsBindingObserver {
     _api = null;
     _retryQueue.clear();
     _initialFetchDone = false;
+    _tombstoneWatermark = null;
     _gcTimer?.cancel();
     _gcTimer = null;
     if (_observerBound) {
@@ -105,6 +120,12 @@ class SavedSearchStore with WidgetsBindingObserver {
       _observerBound = false;
     }
   }
+
+  /// Test-only invocation of the tombstone pull. Production code calls
+  /// it from [_pullIndexFromServer]. Exposed so the cross-device delete
+  /// sync E2E test can drive it deterministically.
+  @visibleForTesting
+  Future<void> debugPullTombstones() => _pullTombstonesFromServer();
 
   /// Test-only invocation of the GC sweeper.
   @visibleForTesting
@@ -781,7 +802,12 @@ class SavedSearchStore with WidgetsBindingObserver {
     try {
       final response = await api.get<Object?>(ApiEndpoints.savedSearches);
       final data = response.data;
-      if (data is! List) return;
+      if (data is! List) {
+        // Even if the index pull yielded nothing parseable, run the
+        // tombstone pull so cross-device deletes still propagate.
+        unawaited(_pullTombstonesFromServer());
+        return;
+      }
 
       for (final item in data) {
         if (item is! Map) continue;
@@ -817,6 +843,102 @@ class SavedSearchStore with WidgetsBindingObserver {
       }
     } catch (e) {
       TLog.w(_tag, 'index pull parse error', error: e);
+    }
+    // ALWAYS pull tombstones after the index, even if the index call
+    // failed — the two endpoints are independent and a single network
+    // hiccup on one shouldn't pause cross-device delete sync on the
+    // other. Awaited so the lifecycle hook can sequence GC/retry after.
+    await _pullTombstonesFromServer();
+  }
+
+  /// Cross-device delete sync. Pulls the server-side tombstone log of
+  /// saved-searches that have been deleted on any device, applies them
+  /// locally (hard-delete + cascade chat/summaries), and advances the
+  /// per-install watermark so the next call only ships the delta.
+  ///
+  /// Robustness:
+  ///   • Idempotent — applying the same tombstone twice is a no-op.
+  ///   • Watermark advances ONLY after a successful local apply, so a
+  ///     mid-sync crash never loses tombstones (we'll re-fetch them).
+  ///   • A 404 (endpoint not deployed) is downgraded to a TLog.w one-
+  ///     time message instead of a loud TLog.e — keeps Telegram clean
+  ///     on older backends while still surfacing the diagnostic.
+  ///   • All failures are swallowed (logged) and never propagated to
+  ///     the UI — the rest of the app can carry on offline.
+  Future<void> _pullTombstonesFromServer() async {
+    final api = _api;
+    final db = _db;
+    if (api == null || db == null) return;
+    try {
+      final since = await _getTombstoneWatermark();
+      final url = since == null
+          ? ApiEndpoints.savedSearchTombstones
+          : '${ApiEndpoints.savedSearchTombstones}?since=${Uri.encodeQueryComponent(since)}';
+      final response = await api.get<Object?>(url);
+      final data = response.data;
+      if (data is! List) return;
+      if (data.isEmpty) return;
+
+      String maxDeletedAt = since ?? '';
+      int applied = 0;
+      for (final item in data) {
+        if (item is! Map) continue;
+        final raw = item.map((k, v) => MapEntry(k.toString(), v));
+        final id = raw['id']?.toString() ?? '';
+        final deletedAt =
+            raw['deletedAt']?.toString() ?? raw['deleted_at']?.toString() ?? '';
+        if (id.isEmpty) continue;
+
+        // Apply the tombstone locally — hard-delete the row + cascade
+        // chat messages + summaries. _hardDeleteLocal is idempotent so
+        // a tombstone for an id we don't have locally is a no-op.
+        await _hardDeleteLocal(db, id);
+        applied++;
+
+        if (deletedAt.compareTo(maxDeletedAt) > 0) {
+          maxDeletedAt = deletedAt;
+        }
+      }
+
+      if (maxDeletedAt.isNotEmpty && maxDeletedAt != since) {
+        await _setTombstoneWatermark(maxDeletedAt);
+      }
+      if (applied > 0) {
+        TLog.i(_tag,
+            'tombstones ✓ ($applied applied, watermark=$maxDeletedAt)');
+      }
+    } on DioException catch (e) {
+      if (e.response?.statusCode == 404) {
+        TLog.w(_tag, 'tombstones 404 — endpoint not deployed yet');
+        return;
+      }
+      TLog.w(_tag, 'tombstones pull failed', error: e);
+    } catch (e) {
+      TLog.w(_tag, 'tombstones parse error', error: e);
+    }
+  }
+
+  Future<String?> _getTombstoneWatermark() async {
+    if (_tombstoneWatermark != null) return _tombstoneWatermark;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      _tombstoneWatermark = prefs.getString(_kTombstoneWatermarkKey);
+    } catch (e) {
+      // Prefs failure shouldn't block sync — fall back to "since=null"
+      // (i.e. ask the server for everything, capped at LIMIT 1000).
+      TLog.w(_tag, 'tombstone watermark read failed', error: e);
+      _tombstoneWatermark = null;
+    }
+    return _tombstoneWatermark;
+  }
+
+  Future<void> _setTombstoneWatermark(String value) async {
+    _tombstoneWatermark = value;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_kTombstoneWatermarkKey, value);
+    } catch (e) {
+      TLog.w(_tag, 'tombstone watermark write failed', error: e);
     }
   }
 

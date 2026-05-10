@@ -64,6 +64,10 @@ abstract final class ApiEndpoints {
       '$_base/api/v1/saved-searches/$id/chat';
   static String savedSearchChatSummary(String id) =>
       '$_base/api/v1/saved-searches/$id/summary';
+  // Cross-device delete sync — pull-only endpoint that returns tombstones
+  // newer than the optional `since` ISO-8601 timestamp.
+  static String get savedSearchTombstones =>
+      '$_base/api/v1/saved-searches/tombstones';
 
   // AI Smart Parse (voice expense)
   static String get aiSmartParse => '$_base/api/v1/ai/smart-parse';
