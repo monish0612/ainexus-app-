@@ -617,40 +617,53 @@ class _SavedSearchDetailSheetState
         ? 'xgrok'
         : 'gemini';
 
+    // Dynamic bottom inset: prefer the keyboard inset when the
+    // soft-keyboard is open, otherwise keep a comfortable gap above the
+    // gesture-nav bar. The outer `SafeArea(bottom: true)` in [build]
+    // already pushes us above the system inset, so this controls the
+    // visual breathing room only.
+    final insets = MediaQuery.of(context).viewInsets.bottom;
+    final bottomPad = insets > 0 ? insets + 8 : 10;
     return Container(
-      padding: EdgeInsets.fromLTRB(
-        12,
-        8,
-        12,
-        12 + MediaQuery.of(context).viewInsets.bottom,
-      ),
+      padding: EdgeInsets.fromLTRB(12, 10, 12, bottomPad.toDouble()),
       decoration: BoxDecoration(
         color: colors.bg,
         border: Border(top: BorderSide(color: colors.border)),
       ),
       child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Row(
-            children: [
-              ProviderPicker(
-                options: providerOptions,
-                selectedId: selectedId,
-                onChanged: (id) => setState(() => _provider = id),
-                colors: colors,
-                heroTag: 'saved-search-detail',
-              ),
-              const SizedBox(width: 8),
-              _buildModeToggle(colors),
-              const Spacer(),
-              if (_sending)
-                const SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2),
+          // Toggles row — wrap so chips never get clipped on narrow
+          // screens or in landscape; fixed 8px run/spacing keeps the
+          // visual rhythm consistent with the input row below.
+          SizedBox(
+            width: double.infinity,
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 6,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                ProviderPicker(
+                  options: providerOptions,
+                  selectedId: selectedId,
+                  onChanged: (id) => setState(() => _provider = id),
+                  colors: colors,
+                  heroTag: 'saved-search-detail',
                 ),
-            ],
+                _buildModeToggle(colors),
+                if (_sending)
+                  const Padding(
+                    padding: EdgeInsets.only(left: 4),
+                    child: SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  ),
+              ],
+            ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 10),
           Row(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
@@ -666,6 +679,7 @@ class _SavedSearchDetailSheetState
                     hintText: 'Ask a follow-up\u2026',
                     hintStyle: GoogleFonts.plusJakartaSans(
                         fontSize: 14, color: colors.text5),
+                    isDense: true,
                     filled: true,
                     fillColor: colors.bg1,
                     contentPadding: const EdgeInsets.symmetric(

@@ -3016,7 +3016,13 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
   /// Opens the saved-searches bottom sheet. Imported lazily to avoid a
   /// circular import between the sheet (which renders saved entries via
   /// existing result widgets) and tutor_screen.
+  ///
+  /// Pending save/remove snackbars are dismissed before the sheet opens
+  /// so a "Saved to history" toast doesn't trail across routes and end up
+  /// floating over the detail sheet's input bar (which used to look like
+  /// the toast was "stuck").
   Future<void> _openSavedSearchesSheet() async {
+    ScaffoldMessenger.maybeOf(context)?.hideCurrentSnackBar();
     final selected = await showModalBottomSheet<SavedSearchEntry>(
       context: context,
       isScrollControlled: true,
@@ -3024,11 +3030,43 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
       builder: (_) => const SavedSearchesSheet(),
     );
     if (!mounted || selected == null) return;
+    ScaffoldMessenger.maybeOf(context)?.hideCurrentSnackBar();
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (_) => SavedSearchDetailSheet(entryId: selected.id),
+    );
+  }
+
+  /// Compact, dark-themed snackbar used for save/remove toasts. Forces
+  /// a short duration (1.8 s — short enough that it doesn't trail across
+  /// navigation, long enough that Undo is still reachable) and a tight
+  /// `floating` margin so it never sits flush against the bottom edge
+  /// where bottom-sheet input bars live.
+  SnackBar _saveSnack({
+    required String message,
+    SnackBarAction? action,
+    bool error = false,
+  }) {
+    return SnackBar(
+      content: Text(
+        message,
+        style: GoogleFonts.plusJakartaSans(
+          fontSize: 13,
+          fontWeight: FontWeight.w600,
+          color: Colors.white,
+        ),
+      ),
+      backgroundColor:
+          error ? const Color(0xFF991B1B) : const Color(0xFF1F2937),
+      behavior: SnackBarBehavior.floating,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(14),
+      ),
+      margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+      duration: const Duration(milliseconds: 1800),
+      action: action,
     );
   }
 
@@ -3050,12 +3088,11 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
         setState(() => _activeSearchIsSaved = false);
         await store.delete(removedId);
         messenger?.hideCurrentSnackBar();
-        messenger?.showSnackBar(SnackBar(
-          content: const Text('Removed from history'),
-          behavior: SnackBarBehavior.floating,
-          duration: const Duration(seconds: 4),
+        messenger?.showSnackBar(_saveSnack(
+          message: 'Removed from history',
           action: SnackBarAction(
             label: 'Undo',
+            textColor: const Color(0xFFC084FC),
             onPressed: () async {
               await store.undelete(removedId);
               if (!mounted) return;
@@ -3079,12 +3116,11 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
           if (promoted) {
             setState(() => _activeSearchIsSaved = true);
             messenger?.hideCurrentSnackBar();
-            messenger?.showSnackBar(SnackBar(
-              content: const Text('Saved to history'),
-              behavior: SnackBarBehavior.floating,
-              duration: const Duration(seconds: 3),
+            messenger?.showSnackBar(_saveSnack(
+              message: 'Saved to history',
               action: SnackBarAction(
                 label: 'Undo',
+                textColor: const Color(0xFFC084FC),
                 onPressed: () async {
                   // Undo of save = soft-delete (matches the gold-standard
                   // article-chat undo). The row stays in DB long enough for
@@ -3107,9 +3143,9 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
           TLog.e('Tutor', 'promoteToSaved failed', error: e);
           if (!mounted) return;
           messenger?.hideCurrentSnackBar();
-          messenger?.showSnackBar(const SnackBar(
-            content: Text('Could not save — please try again'),
-            behavior: SnackBarBehavior.floating,
+          messenger?.showSnackBar(_saveSnack(
+            message: 'Could not save — please try again',
+            error: true,
           ));
         }
         return;
@@ -3134,12 +3170,11 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
           _activeSearchIsSaved = true;
         });
         messenger?.hideCurrentSnackBar();
-        messenger?.showSnackBar(SnackBar(
-          content: const Text('Saved to history'),
-          behavior: SnackBarBehavior.floating,
-          duration: const Duration(seconds: 3),
+        messenger?.showSnackBar(_saveSnack(
+          message: 'Saved to history',
           action: SnackBarAction(
             label: 'Undo',
+            textColor: const Color(0xFFC084FC),
             onPressed: () async {
               await store.delete(entry.id);
               if (!mounted) return;
@@ -3151,9 +3186,9 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
         TLog.e('Tutor', 'saveResult failed', error: e);
         if (!mounted) return;
         messenger?.hideCurrentSnackBar();
-        messenger?.showSnackBar(const SnackBar(
-          content: Text('Could not save — please try again'),
-          behavior: SnackBarBehavior.floating,
+        messenger?.showSnackBar(_saveSnack(
+          message: 'Could not save — please try again',
+          error: true,
         ));
       }
     } finally {

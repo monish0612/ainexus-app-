@@ -55,7 +55,12 @@ class _SavedSearchesSheetState extends ConsumerState<SavedSearchesSheet> {
           color: colors.bg,
           borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
         ),
-        child: Column(
+        // SafeArea(top: false) keeps the rounded grabber edge flush with
+        // the visible top of the sheet while reserving the bottom system
+        // inset (gesture-nav bar) so list rows aren't clipped by it.
+        child: SafeArea(
+          top: false,
+          child: Column(
           children: [
             _buildGrabber(colors),
             _buildHeader(colors, stream.maybeWhen(
@@ -82,6 +87,7 @@ class _SavedSearchesSheetState extends ConsumerState<SavedSearchesSheet> {
               ),
             ),
           ],
+          ),
         ),
       ),
     );
@@ -421,13 +427,30 @@ class _SavedSearchesSheetState extends ConsumerState<SavedSearchesSheet> {
     final messenger = ScaffoldMessenger.maybeOf(context);
     HapticFeedback.lightImpact();
     await store.delete(entry.id);
+    final label = entry.title.isEmpty ? entry.query : entry.title;
+    final shortLabel = label.length > 36 ? '${label.substring(0, 33)}\u2026' : label;
     messenger?.hideCurrentSnackBar();
     messenger?.showSnackBar(SnackBar(
-      content: Text('Removed "${entry.title.isEmpty ? entry.query : entry.title}"'),
+      content: Text(
+        'Removed "$shortLabel"',
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: GoogleFonts.plusJakartaSans(
+          fontSize: 13,
+          fontWeight: FontWeight.w600,
+          color: Colors.white,
+        ),
+      ),
+      backgroundColor: const Color(0xFF1F2937),
       behavior: SnackBarBehavior.floating,
-      duration: const Duration(seconds: 4),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(14),
+      ),
+      margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+      duration: const Duration(milliseconds: 2200),
       action: SnackBarAction(
         label: 'Undo',
+        textColor: const Color(0xFFC084FC),
         onPressed: () => store.undelete(entry.id),
       ),
     ));

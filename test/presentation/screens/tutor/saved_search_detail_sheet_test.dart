@@ -211,5 +211,111 @@ void main() {
           reason: 'second mount must rehydrate the saved entry');
       await _drain(tester);
     });
+
+    testWidgets(
+        'input bar uses Wrap so toggle chips never overflow on narrow '
+        'screens (regression guard for the user-reported "model selection '
+        'is hidden" UI bug)', (tester) async {
+      const result = TavilySearchResponse(
+        answer: 'a', query: 'q', results: <TavilyResultItem>[]);
+      final ctx = await _bootstrap();
+      await ctx.store.saveResult(
+        id: 'narrow-screen',
+        kind: SavedSearchKind.query,
+        query: 'q',
+        result: result,
+      );
+
+      // Simulate a narrow phone in landscape with a tiny logical width
+      // (~320 px) — this is where the old fixed-Row layout used to clip.
+      tester.view.physicalSize = const Size(320 * 3, 640 * 3);
+      tester.view.devicePixelRatio = 3.0;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      await _mount(tester,
+          store: ctx.store, db: ctx.db, entryId: 'narrow-screen');
+      await tester.pumpAndSettle();
+
+      // Both toggles must be in the tree AND laid out (i.e. paint-visible)
+      // — tapping them is the user's primary signal that they're not
+      // "hidden" behind another widget.
+      expect(find.text('Lite'), findsOneWidget);
+      expect(find.text('Gemini'), findsOneWidget);
+
+      // No layout overflow exceptions were thrown during pump.
+      expect(tester.takeException(), isNull,
+          reason: 'narrow viewport must not trigger any overflow asserts');
+      await _drain(tester);
+    });
+
+    testWidgets(
+        'input bar grows its bottom padding when the soft keyboard appears '
+        'so the model picker stays visible above it', (tester) async {
+      const result = TavilySearchResponse(
+        answer: 'a', query: 'q', results: <TavilyResultItem>[]);
+      final ctx = await _bootstrap();
+      await ctx.store.saveResult(
+        id: 'kbd-test',
+        kind: SavedSearchKind.query,
+        query: 'q',
+        result: result,
+      );
+
+      // Mount once with no keyboard.
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            savedSearchStoreProvider.overrideWithValue(ctx.store),
+            appDatabaseProvider.overrideWithValue(ctx.db),
+          ],
+          child: MaterialApp(
+            theme: _testTheme(),
+            home: const Scaffold(
+              body: SavedSearchDetailSheet(entryId: 'kbd-test'),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Snapshot the visible bottom edge of the picker chip.
+      final picker = find.text('Gemini');
+      expect(picker, findsOneWidget);
+      final yWithoutKeyboard = tester.getCenter(picker).dy;
+
+      // Now simulate the keyboard opening (380 px keyboard inset).
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            savedSearchStoreProvider.overrideWithValue(ctx.store),
+            appDatabaseProvider.overrideWithValue(ctx.db),
+          ],
+          child: MaterialApp(
+            theme: _testTheme(),
+            home: MediaQuery(
+              data: const MediaQueryData(
+                viewInsets: EdgeInsets.only(bottom: 380),
+                size: Size(400, 800),
+              ),
+              child: const Scaffold(
+                body: SavedSearchDetailSheet(entryId: 'kbd-test'),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final yWithKeyboard = tester.getCenter(find.text('Gemini')).dy;
+      expect(yWithKeyboard, lessThan(yWithoutKeyboard),
+          reason:
+              'keyboard inset must push the picker UP — proving viewInsets '
+              'are honoured by the dynamic bottom-padding logic');
+      expect(tester.takeException(), isNull);
+      await _drain(tester);
+    });
   });
 }
