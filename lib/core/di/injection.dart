@@ -10,6 +10,7 @@ import '../../data/services/tutor_ai_service.dart';
 import '../../data/services/user_preferences_service.dart';
 import '../../domain/entities/saved_search.dart';
 import '../network/api_client.dart';
+import '../services/image_search_store.dart';
 import '../services/saved_search_store.dart';
 
 final sharedPreferencesProvider = Provider<SharedPreferences>(
@@ -73,4 +74,14 @@ final savedSearchStoreProvider = Provider<SavedSearchStore>((ref) {
 final savedSearchesStreamProvider =
     StreamProvider<List<SavedSearchEntry>>((ref) {
   return ref.watch(savedSearchStoreProvider).watchAll();
+});
+
+/// Singleton store for InsightAI image (vision) searches. Mirrors the
+/// retry / background-notification / cancel pattern of [OnlineSearchStore]
+/// so the image upload path inherits all the lifecycle guarantees the
+/// text path already provides.
+final imageSearchStoreProvider = Provider<ImageSearchStore>((ref) {
+  final store = ImageSearchStore.instance;
+  store.init();
+  return store;
 });

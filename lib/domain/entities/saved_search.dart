@@ -12,12 +12,28 @@ import 'tutor_entities.dart';
 abstract final class SavedSearchKind {
   static const url = 'url';
   static const query = 'query';
+
+  /// InsightAI vision flow — user attached an image (camera/gallery)
+  /// and optionally typed a text query. Same persistence + sync
+  /// semantics as [query]; the discriminator lets the History UI
+  /// render the camera badge instead of the search badge.
+  static const image = 'image';
 }
 
 abstract final class SavedSearchResponseType {
   static const summarizer = 'summarizer';
   static const grounded = 'grounded';
   static const tavily = 'tavily';
+
+  /// Result of an InsightAI image-search call. Wire-compatible with
+  /// [grounded] (same `{ answer, model, sources }` shape) plus three
+  /// extra opaque fields inside `responseJson` for cross-device
+  /// preview without a Drift schema migration:
+  ///   • `imageThumb`     : data:image/jpeg;base64,... (≤ 50 KB)
+  ///   • `imageMediaType` : original mime (image/jpeg, image/png, …)
+  ///   • `question`       : the text query the user typed alongside
+  ///                        the image, surfaced verbatim in History
+  static const imageGrounded = 'image-grounded';
 }
 
 /// Immutable view of a saved search — the in-app domain object the UI and
@@ -187,11 +203,67 @@ class SavedSearchEntry {
         return SummarizerResult.fromJson(parsed);
       case SavedSearchResponseType.grounded:
         return GroundedSearchResponse.fromJson(parsed);
+      case SavedSearchResponseType.imageGrounded:
+        // Image-grounded results share the GroundedSearchResponse wire
+        // shape — the extra `imageThumb` / `imageMediaType` / `question`
+        // fields are surfaced through [imageThumbDataUrl] etc. so the
+        // typed result stays clean and reusable.
+        return GroundedSearchResponse.fromJson(parsed);
       case SavedSearchResponseType.tavily:
         return TavilySearchResponse.fromJson(parsed);
       default:
         return null;
     }
+  }
+
+  // ── Image-grounded helpers ───────────────────────────────────────────────
+  //
+  // These helpers crack open the opaque [responseJson] for image-grounded
+  // entries so the History sheet can render the thumbnail + question
+  // without leaking any of the JSON shape into the rest of the codebase.
+  // For non-image entries they return null/empty so call sites can simply
+  // ignore the field when [responseType] doesn't match.
+
+  Map<String, dynamic>? _responseExtras() {
+    try {
+      final decoded = jsonDecode(responseJson);
+      if (decoded is Map) {
+        return decoded.map((k, v) => MapEntry(k.toString(), v));
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  /// `data:image/jpeg;base64,...` URL for the 256 px preview thumbnail
+  /// of an [SavedSearchResponseType.imageGrounded] entry. Returns null
+  /// when missing or when the entry is not image-grounded.
+  String? get imageThumbDataUrl {
+    if (responseType != SavedSearchResponseType.imageGrounded) return null;
+    final extras = _responseExtras();
+    final v = extras?['imageThumb'];
+    if (v is String && v.isNotEmpty) return v;
+    return null;
+  }
+
+  /// Original media type of the source image (image/jpeg, image/png,
+  /// image/heic, …). Useful for the History UI to render an accurate
+  /// "type" pill. Null for non-image entries.
+  String? get imageMediaType {
+    if (responseType != SavedSearchResponseType.imageGrounded) return null;
+    final extras = _responseExtras();
+    final v = extras?['imageMediaType'];
+    if (v is String && v.isNotEmpty) return v;
+    return null;
+  }
+
+  /// The user's text question that accompanied the uploaded image. May
+  /// be empty when the user uploaded an image without typing anything.
+  String? get imageQuestion {
+    if (responseType != SavedSearchResponseType.imageGrounded) return null;
+    final extras = _responseExtras();
+    final v = extras?['question'];
+    if (v is String) return v;
+    return null;
   }
 
   // ── Convenience builders ──────────────────────────────────────────────────

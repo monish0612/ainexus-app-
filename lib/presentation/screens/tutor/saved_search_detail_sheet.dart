@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
@@ -67,10 +68,16 @@ class _SavedSearchDetailSheetState
   void initState() {
     super.initState();
     _loadEntry();
+    final store = ref.read(savedSearchStoreProvider);
+    // Cross-device freshness: pull index + tombstones in PARALLEL the
+    // moment the user opens this detail. If another device deleted the
+    // row while we were navigating here, the tombstone applies, the
+    // local row is hard-deleted, and our auto-pop watcher (in build)
+    // closes this sheet within ~1 frame.
+    Future<void>.microtask(
+        () => store.syncNow(reason: 'detail-open', force: true));
     // Best-effort pull of any server-side messages we don't yet have.
-    Future<void>.microtask(() => ref
-        .read(savedSearchStoreProvider)
-        .pullMessagesFromServer(widget.entryId));
+    Future<void>.microtask(() => store.pullMessagesFromServer(widget.entryId));
   }
 
   Future<void> _loadEntry() async {
@@ -113,25 +120,54 @@ class _SavedSearchDetailSheetState
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).extension<AppColors>()!;
-    return DraggableScrollableSheet(
-      initialChildSize: 0.92,
-      minChildSize: 0.6,
-      maxChildSize: 0.96,
-      expand: false,
-      builder: (context, scrollController) => Container(
-        decoration: BoxDecoration(
-          color: colors.bg,
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
-        ),
-        child: SafeArea(
-          top: false,
-          child: _loading
-              ? const Center(child: CircularProgressIndicator())
-              : _entry == null
-                  ? _buildMissing(colors)
-                  : _buildBody(colors, scrollController),
-        ),
-      ),
+    // Cross-device delete watcher: if the underlying row is hard-deleted
+    // (locally OR via a tombstone arriving from another device's delete),
+    // auto-pop this sheet on the next frame so the user is never left
+    // staring at a deleted search.
+    return StreamBuilder<SavedSearchEntry?>(
+      stream:
+          ref.read(savedSearchStoreProvider).watchById(widget.entryId),
+      builder: (context, snap) {
+        // Only react AFTER initial load completes — otherwise the
+        // "missing on first frame" race would auto-pop before the row
+        // even has a chance to load. Production-grade guard.
+        if (!_loading &&
+            _entry != null &&
+            snap.connectionState == ConnectionState.active &&
+            snap.hasData &&
+            snap.data == null &&
+            mounted) {
+          // Schedule the pop for the next frame so we don't mutate the
+          // navigator stack mid-build.
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) return;
+            TLog.i('SavedSearchDetail',
+                'auto-pop: row ${widget.entryId} disappeared (cross-device delete)');
+            Navigator.of(context).maybePop();
+          });
+        }
+        return DraggableScrollableSheet(
+          initialChildSize: 0.92,
+          minChildSize: 0.6,
+          maxChildSize: 0.96,
+          expand: false,
+          builder: (context, scrollController) => Container(
+            decoration: BoxDecoration(
+              color: colors.bg,
+              borderRadius:
+                  const BorderRadius.vertical(top: Radius.circular(28)),
+            ),
+            child: SafeArea(
+              top: false,
+              child: _loading
+                  ? const Center(child: CircularProgressIndicator())
+                  : _entry == null
+                      ? _buildMissing(colors)
+                      : _buildBody(colors, scrollController),
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -254,6 +290,8 @@ class _SavedSearchDetailSheetState
         return 'Grounded answer';
       case SavedSearchResponseType.tavily:
         return 'Tavily answer';
+      case SavedSearchResponseType.imageGrounded:
+        return 'Image analysis';
       default:
         return t;
     }
@@ -266,6 +304,9 @@ class _SavedSearchDetailSheetState
     String body = '';
     String? subtitle;
     List<_SnapshotSource> sources = const [];
+
+    final isImage =
+        entry.responseType == SavedSearchResponseType.imageGrounded;
 
     if (result is SummarizerResult) {
       body = result.summary;
@@ -302,11 +343,14 @@ class _SavedSearchDetailSheetState
             padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
             child: Row(
               children: [
-                const Icon(LucideIcons.fileText,
-                    size: 14, color: Color(0xFF8B5CF6)),
+                Icon(
+                  isImage ? LucideIcons.image : LucideIcons.fileText,
+                  size: 14,
+                  color: const Color(0xFF8B5CF6),
+                ),
                 const SizedBox(width: 6),
                 Text(
-                  'ORIGINAL RESULT',
+                  isImage ? 'IMAGE ANALYSIS' : 'ORIGINAL RESULT',
                   style: GoogleFonts.plusJakartaSans(
                     fontSize: 10,
                     fontWeight: FontWeight.w800,
@@ -334,6 +378,7 @@ class _SavedSearchDetailSheetState
               ],
             ),
           ),
+          if (isImage) _buildImageSnapshotPreview(colors, entry),
           if (subtitle != null)
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -392,6 +437,117 @@ class _SavedSearchDetailSheetState
         ],
       ),
     );
+  }
+
+  /// Render the cross-device thumbnail + a chip noting that the
+  /// full-resolution image is only available on the device that
+  /// uploaded it. Follow-up turns from this device route through the
+  /// text-only `/search-followup` endpoint, but the conversation
+  /// continues seamlessly because the model already has the original
+  /// answer in `initialAnswer` + the chat history.
+  Widget _buildImageSnapshotPreview(
+      AppColors colors, SavedSearchEntry entry) {
+    final thumbBytes = _decodeThumbDataUrl(entry.imageThumbDataUrl);
+    final mediaType = entry.imageMediaType ?? '';
+    final question = entry.imageQuestion ?? '';
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (thumbBytes != null)
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: Image.memory(
+                    thumbBytes,
+                    width: 76,
+                    height: 76,
+                    fit: BoxFit.cover,
+                    filterQuality: FilterQuality.low,
+                    gaplessPlayback: true,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        question.trim().isEmpty
+                            ? 'Image analysis'
+                            : question.trim(),
+                        style: GoogleFonts.plusJakartaSans(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: colors.text,
+                          height: 1.35,
+                        ),
+                      ),
+                      if (mediaType.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          mediaType,
+                          style: GoogleFonts.plusJakartaSans(
+                            fontSize: 10,
+                            color: colors.text4,
+                            letterSpacing: 0.4,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          const SizedBox(height: 10),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF59E0B).withValues(alpha: 0.10),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(
+                color: const Color(0xFFF59E0B).withValues(alpha: 0.30),
+              ),
+            ),
+            child: Row(
+              children: [
+                const Icon(LucideIcons.info,
+                    size: 13, color: Color(0xFFB45309)),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    'Full image stays on the device that uploaded it. '
+                    'Follow-up questions here continue text-only.',
+                    style: GoogleFonts.plusJakartaSans(
+                      fontSize: 11,
+                      color: const Color(0xFFB45309),
+                      height: 1.35,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Decode `data:image/...;base64,...` to raw bytes for in-memory
+  /// display. Returns null on malformed input — caller silently
+  /// drops the thumbnail (and the explanatory chip still renders).
+  Uint8List? _decodeThumbDataUrl(String? url) {
+    if (url == null || url.isEmpty) return null;
+    final commaAt = url.indexOf(',');
+    if (commaAt <= 0) return null;
+    try {
+      return base64Decode(url.substring(commaAt + 1));
+    } catch (_) {
+      return null;
+    }
   }
 
   Widget _sourceChip(AppColors colors, _SnapshotSource s) {
@@ -805,6 +961,12 @@ class _SavedSearchDetailSheetState
     if (result is SummarizerResult) {
       initialAnswer = result.summary;
     } else if (result is GroundedSearchResponse) {
+      // Image-grounded entries decode to GroundedSearchResponse too,
+      // so this branch covers both `grounded` and `image-grounded`
+      // response types. Image follow-ups from this device fall back
+      // to the text-only endpoint because we don't keep the full
+      // bytes after the saved entry is closed; the explanatory chip
+      // above sets the user's expectations.
       initialAnswer = result.answer;
     } else if (result is TavilySearchResponse) {
       initialAnswer = result.answer;

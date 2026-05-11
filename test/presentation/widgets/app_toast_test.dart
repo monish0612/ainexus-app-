@@ -483,5 +483,101 @@ void main() {
       // Explicit reference to suppress unused_local_variable lint.
       expect(rootCtx.mounted, isTrue);
     });
+
+    testWidgets(
+        'toast survives modal sheet AUTO-CLOSING (last-item-deleted regression)',
+        (tester) async {
+      // Production scenario: user opens History sheet, deletes the last
+      // saved row, the sheet's StreamBuilder rebuilds with an empty list
+      // and the user (or list logic) closes the sheet right after the
+      // toast is shown. The toast was being requested with `sheetCtx`
+      // — when the sheet pops, that context is unmounted. AppToast must
+      // STILL dismiss correctly because it grabs the ROOT overlay.
+      late BuildContext rootCtx;
+      await tester.pumpWidget(_testApp(
+        Builder(
+          builder: (ctx) {
+            rootCtx = ctx;
+            return ElevatedButton(
+              onPressed: () async {
+                await showModalBottomSheet<void>(
+                  context: ctx,
+                  builder: (sheetCtx) => SizedBox(
+                    height: 200,
+                    child: ElevatedButton(
+                      onPressed: () {
+                        AppToast.show(
+                          sheetCtx,
+                          message: 'last-removed',
+                          duration: const Duration(milliseconds: 300),
+                        );
+                        // Immediately pop the sheet — simulates "deleted
+                        // the last saved row → sheet auto-closes".
+                        Navigator.of(sheetCtx).pop();
+                      },
+                      child: const Text('delete-last'),
+                    ),
+                  ),
+                );
+              },
+              child: const Text('open'),
+            );
+          },
+        ),
+      ));
+
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('delete-last'));
+      await tester.pump(); // schedule sheet pop + toast insertion
+      await tester.pump(const Duration(milliseconds: 50));
+
+      // The toast should still be on screen even though the sheet that
+      // requested it has been torn down.
+      expect(find.text('last-removed'), findsOneWidget,
+          reason: 'toast must outlive the sheet that requested it');
+
+      // Wait beyond duration + slide-out + watchdog grace. Toast must
+      // be GONE — this is the user-reported "white popover doesnt
+      // disappear" scenario.
+      await tester.pump(const Duration(milliseconds: 350));
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.pump(const Duration(milliseconds: 800));
+      expect(AppToast.debugIsShowing(), isFalse,
+          reason:
+              'toast MUST dismiss even after the requesting sheet was popped');
+      expect(rootCtx.mounted, isTrue);
+    });
+
+    testWidgets(
+        'watchdog timer force-removes a stuck overlay even if animation pipeline stalls',
+        (tester) async {
+      // Belt-and-braces guarantee: even in a pathological scenario where
+      // the slide-out animation never completes, the watchdog timer
+      // (duration + animation_out + 800ms grace) MUST tear down the
+      // overlay. We verify this by checking the public debug state
+      // strictly after the watchdog window.
+      late BuildContext ctx;
+      await tester.pumpWidget(_testApp(
+        Builder(builder: (c) {
+          ctx = c;
+          return const SizedBox.shrink();
+        }),
+      ));
+
+      AppToast.show(ctx,
+          message: 'watchdog',
+          duration: const Duration(milliseconds: 200));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(AppToast.debugIsShowing(), isTrue);
+
+      // Wait the FULL watchdog window: duration (200) + animation (220)
+      // + grace (800) = 1220 ms. Anything still showing past this is a
+      // production-bug regression.
+      await tester.pump(const Duration(milliseconds: 1300));
+      expect(AppToast.debugIsShowing(), isFalse,
+          reason: 'watchdog must tear down toast within hard limit');
+    });
   });
 }

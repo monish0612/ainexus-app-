@@ -37,6 +37,24 @@ class _SavedSearchesSheetState extends ConsumerState<SavedSearchesSheet> {
   String _filter = '';
 
   @override
+  void initState() {
+    super.initState();
+    // Cross-device freshness: as soon as the user navigates to the
+    // History view, pull the latest index + tombstones in PARALLEL so
+    // the list reflects deletes that happened on other devices since
+    // the last periodic sync. Fire-and-forget — the StreamBuilder
+    // below picks up Drift mutations live.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      // force=true: explicit user navigation — bypass the debounce so
+      // the user always sees the freshest list regardless of when the
+      // 30 s periodic timer last fired.
+      ref
+          .read(savedSearchStoreProvider)
+          .syncNow(reason: 'sheet-open', force: true);
+    });
+  }
+
+  @override
   void dispose() {
     _filterCtrl.dispose();
     super.dispose();
@@ -256,12 +274,19 @@ class _SavedSearchesSheetState extends ConsumerState<SavedSearchesSheet> {
   }
 
   Widget _buildRow(AppColors colors, SavedSearchEntry entry) {
-    final iconData = entry.kind == SavedSearchKind.url
-        ? LucideIcons.link
-        : LucideIcons.search;
-    final accent = entry.kind == SavedSearchKind.url
-        ? const Color(0xFF4285F4)
-        : const Color(0xFFC084FC);
+    final IconData iconData;
+    final Color accent;
+    if (entry.kind == SavedSearchKind.image ||
+        entry.responseType == SavedSearchResponseType.imageGrounded) {
+      iconData = LucideIcons.image;
+      accent = const Color(0xFF8B5CF6);
+    } else if (entry.kind == SavedSearchKind.url) {
+      iconData = LucideIcons.link;
+      accent = const Color(0xFF4285F4);
+    } else {
+      iconData = LucideIcons.search;
+      accent = const Color(0xFFC084FC);
+    }
 
     return Dismissible(
       key: ValueKey(entry.id),
@@ -407,6 +432,8 @@ class _SavedSearchesSheetState extends ConsumerState<SavedSearchesSheet> {
         return 'Grounded';
       case SavedSearchResponseType.tavily:
         return 'Tavily';
+      case SavedSearchResponseType.imageGrounded:
+        return 'Image';
       default:
         return t;
     }

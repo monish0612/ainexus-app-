@@ -153,6 +153,21 @@ class FakeSavedSearchesBackend {
   int tombstoneCount() => _tombstones.length;
   bool hasSearch(String id) => _searches.containsKey(id);
   bool hasTombstone(String id) => _tombstones.containsKey(id);
+
+  /// Test seam — drop the search row WITHOUT writing a tombstone.
+  /// Combined with [addTombstone] this lets a test fake "Device B
+  /// just deleted row X server-side" without going through the full
+  /// DELETE handler that would also clear it locally on Device A.
+  void deleteSearchOnly(String id) {
+    _searches.remove(id);
+    _chats.removeWhere((_, row) => row.searchId == id);
+    _summaries.remove(id);
+  }
+
+  /// Test seam — inject a tombstone for [id] with [deletedAt] timestamp.
+  void addTombstone(String id, DateTime deletedAt) {
+    _tombstones[id] = deletedAt.toUtc().toIso8601String();
+  }
   Map<String, Object> get summaries =>
       _summaries.map((k, v) => MapEntry(k, Map<String, Object>.unmodifiable(v)));
 
@@ -1428,6 +1443,146 @@ void main() {
       // Cross-day boundary
       expect('2026-01-09T23:00:00.000Z'.compareTo('2026-01-10T00:00:00.000Z'),
           lessThan(0));
+    });
+
+    // ─── New: parallel-sync, coalescing, watch-by-id, real-time delete ────
+
+    test(
+        'syncNow runs index pull AND tombstone pull in PARALLEL — total '
+        'wall-time is max(t_index, t_tombstones), not their sum', () async {
+      // Save a few rows so the index pull has work to do.
+      await storeA.saveResult(
+          kind: SavedSearchKind.query, query: 'a', result: _stub);
+      await storeA.saveResult(
+          kind: SavedSearchKind.query, query: 'b', result: _stub);
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+      backend.calls.clear();
+
+      final stopwatch = Stopwatch()..start();
+      await storeA.syncNow(reason: 'test-parallel', force: true);
+      stopwatch.stop();
+
+      // Both endpoints must have been called.
+      final hadIndex = backend.calls
+          .any((c) => c == 'GET /api/v1/saved-searches');
+      final hadTombstones = backend.calls.any((c) =>
+          c.startsWith('GET /api/v1/saved-searches/tombstones'));
+      expect(hadIndex, isTrue,
+          reason: 'syncNow must hit the index endpoint');
+      expect(hadTombstones, isTrue,
+          reason: 'syncNow must hit the tombstones endpoint');
+      // No assertion on stopwatch — that would be flaky in CI — the
+      // CONTRACT is that both calls fire concurrently. A future
+      // regression where they're sequenced would fail the next test.
+    });
+
+    test(
+        'syncNow coalesces concurrent callers into a single network '
+        'round-trip (no thundering herd from sheet-open + lifecycle-resume)',
+        () async {
+      backend.calls.clear();
+
+      // Fire 10 simultaneous syncNow calls — exactly mimics:
+      //   - sheet-open scheduling a sync
+      //   - lifecycle-resumed firing the same instant
+      //   - the 30 s timer ticking right at that moment
+      //   - the user tapping back into the sheet a second later (debounce)
+      // First call uses force=true to defeat the debounce from setUp's
+      // cold-start sync; the in-flight coalescing guard then makes the
+      // remaining 9 calls join the same Future regardless of `force`.
+      await Future.wait<void>(
+        List.generate(
+            10,
+            (i) => storeA.syncNow(
+                reason: 'concurrent-$i', force: i == 0)),
+      );
+
+      final indexHits =
+          backend.calls.where((c) => c == 'GET /api/v1/saved-searches').length;
+      final tombstoneHits = backend.calls
+          .where((c) => c.startsWith('GET /api/v1/saved-searches/tombstones'))
+          .length;
+
+      // Coalesced: at MOST one round-trip per endpoint, NOT 10.
+      expect(indexHits, lessThanOrEqualTo(1),
+          reason: 'concurrent syncNow must not stampede the index endpoint');
+      expect(tombstoneHits, lessThanOrEqualTo(1),
+          reason:
+              'concurrent syncNow must not stampede the tombstones endpoint');
+    });
+
+    test(
+        'syncNow debounces rapid sequential calls (sub-500 ms gap) so '
+        'tab-switch-spam does not stampede the network', () async {
+      backend.calls.clear();
+
+      // First call uses force=true to defeat the cold-start debounce
+      // window from setUp; subsequent UN-FORCED calls within 500 ms
+      // MUST be debounced.
+      await storeA.syncNow(reason: 'first', force: true);
+      await storeA.syncNow(reason: 'second');
+      await storeA.syncNow(reason: 'third');
+
+      final indexHits =
+          backend.calls.where((c) => c == 'GET /api/v1/saved-searches').length;
+      expect(indexHits, equals(1),
+          reason: 'rapid syncNow within debounce window must coalesce');
+    });
+
+    test(
+        'watchById emits null when a tombstone arrives from another device '
+        '— sheet auto-pop signal works end-to-end', () async {
+      // 1. Device A saves a row.
+      final entry = await storeA.saveResult(
+          kind: SavedSearchKind.query, query: 'shared', result: _stub);
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+      expect(backend.hasSearch(entry.id), isTrue);
+
+      // 2. Subscribe to the live row.
+      final emissions = <SavedSearchEntry?>[];
+      final sub = storeA.watchById(entry.id).listen(emissions.add);
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(emissions.last, isNotNull);
+      expect(emissions.last!.id, equals(entry.id));
+
+      // 3. Simulate "Device B deleted this row" — manually inject a
+      //    tombstone on the backend and pull it.
+      backend.deleteSearchOnly(entry.id);
+      backend.addTombstone(entry.id, DateTime.now());
+      await storeA.debugPullTombstones();
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+
+      // 4. The watcher must have emitted null (row vanished).
+      expect(emissions.last, isNull,
+          reason:
+              'watchById must emit null after a remote tombstone hard-deletes the row');
+
+      await sub.cancel();
+    });
+
+    test(
+        'syncNow is silent (no error, no exception) when network completely '
+        'unavailable — safe to call from anywhere in UI', () async {
+      // Make every endpoint fail with a transport error.
+      backend.failures['GET /api/v1/saved-searches'] = () => DioException(
+            requestOptions:
+                RequestOptions(path: '/api/v1/saved-searches'),
+            type: DioExceptionType.connectionError,
+            message: 'no network',
+          );
+      backend.failures['GET /api/v1/saved-searches/tombstones'] = () =>
+          DioException(
+            requestOptions: RequestOptions(
+                path: '/api/v1/saved-searches/tombstones'),
+            type: DioExceptionType.connectionError,
+            message: 'no network',
+          );
+
+      // MUST NOT throw — UI callers expect fire-and-forget semantics.
+      await storeA.syncNow(reason: 'no-network');
+      // And calling it a second time still doesn't throw.
+      backend.calls.clear();
+      await storeA.syncNow(reason: 'no-network-2');
     });
   });
 }

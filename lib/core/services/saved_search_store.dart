@@ -96,6 +96,32 @@ class SavedSearchStore with WidgetsBindingObserver {
   bool _initialFetchDone = false;
   Timer? _gcTimer;
 
+  /// Periodic foreground sync — fires every [_kForegroundSyncInterval] while
+  /// the app is in the foreground (resumed). Catches the "user has the app
+  /// open while another device deletes a row" scenario without requiring
+  /// the user to background+foreground the app to trigger a resume sync.
+  Timer? _foregroundSyncTimer;
+  static const _kForegroundSyncInterval = Duration(seconds: 30);
+
+  /// Test-only knob — when true, [init] skips installing the periodic
+  /// foreground sync timer. Production always leaves this false; tests
+  /// flip it on so the 30 s [Timer.periodic] doesn't keep firing in
+  /// real time during widget tests and pollute the test clock with
+  /// stale syncNow() invocations.
+  @visibleForTesting
+  static bool debugDisablePeriodicSync = false;
+
+  /// Re-entrancy guard for syncNow — coalesces multiple concurrent callers
+  /// (sheet-open + sheet-rebuild + lifecycle-resume firing nearly together)
+  /// into a single network round-trip. Without this, the user opening the
+  /// History sheet while the app resumes could fire 3+ identical syncs.
+  Future<void>? _inFlightSync;
+
+  /// Last time syncNow actually issued a network call. Used to debounce
+  /// rapid repeated calls (e.g. tab switches in quick succession).
+  DateTime _lastSyncAt = DateTime.fromMillisecondsSinceEpoch(0);
+  static const _kSyncDebounce = Duration(milliseconds: 500);
+
   // Keyed on a stable retry-id (uuid), one entry per pending operation.
   final _retryQueue = <String, _RetryItem>{};
 
@@ -115,6 +141,10 @@ class SavedSearchStore with WidgetsBindingObserver {
     _tombstoneWatermark = null;
     _gcTimer?.cancel();
     _gcTimer = null;
+    _foregroundSyncTimer?.cancel();
+    _foregroundSyncTimer = null;
+    _inFlightSync = null;
+    _lastSyncAt = DateTime.fromMillisecondsSinceEpoch(0);
     if (_observerBound) {
       WidgetsBinding.instance.removeObserver(this);
       _observerBound = false;
@@ -154,6 +184,19 @@ class SavedSearchStore with WidgetsBindingObserver {
       _gcTimer ??= Timer.periodic(const Duration(minutes: 30), (_) {
         unawaited(_runGc());
       });
+      // Periodic foreground sync — pulls the index + tombstones every
+      // 30 s while the app is in the foreground. This is what makes
+      // cross-device delete sync feel REAL-TIME without needing the
+      // user to background+foreground the app: if Device B deletes a
+      // row, Device A picks it up within 30 s while still on screen.
+      // Tests can disable this via [debugDisablePeriodicSync] so the
+      // real-time periodic firing doesn't escape the testWidgets clock.
+      if (!debugDisablePeriodicSync) {
+        _foregroundSyncTimer ??=
+            Timer.periodic(_kForegroundSyncInterval, (_) {
+          unawaited(syncNow(reason: 'periodic-foreground'));
+        });
+      }
       if (!_initialFetchDone) {
         _initialFetchDone = true;
         // Eager sweep on cold launch. The lifecycle observer's `resumed`
@@ -165,7 +208,7 @@ class SavedSearchStore with WidgetsBindingObserver {
         // a "close → reopen 25h later" cold launch leaves the local DB
         // exactly as clean as the user's mental model expects.
         unawaited(_runGc());
-        unawaited(_pullIndexFromServer());
+        unawaited(syncNow(reason: 'cold-start'));
       }
     }
   }
@@ -176,7 +219,10 @@ class SavedSearchStore with WidgetsBindingObserver {
     // Drain the retry queue + run GC + pull fresh server index. All three
     // are best-effort; failures are logged but never thrown.
     unawaited(_runGc());
-    unawaited(_pullIndexFromServer());
+    // force=true: when the user comes back from background, they
+    // expect immediately-fresh data. Skip the debounce that would
+    // otherwise no-op if a periodic sync just happened seconds ago.
+    unawaited(syncNow(reason: 'lifecycle-resumed', force: true));
     if (_retryQueue.isEmpty) return;
     final keys = _retryQueue.keys.toList();
     Future<void>.delayed(const Duration(milliseconds: 1500), () {
@@ -188,6 +234,80 @@ class SavedSearchStore with WidgetsBindingObserver {
         unawaited(_executeRetry(k, item));
       }
     });
+  }
+
+  // ── Public sync entrypoint ─────────────────────────────────────────────
+
+  /// Pull the saved-search index AND tombstones from the server, in
+  /// parallel. Safe to call from anywhere; multiple concurrent callers
+  /// coalesce into a single network round-trip.
+  ///
+  /// Call this:
+  ///   • On cold start (already done in [init])
+  ///   • On app resume (already done in [didChangeAppLifecycleState])
+  ///   • Every 30 s while the app is foreground (periodic timer in [init])
+  ///   • When the user opens the History sheet (instant cross-device
+  ///     freshness when they navigate to the view)
+  ///   • When the user opens a saved-search detail (so a stale row that
+  ///     was deleted on another device tears down the sheet)
+  ///
+  /// [reason] is a short tag included in TLog for debuggability. Pass
+  /// e.g. 'sheet-open', 'lifecycle-resumed', 'periodic-foreground'.
+  ///
+  /// [force]=true bypasses the debounce — use for explicit user-initiated
+  /// actions where the user expects immediate fresh data (e.g. lifecycle
+  /// resume from a long background, manual pull-to-refresh).
+  Future<void> syncNow({String reason = 'manual', bool force = false}) async {
+    final api = _api;
+    final db = _db;
+    if (api == null || db == null) return;
+
+    // Coalesce concurrent callers into a single in-flight Future. If
+    // another sync is mid-flight, await its completion instead of
+    // issuing a duplicate. This guard is unconditional — even `force`
+    // callers should join the in-flight Future rather than fire a
+    // second redundant round-trip.
+    final pending = _inFlightSync;
+    if (pending != null) return pending;
+
+    // Debounce rapid-fire calls (e.g. open sheet → tap row → open detail
+    // all within 200 ms). The 500 ms debounce is short enough that the
+    // user perceives "instant" but long enough to coalesce navigation
+    // bursts into a single round-trip. `force` skips this entirely.
+    final now = DateTime.now();
+    if (!force && now.difference(_lastSyncAt) < _kSyncDebounce) {
+      return;
+    }
+    _lastSyncAt = now;
+
+    final f = _runParallelSync(reason);
+    _inFlightSync = f;
+    try {
+      await f;
+    } finally {
+      _inFlightSync = null;
+    }
+  }
+
+  /// Internal helper: runs the index pull and tombstone pull in PARALLEL
+  /// (Future.wait), so total wall-time is `max(t_index, t_tombstones)`
+  /// instead of `t_index + t_tombstones`. With a 200 ms backend round-trip
+  /// each, that cuts the sync from ~400 ms to ~200 ms — feels instant on
+  /// the user's "open History sheet" tap.
+  Future<void> _runParallelSync(String reason) async {
+    final stopwatch = Stopwatch()..start();
+    try {
+      // Both calls are individually try/catch'd inside the method bodies
+      // so one failing won't poison the other. Future.wait completes
+      // when BOTH are done.
+      await Future.wait<void>([
+        _pullIndexFromServer(),
+        _pullTombstonesFromServer(),
+      ]);
+      TLog.d(_tag, 'syncNow($reason) ✓ in ${stopwatch.elapsedMilliseconds}ms');
+    } catch (e) {
+      TLog.w(_tag, 'syncNow($reason) failed', error: e);
+    }
   }
 
   // ── Public API ─────────────────────────────────────────────────────────────
@@ -533,6 +653,28 @@ class SavedSearchStore with WidgetsBindingObserver {
     return row == null ? null : SavedSearchEntry.fromDrift(row);
   }
 
+  /// Live watch of a single entry. Emits null when the row no longer
+  /// exists in Drift (i.e. hard-deleted by GC, by the user on this
+  /// device, or by a tombstone arriving from a remote device's delete).
+  ///
+  /// Used by [SavedSearchDetailSheet] to auto-pop itself when the
+  /// underlying row disappears mid-view — gives the user a real-time
+  /// "this got deleted on your other phone" experience instead of a
+  /// stuck sheet showing stale content.
+  Stream<SavedSearchEntry?> watchById(String id) {
+    final db = _db;
+    if (db == null) {
+      return const Stream<SavedSearchEntry?>.empty();
+    }
+    final query = db.select(db.savedSearches)
+      ..where((t) => t.id.equals(id))
+      ..limit(1);
+    return query.watch().map((rows) {
+      if (rows.isEmpty) return null;
+      return SavedSearchEntry.fromDrift(rows.first);
+    });
+  }
+
   // ── Chat persistence ──────────────────────────────────────────────────────
 
   /// Append a chat message to a saved search. Persists to Drift first, then
@@ -802,12 +944,7 @@ class SavedSearchStore with WidgetsBindingObserver {
     try {
       final response = await api.get<Object?>(ApiEndpoints.savedSearches);
       final data = response.data;
-      if (data is! List) {
-        // Even if the index pull yielded nothing parseable, run the
-        // tombstone pull so cross-device deletes still propagate.
-        unawaited(_pullTombstonesFromServer());
-        return;
-      }
+      if (data is! List) return;
 
       for (final item in data) {
         if (item is! Map) continue;
@@ -844,11 +981,6 @@ class SavedSearchStore with WidgetsBindingObserver {
     } catch (e) {
       TLog.w(_tag, 'index pull parse error', error: e);
     }
-    // ALWAYS pull tombstones after the index, even if the index call
-    // failed — the two endpoints are independent and a single network
-    // hiccup on one shouldn't pause cross-device delete sync on the
-    // other. Awaited so the lifecycle hook can sequence GC/retry after.
-    await _pullTombstonesFromServer();
   }
 
   /// Cross-device delete sync. Pulls the server-side tombstone log of
@@ -1099,6 +1231,12 @@ class SavedSearchStore with WidgetsBindingObserver {
 
   static String _responseTypeOf(Object result) {
     if (result is SummarizerResult) return SavedSearchResponseType.summarizer;
+    // Image-grounded check MUST come before GroundedSearchResponse — the
+    // wrapper exposes a [response] field of that exact type so a plain
+    // `is GroundedSearchResponse` against the wrapper would mis-route it.
+    if (result is ImageGroundedResult) {
+      return SavedSearchResponseType.imageGrounded;
+    }
     if (result is GroundedSearchResponse) {
       return SavedSearchResponseType.grounded;
     }
@@ -1109,6 +1247,7 @@ class SavedSearchStore with WidgetsBindingObserver {
 
   static String _serializeResult(Object result) {
     if (result is SummarizerResult) return jsonEncode(result.toJson());
+    if (result is ImageGroundedResult) return jsonEncode(result.toJson());
     if (result is GroundedSearchResponse) return jsonEncode(result.toJson());
     if (result is TavilySearchResponse) return jsonEncode(result.toJson());
     throw ArgumentError(
@@ -1117,6 +1256,7 @@ class SavedSearchStore with WidgetsBindingObserver {
 
   static String _modelOf(Object result) {
     if (result is SummarizerResult) return result.model;
+    if (result is ImageGroundedResult) return result.model;
     if (result is GroundedSearchResponse) return result.model;
     return '';
   }

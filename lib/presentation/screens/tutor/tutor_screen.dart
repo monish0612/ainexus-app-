@@ -15,6 +15,8 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../../core/di/injection.dart';
 import '../../../core/llm/model_name_format.dart';
 import '../../../core/services/hold_to_speak_service.dart';
+import '../../../core/services/image_pipeline.dart';
+import '../../../core/services/image_search_store.dart';
 import '../../../core/services/online_search_store.dart';
 import '../../../core/services/process_text_service.dart';
 import '../../../core/services/summarize_store.dart';
@@ -31,6 +33,7 @@ import '../../widgets/sources_disclosure.dart';
 import '../settings/settings_controller.dart';
 import '../settings/settings_modal.dart';
 import 'deep_research_sheet.dart';
+import 'image_followup_sheet.dart';
 import 'saved_search_detail_sheet.dart';
 import 'saved_searches_sheet.dart';
 import 'search_followup_sheet.dart';
@@ -389,6 +392,37 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
   /// duration of the snackbar to also serialise the optional Undo path.
   bool _saveToggleInFlight = false;
 
+  // ── InsightAI Image (vision) state ───────────────────────────────────
+  //
+  // Holds the user's pending image attachment (after pick + compress)
+  // plus the active vision-search session. The session key is the
+  // `_activeSearchId` once a draft is started, otherwise a transient
+  // uuid generated when the search kicks off. The image bytes live
+  // ONLY in memory + in the ImageSearchStore — no thumbnail is shown
+  // on this device until the result lands.
+  PickedImage? _pendingImage;
+
+  /// Loading flag for the image attach-flow (picker open + compress).
+  /// Independent of [_summaryLoading] because the image picker can
+  /// take a few seconds on first invocation (permission dialog +
+  /// gallery thumbnail page) and we don't want to lock the rest of
+  /// the InsightAI input box during that window.
+  bool _pickingImage = false;
+
+  /// Session key for the active image search. Matches
+  /// [_activeSearchId] once the result-driven draft is started so a
+  /// follow-up chat can find the right ImageFollowUpStore entry.
+  String? _imageSearchKey;
+
+  /// Latest image-grounded result on screen. Mirrors [_groundedResult]
+  /// for the text path; rendered by [_imageResultWidget].
+  ImageGroundedResult? _imageResult;
+
+  /// Show an in-flight error banner. Set when the store reports a
+  /// permanent failure and reset when the user starts a new search
+  /// or clears the result.
+  bool _imageErrorShown = false;
+
   // Dictionary
   bool _dictLoading = false;
   DictionaryResult? _dictResult;
@@ -418,6 +452,7 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
     if (state == AppLifecycleState.resumed && mounted) {
       if (_onlineSearchKey != null) _syncSearchFromStore();
       if (_summarizeKey != null) _syncSummarizeFromStore();
+      if (_imageSearchKey != null) _syncImageSearchFromStore();
     }
   }
 
@@ -525,6 +560,16 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
       OnlineSearchStore.instance.cancel(_onlineSearchKey!);
       OnlineSearchStore.instance.remove(_onlineSearchKey!);
     }
+    if (_imageSearchKey != null) {
+      final prior = _imageSearchKey!;
+      ImageSearchStore.instance
+          .removeListener(prior, _onImageSearchStoreUpdate);
+      ImageSearchStore.instance.cancel(prior);
+      ImageSearchStore.instance.remove(prior);
+      // Drop any in-memory chat session pinned to this key so we don't
+      // leak compressed image bytes when the user resets.
+      ImageFollowUpStore.instance.clear(prior);
+    }
     final draftId = _activeSearchId;
     if (draftId != null) {
       // discardDraftIfAny() is a no-op if the user already promoted to
@@ -537,14 +582,18 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
       _summaryResult = null;
       _tavilyResult = null;
       _groundedResult = null;
+      _imageResult = null;
+      _pendingImage = null;
       _activeSearchId = null;
       _activeSearchIsSaved = false;
       _summarizeKey = null;
       _onlineSearchKey = null;
+      _imageSearchKey = null;
       _summaryLoading = false;
       _summaryStage = '';
       _summarizeErrorShown = false;
       _searchErrorShown = false;
+      _imageErrorShown = false;
       _draftStartInFlight = false;
     });
   }
@@ -552,10 +601,18 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
   void _ensureActiveDraft({required Object result}) {
     if (_activeSearchId != null || _draftStartInFlight) return;
     final query = _summaryUrlCtrl.text.trim();
-    if (query.isEmpty) return;
+    final isImageResult = result is ImageGroundedResult;
+    // Image-grounded entries can legitimately have an empty query (the
+    // AI describes the picture without a prompt). For those we
+    // synthesize a placeholder query so the History card still has a
+    // human-readable label.
+    if (query.isEmpty && !isImageResult) return;
+    final effectiveQuery = query.isEmpty && isImageResult
+        ? 'Image analysis'
+        : query;
     _draftStartInFlight = true;
     final settings = ref.read(settingsProvider);
-    final isUrl = _isUrl(query);
+    final isUrl = !isImageResult && _isUrl(query);
     // Provider/mode are best-effort metadata for the History pill; the
     // backend doesn't actually consume these on the saved-search write
     // path so even if we're slightly off (e.g. user toggled mid-flight)
@@ -566,12 +623,15 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
     final mode = isUrl
         ? null
         : (_searchUseDeepModel ? 'deep' : 'lite');
+    final kind = isImageResult
+        ? SavedSearchKind.image
+        : (isUrl ? SavedSearchKind.url : SavedSearchKind.query);
     unawaited(() async {
       try {
         final store = ref.read(savedSearchStoreProvider);
         final entry = await store.startDraft(
-          kind: isUrl ? SavedSearchKind.url : SavedSearchKind.query,
-          query: query,
+          kind: kind,
+          query: effectiveQuery,
           result: result,
           provider: provider,
           mode: mode,
@@ -630,6 +690,10 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
     if (_onlineSearchKey != null) {
       OnlineSearchStore.instance
           .removeListener(_onlineSearchKey!, _onSearchStoreUpdate);
+    }
+    if (_imageSearchKey != null) {
+      ImageSearchStore.instance
+          .removeListener(_imageSearchKey!, _onImageSearchStoreUpdate);
     }
     WidgetsBinding.instance.removeObserver(this);
     _tabController.removeListener(_onTabChanged);
@@ -860,7 +924,16 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
 
   void _handleSummarizerSubmit() {
     final text = _summaryUrlCtrl.text.trim();
-    if (text.isEmpty || _summaryLoading) return;
+    if (_summaryLoading) return;
+    // Image flow wins when present — the AI gets both the picture and
+    // any (optional) text query in a single multimodal turn. We accept
+    // text-empty submissions because vision models give useful
+    // descriptions of pictures even without a prompt.
+    if (_pendingImage != null) {
+      _runImageSearch();
+      return;
+    }
+    if (text.isEmpty) return;
     if (_isUrl(text)) {
       _runSummarize();
     } else {
@@ -874,6 +947,9 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
     }
     if (_onlineSearchKey != null) {
       OnlineSearchStore.instance.cancel(_onlineSearchKey!);
+    }
+    if (_imageSearchKey != null) {
+      ImageSearchStore.instance.cancel(_imageSearchKey!);
     }
     if (mounted) {
       setState(() {
@@ -1002,6 +1078,332 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
       liteModel: useXGrok ? null : settings.liteModel,
     );
     store.addListener(_summarizeKey!, _onSummarizeStoreUpdate);
+  }
+
+  // ── InsightAI Image Vision ─────────────────────────────────────────────
+  //
+  // Two halves: pick + compress (this section) and submit-to-store
+  // (which mirrors _runTavilySearch). The pick side is async because the
+  // OS picker + the off-isolate compress can each take several seconds;
+  // _pickingImage gates the input so the user can't queue a second pick.
+
+  /// Open the bottom-sheet that lets the user choose between camera
+  /// and gallery. Idempotent — a second tap while the previous pick is
+  /// running is a no-op (the action chip already shows the spinner).
+  Future<void> _openImagePickerSheet() async {
+    if (_pickingImage || _summaryLoading) return;
+    final colors = Theme.of(context).extension<AppColors>()!;
+    final source = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: false,
+      backgroundColor: colors.bg1,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Center(
+                child: Container(
+                  width: 36,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: colors.border,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'Attach an image',
+                style: GoogleFonts.plusJakartaSans(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                  color: colors.text,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Ask AI about anything you can photograph — JPEG, PNG, WEBP, HEIC, GIF, BMP all supported.',
+                style: GoogleFonts.plusJakartaSans(
+                  fontSize: 12,
+                  color: colors.text4,
+                  height: 1.4,
+                ),
+              ),
+              const SizedBox(height: 18),
+              _imageSourceTile(
+                colors: colors,
+                icon: LucideIcons.camera,
+                title: 'Take photo',
+                subtitle: 'Capture a new picture with the camera',
+                accent: const Color(0xFF8B5CF6),
+                onTap: () => Navigator.of(ctx).pop('camera'),
+              ),
+              const SizedBox(height: 10),
+              _imageSourceTile(
+                colors: colors,
+                icon: LucideIcons.image,
+                title: 'Choose from gallery',
+                subtitle: 'Pick any image saved on your device',
+                accent: const Color(0xFF6366F1),
+                onTap: () => Navigator.of(ctx).pop('gallery'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (source == null || !mounted) return;
+    if (source == 'camera') {
+      await _pickImage(fromCamera: true);
+    } else if (source == 'gallery') {
+      await _pickImage(fromCamera: false);
+    }
+  }
+
+  Widget _imageSourceTile({
+    required AppColors colors,
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required Color accent,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: colors.bg2,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: colors.border2),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 44,
+              height: 44,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: accent.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(icon, color: accent, size: 22),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: GoogleFonts.plusJakartaSans(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      color: colors.text,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    subtitle,
+                    style: GoogleFonts.plusJakartaSans(
+                      fontSize: 11,
+                      color: colors.text4,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Icon(LucideIcons.chevronRight, size: 16, color: colors.text5),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _pickImage({required bool fromCamera}) async {
+    if (_pickingImage) return;
+    setState(() => _pickingImage = true);
+    try {
+      final picked = fromCamera
+          ? await ImagePipeline.instance.pickFromCamera()
+          : await ImagePipeline.instance.pickFromGallery();
+      if (!mounted) return;
+      if (picked == null) {
+        // user cancelled — silent.
+        setState(() => _pickingImage = false);
+        return;
+      }
+      TLog.i('Tutor',
+          'imageAttached source=${fromCamera ? 'camera' : 'gallery'} '
+          'upload=${(picked.uploadBytes.lengthInBytes / 1024).toStringAsFixed(0)}KB '
+          'thumb=${(picked.thumbnailBytes.lengthInBytes / 1024).toStringAsFixed(1)}KB '
+          '${picked.width}x${picked.height} src=${picked.sourceMediaType}');
+      setState(() {
+        _pendingImage = picked;
+        _pickingImage = false;
+      });
+    } on ImagePipelineException catch (e) {
+      TLog.w('Tutor', 'Image pick rejected: ${e.message}');
+      if (!mounted) return;
+      setState(() => _pickingImage = false);
+      _showMessage(e.message);
+    } catch (e, st) {
+      TLog.e('Tutor', 'Image pick failed', error: e, st: st);
+      if (!mounted) return;
+      setState(() => _pickingImage = false);
+      _showMessage('Could not load the image. Please try a different file.');
+    }
+  }
+
+  void _clearPendingImage() {
+    if (_pendingImage == null) return;
+    TLog.d('Tutor', 'Cleared pending image');
+    setState(() => _pendingImage = null);
+  }
+
+  /// Routes a vision search through [ImageSearchStore]. Mirrors
+  /// [_runTavilySearch] line-for-line on session bookkeeping (detach
+  /// other in-flight stores, discard prior draft, reset UI state) so
+  /// regressions in either path bubble out as obvious diffs.
+  void _runImageSearch() {
+    final picked = _pendingImage;
+    if (picked == null || _summaryLoading) return;
+
+    // Detach any in-flight text-path job so it can't overwrite the
+    // image loading state.
+    if (_summarizeKey != null) {
+      SummarizeStore.instance
+          .removeListener(_summarizeKey!, _onSummarizeStoreUpdate);
+      _summarizeKey = null;
+    }
+    if (_onlineSearchKey != null) {
+      OnlineSearchStore.instance
+          .removeListener(_onlineSearchKey!, _onSearchStoreUpdate);
+      _onlineSearchKey = null;
+    }
+    // Detach previous image search if any. We must also evict the prior
+    // job + bytes from the store, otherwise every fresh image search
+    // leaks a ~1.5 MB compressed payload (plus a thumbnail) into the
+    // singleton's `_jobs` map. Without this, the memory leak check
+    // (20 image searches back-to-back) regresses every release.
+    if (_imageSearchKey != null) {
+      final prior = _imageSearchKey!;
+      ImageSearchStore.instance
+          .removeListener(prior, _onImageSearchStoreUpdate);
+      ImageSearchStore.instance.cancel(prior);
+      ImageSearchStore.instance.remove(prior);
+      // Also tear down any image-follow-up session pinned to the old
+      // sessionKey so its bytes don't outlive the new search.
+      ImageFollowUpStore.instance.clear(prior);
+      _imageSearchKey = null;
+    }
+    _imageErrorShown = false;
+
+    final settings = ref.read(settingsProvider);
+    final useXGrok = settings.xgrokEnabled &&
+        settings.onlineSearchProvider == 'xgrok';
+    final mode = _searchUseDeepModel ? 'deep' : 'lite';
+
+    final query = _summaryUrlCtrl.text.trim();
+    final providerTag = useXGrok ? 'xGrok' : 'Gemini';
+    TLog.i('Tutor',
+        'imageSearchStart provider=$providerTag mode=$mode '
+        'queryLen=${query.length} image=${(picked.uploadBytes.lengthInBytes / 1024).toStringAsFixed(0)}KB');
+
+    // Discard prior text/url draft so we don't accumulate orphans for
+    // power users who chain searches across modalities.
+    final priorDraftId = _activeSearchId;
+    if (priorDraftId != null) {
+      unawaited(
+          ref.read(savedSearchStoreProvider).discardDraftIfAny(priorDraftId));
+    }
+
+    // Encode the cross-device thumbnail as a data: URL right now —
+    // this is the one and only place the bytes get base64-encoded
+    // before persistence.
+    final thumbDataUrl =
+        'data:image/jpeg;base64,${base64Encode(picked.thumbnailBytes)}';
+
+    // Stable session key tied to time + image hash so two rapid taps
+    // produce two distinct jobs. The image-followup sheet later picks
+    // this key up via [_activeSearchId] (set by [_ensureActiveDraft]).
+    final sessionKey =
+        'image-${DateTime.now().microsecondsSinceEpoch}-${picked.uploadBytes.lengthInBytes}';
+
+    setState(() {
+      _summaryLoading = true;
+      _summaryResult = null;
+      _tavilyResult = null;
+      _groundedResult = null;
+      _imageResult = null;
+      _activeSearchId = null;
+      _activeSearchIsSaved = false;
+      _summaryStage = mode == 'deep'
+          ? 'Analyzing image (deep)\u2026'
+          : 'Analyzing image\u2026';
+    });
+
+    final store = ImageSearchStore.instance;
+    _imageSearchKey = store.startSearch(
+      sessionKey: sessionKey,
+      query: query,
+      imageBytes: picked.uploadBytes,
+      imageMediaType: picked.uploadMediaType,
+      thumbDataUrl: thumbDataUrl,
+      originalMediaType: picked.sourceMediaType,
+      service: ref.read(tutorAiServiceProvider),
+      useXGrok: useXGrok,
+      mode: mode,
+      deepModel: useXGrok ? null : settings.deepModel,
+      liteModel: useXGrok ? null : settings.liteModel,
+      xgrokLiteModel: useXGrok ? settings.xgrokLiteModel : null,
+      xgrokDeepModel: useXGrok ? settings.xgrokDeepModel : null,
+      xgrokThinkingModel: useXGrok ? settings.xgrokThinkingModel : null,
+    );
+    store.addListener(_imageSearchKey!, _onImageSearchStoreUpdate);
+  }
+
+  void _onImageSearchStoreUpdate() {
+    if (!mounted) return;
+    _syncImageSearchFromStore();
+  }
+
+  void _syncImageSearchFromStore() {
+    final job = ImageSearchStore.instance.getJob(_imageSearchKey ?? '');
+    if (job == null) return;
+    final response = job.result;
+    final imageGrounded = response == null
+        ? null
+        : ImageGroundedResult(
+            response: response,
+            thumbDataUrl: job.thumbDataUrl,
+            originalMediaType: job.originalMediaType,
+            question: job.question,
+          );
+    setState(() {
+      _summaryLoading = job.loading;
+      _summaryStage = job.stage;
+      _imageResult = imageGrounded;
+      if (job.error != null && !job.loading) {
+        _summaryStage = '';
+      }
+    });
+    if (job.error != null && !job.loading && !_imageErrorShown) {
+      _imageErrorShown = true;
+      _showMessage(job.error!);
+    }
+    if (imageGrounded != null &&
+        _activeSearchId == null &&
+        !_draftStartInFlight) {
+      _ensureActiveDraft(result: imageGrounded);
+    }
   }
 
   Future<void> _pasteUrl() async {
@@ -2688,7 +3090,8 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
     final hasFollowUp = !_summaryLoading &&
         (_groundedResult != null ||
             _summaryResult != null ||
-            _tavilyResult != null);
+            _tavilyResult != null ||
+            _imageResult != null);
 
     // Watch settings here so the search-tab provider picker reactively
     // reflects toggles made in the settings modal without a full rebuild
@@ -2766,6 +3169,18 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
           hasText: _summaryUrlCtrl.text.trim().isNotEmpty,
           isLoading: _summaryLoading,
           isListening: _isListening && _voiceTarget == _summaryUrlCtrl,
+          // Image attach controls — wired only for this tab. The voice
+          // assistant + dictionary tabs that share _SearchInputBox don't
+          // pass these and therefore keep their previous chrome.
+          pendingImageThumbnail: _pendingImage?.thumbnailBytes,
+          pendingImageWidth: _pendingImage?.width,
+          pendingImageHeight: _pendingImage?.height,
+          pendingImageSizeKb: _pendingImage == null
+              ? null
+              : (_pendingImage!.uploadBytes.lengthInBytes / 1024).round(),
+          isAttachingImage: _pickingImage,
+          onAttachImage: _openImagePickerSheet,
+          onClearPendingImage: _clearPendingImage,
           onlineSearchProvider: _isUrl(_summaryUrlCtrl.text)
               ? (settings.xgrokEnabled &&
                       settings.summarizeOverride == 'xgrok'
@@ -2814,32 +3229,315 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
           _groundedResultWidget(colors, _groundedResult!),
         if (_tavilyResult != null && !_summaryLoading)
           _tavilyResultWidget(colors, _tavilyResult!),
+        if (_imageResult != null && !_summaryLoading)
+          _imageResultWidget(colors, _imageResult!),
       ],
     ),
     if (hasFollowUp)
       Positioned(
         right: 16,
         bottom: 24,
-        child: SearchFollowUpFab(
-          query: _summaryUrlCtrl.text.trim(),
-          initialAnswer: _groundedResult?.answer ??
-              _summaryResult?.summary ??
-              _tavilyResult?.answer ??
-              '',
-          model: _groundedResult?.model ??
-              _summaryResult?.model ??
-              'tavily',
-          // Always pass the active session id so EVERY follow-up turn is
-          // mirrored to Drift under it from message #1 — including turns
-          // asked before the user taps the bookmark icon. The mirror is a
-          // no-op for already-persisted message ids, so it's safe to be
-          // greedy here. See [SavedSearchStore.startDraft] for the draft
-          // lifecycle that produces this id.
-          savedSearchId: _activeSearchId,
-        ),
+        child: _imageResult != null && _imageSearchKey != null
+            ? Builder(
+                builder: (_) {
+                  final job =
+                      ImageSearchStore.instance.getJob(_imageSearchKey!);
+                  final bytes = job?.imageBytes;
+                  final mediaType = job?.imageMediaType ?? 'image/jpeg';
+                  if (bytes == null) {
+                    // Bytes evicted (e.g. user navigated away long
+                    // enough for the store to release) — degrade to
+                    // text-only follow-up so the conversation continues.
+                    return SearchFollowUpFab(
+                      query: _summaryUrlCtrl.text.trim().isEmpty
+                          ? 'Image analysis'
+                          : _summaryUrlCtrl.text.trim(),
+                      initialAnswer: _imageResult!.answer,
+                      model: _imageResult!.model,
+                      savedSearchId: _activeSearchId,
+                    );
+                  }
+                  // sessionKey must STAY STABLE across rebuilds. We use
+                  // `_imageSearchKey` (the in-memory session id) and pass
+                  // `_activeSearchId` separately as the Drift draft/save
+                  // id used for cross-device chat mirroring. Don't merge
+                  // the two — the draft id lands a tick AFTER the result,
+                  // so a merged key would flip mid-session, invalidate
+                  // the in-memory bytes registered against the original
+                  // key, and break the chat sheet ("Image not available
+                  // — please re-upload to continue").
+                  return ImageFollowUpFab(
+                    sessionKey: _imageSearchKey!,
+                    query: _summaryUrlCtrl.text.trim().isEmpty
+                        ? 'Image analysis'
+                        : _summaryUrlCtrl.text.trim(),
+                    initialAnswer: _imageResult!.answer,
+                    model: _imageResult!.model,
+                    imageBytes: bytes,
+                    imageMediaType: mediaType,
+                    savedSearchId: _activeSearchId,
+                  );
+                },
+              )
+            : SearchFollowUpFab(
+                query: _summaryUrlCtrl.text.trim(),
+                initialAnswer: _groundedResult?.answer ??
+                    _summaryResult?.summary ??
+                    _tavilyResult?.answer ??
+                    '',
+                model: _groundedResult?.model ??
+                    _summaryResult?.model ??
+                    'tavily',
+                // Always pass the active session id so EVERY follow-up
+                // turn is mirrored to Drift under it from message #1 —
+                // including turns asked before the user taps the
+                // bookmark icon. See [SavedSearchStore.startDraft] for
+                // the draft lifecycle that produces this id.
+                savedSearchId: _activeSearchId,
+              ),
       ),
       ],
     );
+  }
+
+  /// Renders an image-grounded result: the user's thumbnail, the
+  /// question they typed (if any), the AI answer in markdown, and any
+  /// citation chips the vision model returned. Mirrors the layout of
+  /// [_groundedResultWidget] so the surrounding tab keeps visual
+  /// language consistency across modalities.
+  Widget _imageResultWidget(AppColors colors, ImageGroundedResult r) {
+    const accentColor = Color(0xFF8B5CF6);
+    final isXGrokResult = r.model.toLowerCase().contains('grok');
+    final badgeLabel = isXGrokResult
+        ? 'xGrok Vision \u00b7 ${r.model}'
+        : 'Gemini Vision \u00b7 ${r.model.isNotEmpty ? r.model : 'auto'}';
+    final badgeColor = isXGrokResult
+        ? const Color(0xFFE8453C)
+        : const Color(0xFF4285F4);
+
+    final thumbBytes = _decodeThumbDataUrl(r.thumbDataUrl);
+    final question = r.question.trim();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const SizedBox(height: 20),
+        Row(
+          children: [
+            Expanded(
+              child: _searchServiceBadge(
+                colors,
+                badgeLabel,
+                isXGrokResult ? LucideIcons.bot : LucideIcons.image,
+                badgeColor,
+              ),
+            ),
+            _buildSaveResultButton(colors: colors, result: r),
+          ],
+        ),
+        const SizedBox(height: 10),
+        Container(
+          decoration: BoxDecoration(
+            color: colors.bg1,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: colors.border),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Container(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(colors: [
+                    accentColor.withValues(alpha: 0.06),
+                    const Color(0xFF6366F1).withValues(alpha: 0.06),
+                  ]),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(children: [
+                      const Icon(LucideIcons.image,
+                          size: 14, color: accentColor),
+                      const SizedBox(width: 8),
+                      Text(
+                        'IMAGE ANALYSIS',
+                        style: GoogleFonts.plusJakartaSans(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                          color: accentColor,
+                          letterSpacing: 1.2,
+                        ),
+                      ),
+                      const Spacer(),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: accentColor.withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Text(
+                          r.model.isNotEmpty ? r.model : 'vision',
+                          style: GoogleFonts.plusJakartaSans(
+                            fontSize: 9,
+                            fontWeight: FontWeight.w700,
+                            color: accentColor,
+                          ),
+                        ),
+                      ),
+                    ]),
+                    if (thumbBytes != null) ...[
+                      const SizedBox(height: 12),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(12),
+                            child: Image.memory(
+                              thumbBytes,
+                              width: 84,
+                              height: 84,
+                              fit: BoxFit.cover,
+                              filterQuality: FilterQuality.low,
+                              gaplessPlayback: true,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  question.isEmpty
+                                      ? 'What is in this image?'
+                                      : question,
+                                  style: GoogleFonts.plusJakartaSans(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w700,
+                                    color: colors.text,
+                                    height: 1.35,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  r.originalMediaType,
+                                  style: GoogleFonts.plusJakartaSans(
+                                    fontSize: 10,
+                                    color: colors.text4,
+                                    letterSpacing: 0.4,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              Divider(height: 1, color: colors.border2),
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            'ANSWER',
+                            style: GoogleFonts.plusJakartaSans(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700,
+                              color: colors.text5,
+                              letterSpacing: 1.2,
+                            ),
+                          ),
+                        ),
+                        GestureDetector(
+                          onTap: () => _copy(r.answer),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(LucideIcons.copy,
+                                  size: 13, color: colors.text4),
+                              const SizedBox(width: 4),
+                              Text(
+                                'Copy',
+                                style: GoogleFonts.plusJakartaSans(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w700,
+                                  color: colors.text4,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    SelectionArea(
+                      child: MarkdownBody(
+                        data: r.answer,
+                        selectable: false,
+                        onTapLink: (_, href, __) {
+                          if (href != null) _openUrl(href);
+                        },
+                        styleSheet: _aiMarkdownStyle(colors),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        if (r.sources.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 12),
+            child: SourcesDisclosure(
+              count: r.sources.length,
+              accentColor: accentColor,
+              body: _buildGroundedSourcesList(colors, accentColor, r.sources),
+            ),
+          ),
+        const SizedBox(height: 12),
+        OutlinedButton.icon(
+          onPressed: _resetSearchSession,
+          icon: Icon(LucideIcons.rotateCcw, size: 16, color: colors.text4),
+          label: Text(
+            'New Search',
+            style: GoogleFonts.plusJakartaSans(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: colors.text3,
+            ),
+          ),
+          style: OutlinedButton.styleFrom(
+            side: BorderSide(color: colors.border),
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12)),
+            padding: const EdgeInsets.symmetric(vertical: 14),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Decode a `data:image/jpeg;base64,...` URL to raw bytes for
+  /// in-memory display. Returns null on malformed input — callers
+  /// fall back to text-only rendering in that case.
+  Uint8List? _decodeThumbDataUrl(String url) {
+    if (url.isEmpty) return null;
+    final commaAt = url.indexOf(',');
+    if (commaAt <= 0) return null;
+    try {
+      return base64Decode(url.substring(commaAt + 1));
+    } catch (_) {
+      return null;
+    }
   }
 
   Widget _tavilyResultWidget(AppColors colors, TavilySearchResponse result) {
@@ -3119,11 +3817,19 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
       // practice — the draft insert completes within ~10ms on real
       // devices.
       final query = _summaryUrlCtrl.text.trim();
-      final kind = _isUrl(query) ? SavedSearchKind.url : SavedSearchKind.query;
+      final isImage = result is ImageGroundedResult;
+      // Image-grounded results can have empty queries (user uploaded a
+      // picture without typing anything); pick a label-friendly stand-
+      // in so the History card always has a readable title.
+      final effectiveQuery =
+          isImage && query.isEmpty ? 'Image analysis' : query;
+      final kind = isImage
+          ? SavedSearchKind.image
+          : (_isUrl(query) ? SavedSearchKind.url : SavedSearchKind.query);
       try {
         final entry = await store.saveResult(
           kind: kind,
-          query: query,
+          query: effectiveQuery,
           result: result,
         );
         if (!mounted) return;
@@ -4557,6 +5263,13 @@ class _SearchInputBox extends StatefulWidget {
     this.isListening = false,
     this.savedCount = 0,
     this.onOpenHistory,
+    this.pendingImageThumbnail,
+    this.pendingImageWidth,
+    this.pendingImageHeight,
+    this.pendingImageSizeKb,
+    this.isAttachingImage = false,
+    this.onAttachImage,
+    this.onClearPendingImage,
   });
 
   final TextEditingController controller;
@@ -4610,6 +5323,33 @@ class _SearchInputBox extends StatefulWidget {
   /// this is null, so callers that don't want history can simply omit it
   /// — fully backwards compatible with existing usages of this widget.
   final VoidCallback? onOpenHistory;
+
+  // ── InsightAI image-attach controls ──────────────────────────────────
+  //
+  // When [pendingImageThumbnail] is non-null we render a small 56×56
+  // preview chip directly above the text field with a clear (×) button.
+  // The attach icon stays visible in URL mode too — vision still works
+  // for URL-shaped queries (the URL becomes the query text alongside
+  // the image), and hiding the chip in URL mode caused confusion in
+  // QA.
+  final Uint8List? pendingImageThumbnail;
+  final int? pendingImageWidth;
+  final int? pendingImageHeight;
+  final int? pendingImageSizeKb;
+
+  /// True while the picker / compressor is running; lets us disable
+  /// the attach button + show a spinner so the user can't queue a
+  /// second pick on top of the first.
+  final bool isAttachingImage;
+
+  /// Tap handler for the attach icon. Null hides the icon entirely
+  /// (used by the other tabs that re-use this widget for non-AI
+  /// search and don't want image upload).
+  final VoidCallback? onAttachImage;
+
+  /// Tap handler for the × on the preview chip. Required when
+  /// [pendingImageThumbnail] is non-null.
+  final VoidCallback? onClearPendingImage;
 
   @override
   State<_SearchInputBox> createState() => _SearchInputBoxState();
@@ -4711,6 +5451,18 @@ class _SearchInputBoxState extends State<_SearchInputBox> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
+                // ── Pending image preview chip ────────────────────
+                // Shown when the user has attached an image but not
+                // yet submitted. Animated in/out so the layout shift
+                // is smooth and never jolts the surrounding tab.
+                AnimatedSize(
+                  duration: const Duration(milliseconds: 220),
+                  curve: Curves.easeOutCubic,
+                  alignment: Alignment.topLeft,
+                  child: widget.pendingImageThumbnail == null
+                      ? const SizedBox(width: double.infinity, height: 0)
+                      : _buildPendingImageChip(colors),
+                ),
                 // ── Multi-line text field ─────────────────────────
                 ConstrainedBox(
                   constraints: const BoxConstraints(minHeight: 56),
@@ -4752,6 +5504,10 @@ class _SearchInputBoxState extends State<_SearchInputBox> {
                     children: [
                       _buildVoiceChip(colors),
                       const SizedBox(width: 6),
+                      if (widget.onAttachImage != null) ...[
+                        _buildAttachImageChip(colors),
+                        const SizedBox(width: 6),
+                      ],
                       _buildActionChip(
                         icon: LucideIcons.clipboard,
                         label: 'Paste',
@@ -4818,13 +5574,13 @@ class _SearchInputBoxState extends State<_SearchInputBox> {
 
           // ── Submit / Stop button ───────────────────────────────
           GestureDetector(
-            onTapDown: widget.hasText || widget.isLoading
+            onTapDown: _canSubmit || widget.isLoading
                 ? (_) => setState(() => _btnScale = 0.96)
                 : null,
-            onTapUp: widget.hasText || widget.isLoading
+            onTapUp: _canSubmit || widget.isLoading
                 ? (_) => setState(() => _btnScale = 1.0)
                 : null,
-            onTapCancel: widget.hasText || widget.isLoading
+            onTapCancel: _canSubmit || widget.isLoading
                 ? () => setState(() => _btnScale = 1.0)
                 : null,
             child: AnimatedScale(
@@ -5113,6 +5869,147 @@ class _SearchInputBoxState extends State<_SearchInputBox> {
     );
   }
 
+  /// Attach-image chip rendered in the action toolbar. Hidden when the
+  /// parent didn't wire [widget.onAttachImage]. Switches to a small
+  /// spinner while the pick + compress pipeline is running so the user
+  /// can't queue a second pick mid-flight.
+  Widget _buildAttachImageChip(AppColors colors) {
+    const accent = _gradEnd;
+    final attached = widget.pendingImageThumbnail != null;
+    final busy = widget.isAttachingImage;
+    return GestureDetector(
+      onTap: busy ? null : widget.onAttachImage,
+      behavior: HitTestBehavior.opaque,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: attached
+              ? accent.withValues(alpha: 0.18)
+              : accent.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(20),
+          border: attached
+              ? Border.all(color: accent.withValues(alpha: 0.40))
+              : null,
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (busy)
+              const SizedBox(
+                width: 12,
+                height: 12,
+                child: CircularProgressIndicator(
+                  strokeWidth: 1.6,
+                  valueColor: AlwaysStoppedAnimation<Color>(accent),
+                ),
+              )
+            else
+              Icon(
+                attached ? LucideIcons.imagePlus : LucideIcons.image,
+                size: 13,
+                color: accent,
+              ),
+            const SizedBox(width: 4),
+            Text(
+              busy ? 'Loading\u2026' : (attached ? 'Image' : 'Image'),
+              style: GoogleFonts.plusJakartaSans(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: accent,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 56×56 thumbnail chip rendered just above the text field. Shows the
+  /// compressed-thumbnail bytes (so the chip renders instantly even
+  /// from a 50 MB source) plus dimensions + size for confidence, with
+  /// an × button to drop the attachment without submitting.
+  Widget _buildPendingImageChip(AppColors colors) {
+    final thumb = widget.pendingImageThumbnail!;
+    final dims = widget.pendingImageWidth != null &&
+            widget.pendingImageHeight != null
+        ? '${widget.pendingImageWidth}\u00d7${widget.pendingImageHeight}'
+        : null;
+    final size = widget.pendingImageSizeKb != null
+        ? '${widget.pendingImageSizeKb} KB'
+        : null;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 10, 10, 0),
+      child: Container(
+        padding: const EdgeInsets.all(6),
+        decoration: BoxDecoration(
+          color: colors.bg2,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: colors.border2),
+        ),
+        child: Row(
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: Image.memory(
+                thumb,
+                width: 44,
+                height: 44,
+                fit: BoxFit.cover,
+                filterQuality: FilterQuality.low,
+                gaplessPlayback: true,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Image attached',
+                    style: GoogleFonts.plusJakartaSans(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      color: colors.text,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    [
+                      if (dims != null) dims,
+                      if (size != null) size,
+                      'JPEG',
+                    ].join('  ·  '),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.plusJakartaSans(
+                      fontSize: 10,
+                      color: colors.text4,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (widget.onClearPendingImage != null)
+              GestureDetector(
+                onTap: widget.onClearPendingImage,
+                behavior: HitTestBehavior.opaque,
+                child: Container(
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    color: colors.bg3,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(LucideIcons.x, size: 12, color: colors.text4),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildActionChip({
     required IconData icon,
     required String label,
@@ -5184,19 +6081,33 @@ class _SearchInputBoxState extends State<_SearchInputBox> {
       );
     }
 
-    final label = widget.isUrl ? 'Summarize' : 'Search Web';
-    final icon = widget.isUrl ? LucideIcons.sparkles : LucideIcons.search;
+    final hasImage = widget.pendingImageThumbnail != null;
+    final String label;
+    final IconData icon;
+    if (hasImage) {
+      // When an image is attached the submit verb shifts to "Analyze" —
+      // we may be Summarize-mode or Search-mode by URL detection, but
+      // the user's mental model is "look at this picture".
+      label = 'Analyze Image';
+      icon = LucideIcons.image;
+    } else if (widget.isUrl) {
+      label = 'Summarize';
+      icon = LucideIcons.sparkles;
+    } else {
+      label = 'Search Web';
+      icon = LucideIcons.search;
+    }
 
     return DecoratedBox(
       decoration: BoxDecoration(
-        gradient: widget.hasText
+        gradient: _canSubmit
             ? const LinearGradient(colors: [_gradStart, _gradEnd])
             : null,
-        color: widget.hasText ? null : _gradStart.withValues(alpha: 0.12),
+        color: _canSubmit ? null : _gradStart.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(14),
       ),
       child: FilledButton.icon(
-        onPressed: widget.hasText ? widget.onSubmitted : null,
+        onPressed: _canSubmit ? widget.onSubmitted : null,
         style: FilledButton.styleFrom(
           backgroundColor: Colors.transparent,
           disabledBackgroundColor: Colors.transparent,
@@ -5207,7 +6118,7 @@ class _SearchInputBoxState extends State<_SearchInputBox> {
         icon: Icon(
           icon,
           size: 17,
-          color: widget.hasText
+          color: _canSubmit
               ? (colors.isDark ? colors.text : Colors.white)
               : colors.text5,
         ),
@@ -5216,7 +6127,7 @@ class _SearchInputBoxState extends State<_SearchInputBox> {
           style: GoogleFonts.plusJakartaSans(
             fontSize: 14,
             fontWeight: FontWeight.w800,
-            color: widget.hasText
+            color: _canSubmit
                 ? (colors.isDark ? colors.text : Colors.white)
                 : colors.text5,
           ),
@@ -5224,6 +6135,13 @@ class _SearchInputBoxState extends State<_SearchInputBox> {
       ),
     );
   }
+
+  /// True when the search button should be tappable. The text path needs
+  /// non-empty text; the image-vision path accepts text-empty submissions
+  /// (the AI will describe what's in the picture). Either way the parent
+  /// handler short-circuits if [widget.isLoading] is true.
+  bool get _canSubmit =>
+      widget.hasText || widget.pendingImageThumbnail != null;
 
   // ── Provider chip ──────────────────────────────────────────────────────────
 

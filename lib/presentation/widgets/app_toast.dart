@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -7,7 +6,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../../core/services/telegram_logger.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  AppToast — Overlay-based toast with HARD-TIMER auto-dismiss
+//  AppToast — Overlay-based toast with TWO independent dismiss timers
 // ─────────────────────────────────────────────────────────────────────────────
 //
 // Why this exists (and why we don't use SnackBar for save/remove popovers):
@@ -20,47 +19,53 @@ import '../../core/services/telegram_logger.dart';
 //     • Some Flutter versions pause SnackBar's auto-dismiss timer when a new
 //       opaque route covers the underlying messenger. Result: the user
 //       perceives the toast as "stuck".
-//     • Floating snackbars with a margin from the bottom can appear pinned
-//       above bottom-sheet input bars instead of dismissing cleanly.
+//     • In dark-mode, the default SnackBar inverts to a LIGHT background
+//       with dark text — clashes hard with our app's dark theme.
 //
-//   The fix is the same one every production app eventually lands on:
-//   render the toast directly on the *root navigator's overlay* with a
-//   hard [Timer] that calls dismiss after the configured duration —
-//   independent of any Scaffold, route stack, or animation pipeline.
+// Belt-and-braces dismissal contract:
+//   1. **Primary timer** schedules the normal dismiss after [duration].
+//   2. **Watchdog timer** fires at [duration] + [_kWatchdogGrace] and force-
+//      tears down the overlay entry no matter what — even if the primary
+//      animation was somehow paused, even if the parent route is gone, even
+//      if the widget tree was rebuilt mid-animation.
+//   This is the production answer to "the toast didn't disappear" — the
+//   watchdog is independent of any animation pipeline, route stack, or
+//   widget lifecycle. Worst case it removes a torn-down entry which is a
+//   no-op.
 //
-// Guarantees:
-//   • The toast WILL dismiss after [duration] regardless of route state,
-//     widget tree changes, or whether the user interacts with the screen.
-//   • Showing a new toast immediately replaces any toast currently on
-//     screen — no stacking, no orphans.
-//   • The overlay is mounted on the [rootOverlay], so the toast renders
-//     ABOVE all bottom sheets, dialogs, and pushed routes.
-//   • Tap on the toast's body dismisses it instantly.
-//   • If the user taps the optional action button (e.g. "Undo"), the
-//     callback fires and the toast dismisses immediately.
-//
-// Telegram observability:
-//   Every show/dismiss path emits a debug-level [TLog] entry tagged
-//   "AppToast" so the toast lifecycle is visible in production logs.
+// Implementation notes:
+//   • Uses the *root navigator's overlay* so the toast renders ABOVE every
+//     bottom sheet, dialog, and pushed route.
+//   • NO BackdropFilter — that's a hardware-accelerated path that has
+//     occasional rendering issues on certain Android device/OS combos and
+//     is not necessary for a solid, opaque toast.
+//   • Fully opaque background — no alpha mixing means the toast renders
+//     identically on every theme + device.
+//   • Throwing onAction is wrapped in try/finally so a buggy caller can't
+//     leave the toast stranded on screen.
 
 class AppToast {
   AppToast._();
 
   static OverlayEntry? _activeEntry;
   static Timer? _activeTimer;
+  static Timer? _watchdogTimer;
   static _AppToastEntryState? _activeState;
 
-  /// Default visible duration for a toast. Long enough for the user to
-  /// read + reach the action button; short enough that it never feels
-  /// like the app is "stuck".
+  /// Default visible duration for a toast.
   static const Duration _kDefaultDuration = Duration(seconds: 3);
 
-  /// Hard upper-bound timer leeway — we add 200 ms over the configured
-  /// duration so the slide-out animation can complete before the entry
-  /// is removed from the overlay tree.
+  /// Slide-out animation length — kept in sync with [_AppToastEntryState].
   static const Duration _kAnimationOut = Duration(milliseconds: 220);
 
-  /// Show a toast attached to the nearest [Overlay] of [context].
+  /// How long after the configured [duration] the watchdog timer fires
+  /// to force-remove a still-mounted entry. Generous enough that the
+  /// normal animation path always completes first under healthy conditions
+  /// but short enough that the user never sees a stuck toast for >1 s
+  /// past its expected lifetime.
+  static const Duration _kWatchdogGrace = Duration(milliseconds: 800);
+
+  /// Show a toast attached to the root [Overlay] of [context].
   ///
   /// Pass [action] to render an inline button (e.g. "Undo"). Tapping it
   /// fires [onAction] and immediately dismisses the toast.
@@ -95,8 +100,8 @@ class AppToast {
       return;
     }
 
-    // Replace any existing toast — no stacking. We slide-out the prior
-    // entry first so the transition reads naturally.
+    // Replace any existing toast — no stacking. We tear down hard (no
+    // animation) so the next show() reads as a clean swap.
     _hideInternal(animate: false);
 
     final entry = OverlayEntry(
@@ -117,9 +122,25 @@ class AppToast {
         '(${duration.inMilliseconds}ms${action != null ? ', action=$action' : ''})');
 
     if (duration > Duration.zero) {
+      // Primary dismiss path — schedules the smooth slide-out.
       _activeTimer = Timer(duration, () {
         TLog.d('AppToast', 'auto-dismiss after ${duration.inMilliseconds}ms');
         hide();
+      });
+      // Watchdog dismiss path — independent timer that force-removes the
+      // overlay entry no matter what. This is the safety net for the
+      // "toast stuck on screen" production bug. Fires at:
+      //   duration + _kAnimationOut + _kWatchdogGrace
+      // so under healthy conditions the primary path completes first and
+      // this becomes a no-op (entry is already null).
+      final hardLimit = duration + _kAnimationOut + _kWatchdogGrace;
+      _watchdogTimer = Timer(hardLimit, () {
+        if (_activeEntry == entry) {
+          TLog.w('AppToast',
+              'watchdog fired after ${hardLimit.inMilliseconds}ms — '
+              'forcing entry removal (primary dismiss path stalled)');
+          _hideInternal(animate: false);
+        }
       });
     }
   }
@@ -133,6 +154,8 @@ class AppToast {
   static void _hideInternal({required bool animate}) {
     _activeTimer?.cancel();
     _activeTimer = null;
+    _watchdogTimer?.cancel();
+    _watchdogTimer = null;
     final entry = _activeEntry;
     final state = _activeState;
     _activeEntry = null;
@@ -160,6 +183,8 @@ class AppToast {
   static void debugResetForTests() {
     _activeTimer?.cancel();
     _activeTimer = null;
+    _watchdogTimer?.cancel();
+    _watchdogTimer = null;
     final entry = _activeEntry;
     _activeEntry = null;
     _activeState = null;
@@ -267,108 +292,96 @@ class _AppToastEntryState extends State<_AppToastEntry>
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Material(
-              color: Colors.transparent,
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(14),
-                child: BackdropFilter(
-                  filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-                  child: GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onTap: () {
-                      TLog.d('AppToast', 'tap-to-dismiss');
-                      widget.onDismiss();
-                    },
-                    child: Container(
-                      decoration: BoxDecoration(
-                        color: colors.bg,
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(
-                            color: colors.border, width: 0.6),
-                        boxShadow: const [
-                          BoxShadow(
-                            color: Color(0x33000000),
-                            blurRadius: 18,
-                            offset: Offset(0, 6),
+              // Fully opaque so the toast renders the same way on every
+              // device + theme. No BackdropFilter (that's a GPU path with
+              // occasional rendering glitches on certain Android combos).
+              color: colors.bg,
+              elevation: 8,
+              shadowColor: const Color(0x55000000),
+              borderRadius: BorderRadius.circular(14),
+              clipBehavior: Clip.antiAlias,
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () {
+                  TLog.d('AppToast', 'tap-to-dismiss');
+                  widget.onDismiss();
+                },
+                child: Container(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(14),
+                    border:
+                        Border.all(color: colors.border, width: 0.6),
+                  ),
+                  padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
+                  child: Row(
+                    children: [
+                      if (colors.icon != null) ...[
+                        Icon(colors.icon, size: 18, color: colors.iconColor),
+                        const SizedBox(width: 10),
+                      ],
+                      Expanded(
+                        child: Text(
+                          widget.message,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: GoogleFonts.plusJakartaSans(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.white,
+                            height: 1.3,
                           ),
-                        ],
+                        ),
                       ),
-                      padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
-                      child: Row(
-                        children: [
-                          if (colors.icon != null) ...[
-                            Icon(colors.icon, size: 18, color: colors.iconColor),
-                            const SizedBox(width: 10),
-                          ],
-                          Expanded(
-                            child: Text(
-                              widget.message,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: GoogleFonts.plusJakartaSans(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w600,
-                                color: Colors.white,
-                                height: 1.3,
-                              ),
-                            ),
-                          ),
-                          if (widget.action != null) ...[
-                            const SizedBox(width: 10),
-                            // Dedicated action chip — separate hit-target so
-                            // the body's tap-to-dismiss doesn't swallow it.
-                            Material(
-                              color: Colors.transparent,
-                              borderRadius: BorderRadius.circular(8),
-                              child: InkWell(
-                                borderRadius: BorderRadius.circular(8),
-                                onTap: () {
-                                  TLog.d('AppToast',
-                                      'action="${widget.action}" pressed');
-                                  // Fire callback first so any state mutation
-                                  // happens BEFORE the overlay tears down.
-                                  // Wrap in try/finally so a throwing action
-                                  // never leaks the toast on-screen forever
-                                  // (production safety: a buggy Undo handler
-                                  // shouldn't permanently freeze the toast).
-                                  Object? caught;
-                                  StackTrace? caughtStack;
-                                  try {
-                                    widget.onAction?.call();
-                                  } catch (e, st) {
-                                    caught = e;
-                                    caughtStack = st;
-                                    TLog.e('AppToast',
-                                        'action="${widget.action}" threw',
-                                        error: e);
-                                  } finally {
-                                    widget.onDismiss();
-                                  }
-                                  // Re-raise after dismiss so the framework /
-                                  // test harness still observes the error
-                                  // through normal channels.
-                                  if (caught != null) {
-                                    Error.throwWithStackTrace(
-                                        caught, caughtStack ?? StackTrace.current);
-                                  }
-                                },
-                                child: Padding(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 12, vertical: 8),
-                                  child: Text(
-                                    widget.action!,
-                                    style: GoogleFonts.plusJakartaSans(
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.w800,
-                                      color: const Color(0xFFC084FC),
-                                    ),
-                                  ),
+                      if (widget.action != null) ...[
+                        const SizedBox(width: 10),
+                        // Dedicated action chip — separate hit-target so
+                        // the body's tap-to-dismiss doesn't swallow it.
+                        Material(
+                          color: Colors.transparent,
+                          borderRadius: BorderRadius.circular(8),
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(8),
+                            onTap: () {
+                              TLog.d('AppToast',
+                                  'action="${widget.action}" pressed');
+                              // Wrap in try/finally so a throwing action
+                              // never leaks the toast on-screen forever
+                              // (production safety: a buggy Undo handler
+                              // shouldn't permanently freeze the toast).
+                              Object? caught;
+                              StackTrace? caughtStack;
+                              try {
+                                widget.onAction?.call();
+                              } catch (e, st) {
+                                caught = e;
+                                caughtStack = st;
+                                TLog.e('AppToast',
+                                    'action="${widget.action}" threw',
+                                    error: e);
+                              } finally {
+                                widget.onDismiss();
+                              }
+                              if (caught != null) {
+                                Error.throwWithStackTrace(caught,
+                                    caughtStack ?? StackTrace.current);
+                              }
+                            },
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 12, vertical: 8),
+                              child: Text(
+                                widget.action!,
+                                style: GoogleFonts.plusJakartaSans(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w800,
+                                  color: const Color(0xFFC084FC),
                                 ),
                               ),
                             ),
-                          ],
-                        ],
-                      ),
-                    ),
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
                 ),
               ),
@@ -383,22 +396,26 @@ class _AppToastEntryState extends State<_AppToastEntry>
     switch (v) {
       case AppToastVariant.success:
         return const _ToastColors(
-          bg: Color(0xE61F2937),
+          // Fully opaque dark gray-green. Sits great on dark backgrounds
+          // and is clearly distinct from "info".
+          bg: Color(0xFF14532D),
           border: Color(0xFF22C55E),
           icon: Icons.check_circle_outline,
           iconColor: Color(0xFF22C55E),
         );
       case AppToastVariant.error:
         return const _ToastColors(
-          bg: Color(0xE6991B1B),
+          bg: Color(0xFF7F1D1D),
           border: Color(0xFFFCA5A5),
           icon: Icons.error_outline,
           iconColor: Color(0xFFFCA5A5),
         );
       case AppToastVariant.info:
         return const _ToastColors(
-          bg: Color(0xE61F2937),
-          border: Color(0x331F2937),
+          // Fully opaque dark slate — matches our dark theme exactly so
+          // it's never mistaken for a Material SnackBar in dark mode.
+          bg: Color(0xFF111827),
+          border: Color(0xFF374151),
           icon: null,
           iconColor: Colors.white,
         );

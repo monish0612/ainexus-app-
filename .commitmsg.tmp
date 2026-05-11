@@ -1,0 +1,65 @@
+feat(insightai): image-grounded search + follow-up chat
+
+Adds a vision-powered InsightAI mode where the user attaches a photo
+(camera or gallery), gets an LLM-grounded answer, and can chase the
+conversation with follow-up questions. The image is re-attached on
+every turn so mid-chat provider/mode switches stay accurate without
+a session-aware backend.
+
+Core
+- image_pipeline.dart: pure-Dart isolate-safe compress + thumbnail
+  pipeline. Caps long edge, EXIF-strips, JPEG-encodes, returns the
+  bytes destined for the wire layer (base64 wrapped at the API client).
+- image_search_store.dart: in-memory + Drift-backed store mirroring
+  saved_search_store, but keyed on the image bytes hash so retries and
+  saved-search promote/demote semantics are stable across follow-ups.
+- tutor_ai_service.dart: new imageSearch() and imageFollowUp() RPCs
+  posting to /api/v1/ai/image-search and /api/v1/ai/image-followup.
+  Wire body: {query, image (base64), imageMediaType, query/initial-
+  Answer/question/history for follow-up, ...ModelHints}.
+- saved_search_store.dart: extended save schema to carry imageBytes,
+  imageMediaType, and an isImageGrounded flag so image sessions round
+  trip through the same Save / restore plumbing as text sessions.
+- Cross-device delete sync continues to apply to image entries via the
+  existing tombstone path.
+
+UI
+- image_followup_sheet.dart: full-screen vision chat sheet with
+  preview thumbnail pinned to header, scroll-to-latest, mid-chat
+  provider/mode chip switcher, and the unified app_toast for save /
+  remove / clear toasts.
+- saved_search_detail_sheet.dart + saved_searches_sheet.dart:
+  render image entries inline (thumbnail + truncated query), tap
+  reopens the image-followup sheet with full chat history.
+- tutor_screen.dart: new image-attach button on the InsightAI card,
+  launches the picker, runs the pipeline, and routes the answer to
+  image_followup_sheet.
+
+Android plumbing
+- AndroidManifest.xml: CAMERA, READ_MEDIA_IMAGES, READ_MEDIA_VISUAL_
+  USER_SELECTED permissions (Android 13+ scoped + 14+ partial).
+- FileProvider entry with ${applicationId}.fileprovider authority so
+  image_picker camera capture works without legacy storage perms.
+- res/xml/file_paths.xml: cache + files + external paths exposed for
+  any future upload flow on the same authority.
+
+Dependencies
+- image: ^4.3.0 (pure-Dart, isolate-safe, used by image_pipeline).
+
+Tests (157 passing locally)
+- image_pipeline_test, image_search_store_test, image_followup_store_
+  test, image_followup_sheet_model_switch_test.
+- saved_search_image_grounded_test, saved_search_sync_deep_test,
+  saved_search_detail_sheet_image_test, saved_searches_sheet_image_
+  test.
+- tutor_ai_service_image_routing_test (verifies provider/mode hints
+  flow into image-search and image-followup wire bodies unchanged).
+- saved_search_sync_e2e_test extended for image roundtrip + tombstone
+  delete sync of image-grounded entries.
+
+Note
+- Backend routes /api/v1/ai/image-search and /api/v1/ai/image-followup
+  are not yet implemented in the ainexus repo. Until they ship, the
+  image attach button will surface a 4xx via the unified error toast.
+  Server-side wire shape mirrors search/searchFollowUp + adds image
+  (base64) and imageMediaType to the body.

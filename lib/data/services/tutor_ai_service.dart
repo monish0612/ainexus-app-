@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
 import 'package:dio/dio.dart';
 
 import '../../core/llm/model_hints.dart';
@@ -393,6 +396,185 @@ class TutorAiService {
       return ArticleFollowUpResponse.fromJson(data);
     } catch (e) {
       TLog.e('TutorAI', 'Deep research failed', error: e);
+      rethrow;
+    }
+  }
+
+  // ── Image Search (InsightAI vision) ──────────────────────────────────────
+
+  /// Single-shot image analysis. Sends a base64-encoded JPEG (the
+  /// pipeline-compressed bytes — never the raw 50 MB source) plus an
+  /// optional text query and returns the same [GroundedSearchResponse]
+  /// shape as the text path, so [OnlineSearchStore] / SaveSearchStore
+  /// can reuse all existing rendering + persistence plumbing.
+  ///
+  /// Routing follows the exact same provider / mode / model-hint
+  /// contract as [groundedSearch] — the backend is expected to
+  /// dispatch the request to the vision-capable variant of the
+  /// resolved (provider, mode) pair.
+  ///
+  /// We do NOT add client-side multi-attempt retry here. The Dio
+  /// interceptor already retries on 5xx + transient connection
+  /// errors, and the resume-retry queue in [ImageSearchStore] handles
+  /// network-loss recovery on app resume. Stacking another retry
+  /// loop would amplify backend load on a 1-2 MB upload.
+  ///
+  /// Timeouts are deliberately longer than the text path because a
+  /// 1-2 MB JPEG upload on a slow cellular link can take 30+ seconds
+  /// just to send — 90 s send + 90 s receive gives a comfortable
+  /// budget without leaving the user staring at a dead progress bar
+  /// for minutes.
+  Future<GroundedSearchResponse> imageSearch({
+    required String query,
+    required Uint8List imageBytes,
+    required String imageMediaType,
+    String? provider,
+    String? mode,
+    String? deepModel,
+    String? liteModel,
+    String? xgrokLiteModel,
+    String? xgrokDeepModel,
+    String? xgrokThinkingModel,
+    CancelToken? cancelToken,
+  }) async {
+    final hints = ModelHints.build(
+      provider: provider,
+      mode: mode,
+      deepModel: deepModel,
+      liteModel: liteModel,
+      xgrokLiteModel: xgrokLiteModel,
+      xgrokDeepModel: xgrokDeepModel,
+      xgrokThinkingModel: xgrokThinkingModel,
+    );
+    final resolvedProvider = hints['provider'] as String;
+    final resolvedMode = hints['mode'] as String;
+    final qPreview =
+        query.length > 80 ? '${query.substring(0, 77)}\u2026' : query;
+    final sizeKB = (imageBytes.lengthInBytes / 1024).toStringAsFixed(0);
+    TLog.d('TutorAI',
+        'ImageSearch \u2192 "$qPreview" [provider=$resolvedProvider mode=$resolvedMode '
+        'imageBytes=${sizeKB}KB type=$imageMediaType]');
+    final sw = Stopwatch()..start();
+
+    try {
+      final body = <String, dynamic>{
+        'query': query,
+        'image': base64Encode(imageBytes),
+        'imageMediaType': imageMediaType,
+        ...hints,
+      };
+      final response = await _apiClient.post<Object?>(
+        ApiEndpoints.aiImageSearch,
+        data: body,
+        options: Options(
+          sendTimeout: const Duration(seconds: 90),
+          receiveTimeout: const Duration(seconds: 120),
+        ),
+        cancelToken: cancelToken,
+      );
+      final data = _asMap(response.data);
+      if (data == null) {
+        TLog.w('TutorAI', 'Empty image search response body');
+        throw StateError('Empty image search response');
+      }
+      sw.stop();
+      TLog.i('TutorAI',
+          'ImageSearch \u2713 provider=$resolvedProvider mode=${data['mode'] ?? resolvedMode} '
+          'model=${data['model']} sources=${(data['sources'] as List?)?.length ?? 0} '
+          'image=${sizeKB}KB ${sw.elapsedMilliseconds}ms');
+      return GroundedSearchResponse.fromJson(data);
+    } catch (e) {
+      sw.stop();
+      TLog.e('TutorAI',
+          'ImageSearch FAILED [provider=$resolvedProvider mode=$resolvedMode] '
+          '${sw.elapsedMilliseconds}ms',
+          error: e);
+      rethrow;
+    }
+  }
+
+  /// Follow-up turn for an active image-search session. The image
+  /// bytes are re-attached on EVERY call so the backend (stateless)
+  /// always has full vision context — this is the same pattern as
+  /// the Anthropic sample at cursor_ai_image_chat_prompt.md and is
+  /// what makes mid-chat Lite\u2194Deep / Gemini\u2194xGrok switching
+  /// stay accurate without a session-aware backend.
+  Future<ArticleFollowUpResponse> imageFollowUp({
+    required String query,
+    required String question,
+    required Uint8List imageBytes,
+    required String imageMediaType,
+    // The original answer the user got back from `/ai/image-search`.
+    // Forwarded verbatim so the backend can ground the conversation
+    // in that response even on turn #1 when `history` is still
+    // empty. Optional so older callers still compile; default empty
+    // string is the legacy no-context behaviour.
+    String initialAnswer = '',
+    List<Map<String, String>> history = const [],
+    String? provider,
+    String? mode,
+    String? deepModel,
+    String? liteModel,
+    String? xgrokLiteModel,
+    String? xgrokDeepModel,
+    String? xgrokThinkingModel,
+    CancelToken? cancelToken,
+  }) async {
+    final hints = ModelHints.build(
+      provider: provider,
+      mode: mode,
+      deepModel: deepModel,
+      liteModel: liteModel,
+      xgrokLiteModel: xgrokLiteModel,
+      xgrokDeepModel: xgrokDeepModel,
+      xgrokThinkingModel: xgrokThinkingModel,
+    );
+    final resolvedProvider = hints['provider'] as String;
+    final resolvedMode = hints['mode'] as String;
+    final sizeKB = (imageBytes.lengthInBytes / 1024).toStringAsFixed(0);
+    TLog.d('TutorAI',
+        'ImageFollowUp \u2192 "${question.length > 60 ? '${question.substring(0, 60)}\u2026' : question}" '
+        '[provider=$resolvedProvider mode=$resolvedMode history=${history.length} '
+        'image=${sizeKB}KB]');
+    final sw = Stopwatch()..start();
+
+    try {
+      final body = <String, dynamic>{
+        'query': query,
+        if (initialAnswer.isNotEmpty) 'initialAnswer': initialAnswer,
+        'question': question,
+        'history': history,
+        'image': base64Encode(imageBytes),
+        'imageMediaType': imageMediaType,
+        ...hints,
+      };
+      final response = await _apiClient.post<Object?>(
+        ApiEndpoints.aiImageFollowup,
+        data: body,
+        options: Options(
+          sendTimeout: const Duration(seconds: 90),
+          receiveTimeout: const Duration(seconds: 120),
+        ),
+        cancelToken: cancelToken,
+      );
+      final data = _asMap(response.data);
+      if (data == null) {
+        TLog.w('TutorAI', 'Empty image follow-up response body');
+        throw StateError('Empty image follow-up response');
+      }
+      sw.stop();
+      TLog.i('TutorAI',
+          'ImageFollowUp \u2713 model=${data['model']} '
+          'sources=${(data['sources'] as List?)?.length ?? 0} '
+          '[provider=$resolvedProvider mode=$resolvedMode] '
+          '${sw.elapsedMilliseconds}ms');
+      return ArticleFollowUpResponse.fromJson(data);
+    } catch (e) {
+      sw.stop();
+      TLog.e('TutorAI',
+          'ImageFollowUp FAILED [provider=$resolvedProvider mode=$resolvedMode] '
+          '${sw.elapsedMilliseconds}ms',
+          error: e);
       rethrow;
     }
   }

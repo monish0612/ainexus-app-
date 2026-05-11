@@ -26,6 +26,16 @@ abstract final class ApiEndpoints {
   static String get aiSearchFollowup => '$_base/api/v1/ai/search-followup';
   static String get aiSummarizeHistory => '$_base/api/v1/ai/summarize-history';
 
+  // ── InsightAI Image (vision) ───────────────────────────────────────────
+  // Dedicated vision endpoints that accept a base64-encoded image +
+  // optional text query. The backend routes the request to the
+  // multimodal variant of the user-selected provider (Gemini Vision
+  // for `provider=gemini`, Grok Vision for `provider=xgrok`) and
+  // returns the same `GroundedSearchResponse` shape as the text path
+  // so the UI / save-sync layer can reuse all existing plumbing.
+  static String get aiImageSearch => '$_base/api/v1/ai/image-search';
+  static String get aiImageFollowup => '$_base/api/v1/ai/image-followup';
+
   // News
   static String get news => '$_base/api/v1/news';
   static String get newsRefresh => '$_base/api/v1/news/refresh';

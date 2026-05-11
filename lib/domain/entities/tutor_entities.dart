@@ -464,6 +464,54 @@ class GroundedCitation {
       };
 }
 
+// ── Image-Grounded (InsightAI vision) ────────────────────────────────────────
+
+/// Bundles a [GroundedSearchResponse] from the image-search endpoint with
+/// the cross-device sync fields the SavedSearchStore needs:
+///   • [thumbDataUrl]  : `data:image/jpeg;base64,...` (≤ 50 KB) — small
+///                       enough to ride along inside `responseJson` and
+///                       reach every signed-in device of the same user.
+///   • [originalMediaType] : original source MIME (image/jpeg, image/png,
+///                       image/heic, …) — informational, surfaced as a
+///                       chip in the History UI.
+///   • [question]      : the user's text query that accompanied the image.
+///
+/// This class is intentionally NOT a network DTO — it lives entirely in the
+/// app layer to plumb image-grounded saves through the existing object-based
+/// SavedSearchStore.saveResult / startDraft API without changing the API
+/// shape. The persisted JSON merges the GroundedSearchResponse fields with
+/// the extras above and decodes back via [SavedSearchEntry.decodedResult]
+/// (returns a plain GroundedSearchResponse) + [SavedSearchEntry.imageThumbDataUrl]
+/// etc. for the extras.
+@immutable
+class ImageGroundedResult {
+  const ImageGroundedResult({
+    required this.response,
+    required this.thumbDataUrl,
+    required this.originalMediaType,
+    required this.question,
+  });
+
+  final GroundedSearchResponse response;
+  final String thumbDataUrl;
+  final String originalMediaType;
+  final String question;
+
+  String get answer => response.answer;
+  String get model => response.model;
+  List<GroundedSource> get sources => response.sources;
+
+  /// Camel-case JSON form for SavedSearchStore persistence. Merges the
+  /// grounded fields with the image-only extras under top-level keys so
+  /// the JSON stays flat and idiomatic.
+  Map<String, dynamic> toJson() => <String, dynamic>{
+        ...response.toJson(),
+        'imageThumb': thumbDataUrl,
+        'imageMediaType': originalMediaType,
+        'question': question,
+      };
+}
+
 // ── Article Follow-Up ────────────────────────────────────────────────────────
 
 @immutable
