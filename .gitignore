@@ -69,3 +69,6 @@ ios/Runner/GoogleService-Info.plist
 secrets/
 *.sa.json
 google-services.json
+
+# Local commit message scratch files
+.commitmsg.tmp
