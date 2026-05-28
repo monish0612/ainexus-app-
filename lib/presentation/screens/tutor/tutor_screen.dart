@@ -14,6 +14,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/di/injection.dart';
 import '../../../core/llm/model_name_format.dart';
+import '../../../core/network/ai_error.dart';
 import '../../../core/services/hold_to_speak_service.dart';
 import '../../../core/services/image_pipeline.dart';
 import '../../../core/services/image_search_store.dart';
@@ -823,10 +824,11 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
       setState(() => _rephraseLoading = false);
       _showMessage('Could not parse your input. Use: your instruction "text to rephrase"');
     } catch (e) {
-      TLog.e('Tutor', 'Rephrase failed', error: e);
+      final aiErr = AiError.fromAny(e, fallbackMessage: 'Rephrase failed. Please try again.');
+      TLog.e('Tutor', 'Rephrase failed → ${aiErr.code}', error: e);
       if (!mounted) return;
       setState(() => _rephraseLoading = false);
-      _showMessage('Rephrase failed. Check your connection and try again.');
+      _showAiError(aiErr);
     }
   }
 
@@ -851,10 +853,11 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
         _coachLoading = false;
       });
     } catch (e) {
-      TLog.e('Tutor', 'Coach failed', error: e);
+      final aiErr = AiError.fromAny(e, fallbackMessage: 'Coach is unavailable. Please try again.');
+      TLog.e('Tutor', 'Coach failed → ${aiErr.code}', error: e);
       if (!mounted) return;
       setState(() => _coachLoading = false);
-      _showMessage('Coach is unavailable. Please try again.');
+      _showAiError(aiErr);
     }
   }
 
@@ -1533,6 +1536,32 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
         behavior: SnackBarBehavior.floating,
         duration: const Duration(seconds: 2),
       ),
+    );
+  }
+
+  // Surface a structured AI error with the right copy + an
+  // "Open Settings" CTA when the failure is settings-actionable
+  // (e.g. user picked a Gemini model the API key can't reach).
+  // Falls back to a normal toast for transient failures.
+  void _showAiError(AiError err) {
+    if (!mounted) return;
+    if (err.isSettingsActionable) {
+      AppToast.show(
+        context,
+        message: err.toastMessage,
+        action: 'Open Settings',
+        onAction: () {
+          if (!mounted) return;
+          showSettingsModal(context, ref);
+        },
+        duration: const Duration(seconds: 6),
+      );
+      return;
+    }
+    AppToast.show(
+      context,
+      message: err.toastMessage,
+      duration: const Duration(seconds: 4),
     );
   }
 

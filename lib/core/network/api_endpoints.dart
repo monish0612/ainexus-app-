@@ -26,6 +26,13 @@ abstract final class ApiEndpoints {
   static String get aiSearchFollowup => '$_base/api/v1/ai/search-followup';
   static String get aiSummarizeHistory => '$_base/api/v1/ai/summarize-history';
 
+  /// Live directory of Gemini models the backend's GOOGLE_API_KEY can
+  /// invoke. Used by the Settings sheet to render a dynamic picker so
+  /// the user never types a model id Google hasn't shipped yet (or has
+  /// retired). Backed by Google's `/v1beta/models` endpoint, cached
+  /// 5 min server-side.
+  static String get aiModels => '$_base/api/v1/ai/models';
+
   // ── InsightAI Image (vision) ───────────────────────────────────────────
   // Dedicated vision endpoints that accept a base64-encoded image +
   // optional text query. The backend routes the request to the

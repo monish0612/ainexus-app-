@@ -9,6 +9,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import '../../data/repositories/news_repository.dart';
 import '../../data/services/news_summarize_service.dart';
 import '../../domain/entities/news_entities.dart';
+import '../network/ai_error.dart';
 import '../platform/platform_capabilities.dart';
 import 'background_task_coordinator.dart';
 import 'telegram_logger.dart';
@@ -614,7 +615,21 @@ class NewsSummarizeStore extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   static String _userFacingError(Object? e) {
+    // Try the structured envelope first (backend AI errors carry a
+    // `{error: {message, code, model}}` body). When the code is
+    // MODEL_NOT_FOUND / CONFIG, surface the actionable message
+    // instead of the generic "Could not summarize" — the user almost
+    // always wants to fix the model id in Settings, not hammer the
+    // retry button.
     if (e is DioException) {
+      final aiErr = AiError.fromDio(e);
+      if (aiErr.code == 'MODEL_NOT_FOUND' ||
+          aiErr.code == 'INVALID_MODEL' ||
+          aiErr.code == 'CONFIG' ||
+          aiErr.code == 'BLOCKED') {
+        // No "Tap to retry" — retrying the same bad model wouldn't help.
+        return aiErr.toastMessage;
+      }
       final code = e.response?.statusCode;
       if (code != null) {
         return code >= 500

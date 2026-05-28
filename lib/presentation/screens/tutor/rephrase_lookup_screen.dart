@@ -5,10 +5,13 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
 import '../../../core/di/injection.dart';
+import '../../../core/network/ai_error.dart';
 import '../../../core/services/telegram_logger.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../domain/entities/tutor_entities.dart';
+import '../../widgets/app_toast.dart';
 import '../settings/settings_controller.dart';
+import '../settings/settings_modal.dart';
 
 /// Standalone rephrase screen that can be pushed on any navigation stack.
 /// Preserves the underlying screen so back-swipe returns to it.
@@ -67,12 +70,28 @@ class _RephraseLookupScreenState extends ConsumerState<RephraseLookupScreen> {
         _loading = false;
       });
     } catch (e, st) {
-      TLog.e('RephraseLookup', 'Rephrase failed', error: e, st: st);
+      final aiErr = AiError.fromAny(e, fallbackMessage: 'Rephrase failed. Please try again.');
+      TLog.e('RephraseLookup', 'Rephrase failed → ${aiErr.code}', error: e, st: st);
       if (!mounted) return;
       setState(() {
-        _error = 'Rephrase failed. Please try again.';
+        _error = aiErr.toastMessage;
         _loading = false;
       });
+      // For actionable failures we ALSO surface a toast with an
+      // "Open Settings" shortcut — the in-card error label alone is
+      // easy to miss, and "MODEL_NOT_FOUND" needs a one-tap fix.
+      if (aiErr.isSettingsActionable) {
+        AppToast.show(
+          context,
+          message: aiErr.toastMessage,
+          action: 'Open Settings',
+          onAction: () {
+            if (!mounted) return;
+            showSettingsModal(context, ref);
+          },
+          duration: const Duration(seconds: 6),
+        );
+      }
     }
   }
 

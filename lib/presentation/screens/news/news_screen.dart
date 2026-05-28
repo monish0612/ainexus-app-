@@ -42,16 +42,26 @@ class _NewsNotif {
   final Color color;
 }
 
-IconData _notifIconForCategory(String category) {
+/// Single source of truth for the icon used to represent a news category.
+/// Shared by the notification panel, the featured card badge, and the
+/// list-row badge so every surface stays in sync when a new category is
+/// added in [CATEGORIES].
+IconData newsCategoryIcon(String category) {
   switch (category) {
     case 'Finance':
       return LucideIcons.trendingUp;
     case 'AI News':
       return LucideIcons.cpu;
+    case 'Movies':
+      return LucideIcons.film;
+    case 'General':
+      return LucideIcons.globe;
     default:
       return LucideIcons.newspaper;
   }
 }
+
+IconData _notifIconForCategory(String category) => newsCategoryIcon(category);
 
 Color _notifColorForCategory(String category) {
   switch (category) {
@@ -59,6 +69,10 @@ Color _notifColorForCategory(String category) {
       return const Color(0xFF34D399);
     case 'AI News':
       return const Color(0xFFF59E0B);
+    case 'Movies':
+      return const Color(0xFFEC4899);
+    case 'General':
+      return const Color(0xFF38BDF8);
     default:
       return AppColors.accent;
   }
@@ -264,7 +278,22 @@ class _NewsScreenState extends ConsumerState<NewsScreen>
     required List<Article> unfilteredFeed,
     required List<Article> filteredFeed,
   }) async {
-    final target = scope == NewsFabScope.all ? unfilteredFeed : filteredFeed;
+    var target = scope == NewsFabScope.all ? unfilteredFeed : filteredFeed;
+
+    // EDGE CASE GUARD — when the user is on a Movies/General chip and picks
+    // "summarize current category", the inline scope picker still routes
+    // through `filteredFeed`, which is the (full-content) Movies/General
+    // articles. Those must NEVER be batch-summarized by the AI — the whole
+    // point of the skip_summary feeds is to show the original body. Strip
+    // them defensively here so a future scope-picker change can't sneak
+    // them into the summarize pipeline. "Clear" action is unaffected:
+    // marking Movies/General articles as read in bulk is still valid.
+    if (action == NewsFabAction.summarize) {
+      target = target
+          .where((a) => !kNoSummarizeCategories.contains(a.category))
+          .toList(growable: false);
+    }
+
     if (target.isEmpty) return;
 
     switch (action) {
@@ -347,12 +376,25 @@ class _NewsScreenState extends ConsumerState<NewsScreen>
     final allArticles = newsState.valueOrNull ?? const <Article>[];
     final notifications = _buildNotifications(allArticles);
     final unreadNotifCount = notifications.where((n) => !n.read).length;
-    final unfilteredFeed =
+
+    // All unread+unsaved articles regardless of category. Drives the
+    // per-category chip (Movies / General etc.) and the notification panel
+    // so those tabs always reflect the true article pool.
+    final unreadUnsaved =
         allArticles.where((a) => !a.isRead && !a.isSaved).toList();
-    var feed = unfilteredFeed;
-    if (_category != 'All') {
-      feed = feed.where((a) => a.category == _category).toList();
-    }
+
+    // The "All" chip + FAB "summarize-all" scope deliberately EXCLUDE the
+    // no-summarize categories (Movies, General). Those feeds carry the
+    // FULL article body — the catch-up summarize flow is designed for
+    // AI-condensed pieces, and the user explicitly asked for them to be
+    // segregated from the "All" pile.
+    final unfilteredFeed = unreadUnsaved
+        .where((a) => !kNoSummarizeCategories.contains(a.category))
+        .toList(growable: false);
+
+    final List<Article> feed = _category == 'All'
+        ? unfilteredFeed
+        : unreadUnsaved.where((a) => a.category == _category).toList();
     final featured = feed.isEmpty ? null : feed.first;
     final featuredArticle = featured;
     final rest = featuredArticle == null
@@ -835,11 +877,7 @@ class _FeaturedCard extends StatelessWidget {
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             Icon(
-                              article.category == 'Finance'
-                                  ? LucideIcons.trendingUp
-                                  : article.category == 'AI News'
-                                      ? LucideIcons.cpu
-                                      : LucideIcons.newspaper,
+                              newsCategoryIcon(article.category),
                               size: 10,
                               color: cat,
                             ),
@@ -1030,9 +1068,7 @@ class _NewsListCard extends StatelessWidget {
                             color: cat.withValues(alpha: 0.08),
                             child: Center(
                               child: Icon(
-                                article.category == 'Finance'
-                                    ? LucideIcons.trendingUp
-                                    : LucideIcons.cpu,
+                                newsCategoryIcon(article.category),
                                 size: 24,
                                 color: cat.withValues(alpha: 0.3),
                               ),
@@ -1042,9 +1078,7 @@ class _NewsListCard extends StatelessWidget {
                             color: cat.withValues(alpha: 0.08),
                             child: Center(
                               child: Icon(
-                                article.category == 'Finance'
-                                    ? LucideIcons.trendingUp
-                                    : LucideIcons.cpu,
+                                newsCategoryIcon(article.category),
                                 size: 24,
                                 color: cat.withValues(alpha: 0.3),
                               ),
@@ -1065,9 +1099,7 @@ class _NewsListCard extends StatelessWidget {
                           ),
                           child: Center(
                             child: Icon(
-                              article.category == 'Finance'
-                                  ? LucideIcons.trendingUp
-                                  : LucideIcons.cpu,
+                              newsCategoryIcon(article.category),
                               size: 24,
                               color: cat.withValues(alpha: 0.35),
                             ),
@@ -1129,11 +1161,7 @@ class _NewsListCard extends StatelessWidget {
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               Icon(
-                                article.category == 'Finance'
-                                    ? LucideIcons.trendingUp
-                                    : article.category == 'AI News'
-                                        ? LucideIcons.cpu
-                                        : LucideIcons.newspaper,
+                                newsCategoryIcon(article.category),
                                 size: 9,
                                 color: cat,
                               ),

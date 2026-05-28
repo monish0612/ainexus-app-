@@ -6,7 +6,9 @@ import 'package:lucide_icons/lucide_icons.dart';
 import '../../../core/auth/auth_service.dart';
 import '../../../core/constants/app_constants.dart';
 import '../../../core/di/injection.dart';
+import '../../../core/network/ai_error.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../../data/services/ai_models_service.dart';
 import 'settings_controller.dart';
 
 const _signOutRed = Color(0xFFEF4444);
@@ -584,7 +586,7 @@ class _DeepModelSectionState extends State<_DeepModelSection> {
 
 // ── Gemini Lite Model ────────────────────────────────────────────────────────
 
-class _LiteModelSection extends StatefulWidget {
+class _LiteModelSection extends ConsumerStatefulWidget {
   const _LiteModelSection({
     required this.colors,
     required this.liteModel,
@@ -596,17 +598,29 @@ class _LiteModelSection extends StatefulWidget {
   final void Function(String) onChanged;
 
   @override
-  State<_LiteModelSection> createState() => _LiteModelSectionState();
+  ConsumerState<_LiteModelSection> createState() => _LiteModelSectionState();
 }
 
-class _LiteModelSectionState extends State<_LiteModelSection> {
+class _LiteModelSectionState extends ConsumerState<_LiteModelSection> {
   late final TextEditingController _ctrl;
   bool _editing = false;
+
+  // Async state of the `/api/v1/ai/models` fetch — `null` while
+  // idle, populated after the first `_loadModels()` call. Errors
+  // are captured into [_listError] so the UI can show a hint
+  // instead of throwing.
+  GeminiModelList? _modelList;
+  bool _listLoading = false;
+  String? _listError;
 
   @override
   void initState() {
     super.initState();
     _ctrl = TextEditingController(text: widget.liteModel);
+    // Kick off model discovery on first build so the chips are
+    // ready by the time the user taps the field. Cheap (cached
+    // server-side 5 min) and avoids a UI stall on tap.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _loadModels());
   }
 
   @override
@@ -623,11 +637,40 @@ class _LiteModelSectionState extends State<_LiteModelSection> {
     super.dispose();
   }
 
+  Future<void> _loadModels({bool force = false}) async {
+    if (_listLoading) return;
+    setState(() {
+      _listLoading = true;
+      _listError = null;
+    });
+    try {
+      final list = await ref.read(aiModelsServiceProvider).list(force: force);
+      if (!mounted) return;
+      setState(() {
+        _modelList = list;
+        _listLoading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _listError = e is AiError ? e.toastMessage : 'Could not load models';
+        _listLoading = false;
+      });
+    }
+  }
+
   void _save() {
     final value = _ctrl.text.trim();
     if (value.isNotEmpty && value != widget.liteModel) {
       widget.onChanged(value);
     }
+    setState(() => _editing = false);
+  }
+
+  void _applyModel(String id) {
+    if (id.isEmpty) return;
+    _ctrl.text = id;
+    if (id != widget.liteModel) widget.onChanged(id);
     setState(() => _editing = false);
   }
 
@@ -753,7 +796,178 @@ class _LiteModelSectionState extends State<_LiteModelSection> {
             ],
           ),
         ),
+        const SizedBox(height: 10),
+        _AvailableModelsRow(
+          colors: colors,
+          loading: _listLoading,
+          list: _modelList,
+          error: _listError,
+          currentId: _ctrl.text.trim(),
+          onSelect: _applyModel,
+          onRefresh: () => _loadModels(force: true),
+        ),
       ],
+    );
+  }
+}
+
+// Compact horizontal scroller of model-id chips backed by the live
+// `/api/v1/ai/models` endpoint. Solves the original failure mode of
+// this screen — the user typing a model id Google has retired or
+// hasn't shipped yet — by surfacing only what the configured server
+// API key can actually invoke right now. Refresh icon busts the
+// 5-minute server-side cache for the case when Google ships a new
+// model and the user wants to see it without waiting.
+class _AvailableModelsRow extends StatelessWidget {
+  const _AvailableModelsRow({
+    required this.colors,
+    required this.loading,
+    required this.list,
+    required this.error,
+    required this.currentId,
+    required this.onSelect,
+    required this.onRefresh,
+  });
+
+  final AppColors colors;
+  final bool loading;
+  final GeminiModelList? list;
+  final String? error;
+  final String currentId;
+  final void Function(String id) onSelect;
+  final VoidCallback onRefresh;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            Text(
+              'AVAILABLE MODELS',
+              style: GoogleFonts.plusJakartaSans(
+                fontSize: 9,
+                fontWeight: FontWeight.w800,
+                color: colors.text4,
+                letterSpacing: 1.4,
+              ),
+            ),
+            const Spacer(),
+            GestureDetector(
+              onTap: loading ? null : onRefresh,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    SizedBox(
+                      width: 12,
+                      height: 12,
+                      child: loading
+                          ? CircularProgressIndicator(
+                              strokeWidth: 1.6,
+                              color: colors.text4,
+                            )
+                          : Icon(LucideIcons.refreshCw, size: 12, color: colors.text4),
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      'Refresh',
+                      style: GoogleFonts.plusJakartaSans(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: colors.text4,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        _buildBody(),
+      ],
+    );
+  }
+
+  Widget _buildBody() {
+    if (error != null) {
+      return Text(
+        error!,
+        style: GoogleFonts.plusJakartaSans(
+          fontSize: 11,
+          color: const Color(0xFFEF4444),
+          height: 1.4,
+        ),
+      );
+    }
+    final models = list?.models ?? const [];
+    if (loading && models.isEmpty) {
+      return Text(
+        'Loading…',
+        style: GoogleFonts.plusJakartaSans(
+          fontSize: 11,
+          color: colors.text4,
+        ),
+      );
+    }
+    if (models.isEmpty) {
+      return Text(
+        'No models discovered. Tap Refresh once the server has GOOGLE_API_KEY configured.',
+        style: GoogleFonts.plusJakartaSans(
+          fontSize: 11,
+          color: colors.text4,
+          height: 1.5,
+        ),
+      );
+    }
+    return SizedBox(
+      height: 34,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        itemCount: models.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        itemBuilder: (_, i) {
+          final m = models[i];
+          final selected = m.id == currentId;
+          return GestureDetector(
+            onTap: () => onSelect(m.id),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+              decoration: BoxDecoration(
+                color: selected
+                    ? AppColors.accent.withValues(alpha: 0.16)
+                    : colors.bg2,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: selected
+                      ? AppColors.accent.withValues(alpha: 0.55)
+                      : colors.border,
+                ),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (selected) ...[
+                    const Icon(LucideIcons.check, size: 12, color: AppColors.accent),
+                    const SizedBox(width: 6),
+                  ],
+                  Text(
+                    m.id,
+                    style: GoogleFonts.plusJakartaSans(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: selected ? AppColors.accent : colors.text2,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
     );
   }
 }

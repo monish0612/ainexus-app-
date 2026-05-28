@@ -14,6 +14,7 @@ import '../../../data/services/article_tts_service.dart';
 import '../../../domain/entities/news_entities.dart';
 import '../../widgets/wave_visualizer.dart';
 import 'article_followup_sheet.dart';
+import 'news_screen.dart' show newsCategoryIcon;
 
 Color newsCategoryColor(String category) {
   final hex = CAT_COLOR[category] ?? '#818CF8';
@@ -22,6 +23,14 @@ Color newsCategoryColor(String category) {
   if (parsed == null) return const Color(0xFF818CF8);
   return Color(parsed + 0xFF000000);
 }
+
+/// Articles in [kNoSummarizeCategories] (Movies, General) ship the FULL
+/// original article body — no AI summary. We render them with a slightly
+/// larger, more "article-reader" oriented typography so long-form reading
+/// is comfortable on mobile. AI-summarized pieces continue to use the
+/// compact dashboard styling.
+bool _isFullContentArticle(Article article) =>
+    kNoSummarizeCategories.contains(article.category);
 
 /// Full-screen article detail (open with [Navigator.push]).
 class ArticleDetailModal extends StatefulWidget {
@@ -141,8 +150,17 @@ class _ArticleDetailModalState extends State<ArticleDetailModal> {
     final colors = Theme.of(context).extension<AppColors>()!;
     final cat = newsCategoryColor(widget.article.category);
     final summaryMarkdown = widget.article.summaryMarkdown?.trim();
-    final hasSummaryMarkdown =
-        summaryMarkdown != null && summaryMarkdown.isNotEmpty;
+    // Detect the server's "couldn't summarise" sentinel
+    // (`<!-- summary-unavailable -->`). When present, we render a
+    // single clean banner instead of trying to display the title
+    // twice + an "Article Preview" header + the raw RSS excerpt —
+    // that combination is what made the news tab look broken in
+    // the user-reported screenshot.
+    final isSummaryUnavailable = summaryMarkdown != null &&
+        summaryMarkdown.contains('<!-- summary-unavailable -->');
+    final hasSummaryMarkdown = summaryMarkdown != null &&
+        summaryMarkdown.isNotEmpty &&
+        !isSummaryUnavailable;
     final originalUrl = widget.article.originalUrl;
     final hasOriginalUrl = originalUrl != null && originalUrl.isNotEmpty;
 
@@ -199,7 +217,10 @@ class _ArticleDetailModalState extends State<ArticleDetailModal> {
                         summary: summaryMarkdown,
                         cat: cat,
                         colors: colors,
+                        isFullArticle: _isFullContentArticle(widget.article),
                       )
+                    else if (isSummaryUnavailable)
+                      _SummaryUnavailableBanner(colors: colors, cat: cat)
                     else
                       _BlockList(
                           blocks: widget.article.blocks,
@@ -322,19 +343,102 @@ class _ArticleDetailModalState extends State<ArticleDetailModal> {
   }
 }
 
+/// Clean, single-card banner shown when the backend wasn't able to
+/// produce an AI summary for this article (e.g. configured Gemini
+/// model id doesn't exist, rate-limited, blocked by safety filter).
+///
+/// Replaces the previous behaviour where the fallback markdown
+/// (`# title / ## Article Preview / <RSS excerpt>`) was rendered
+/// verbatim — that path looked broken because the title was already
+/// shown above and the "Article Preview" header had no visual
+/// affordance to communicate "this is a failure state, not your
+/// summary".
+class _SummaryUnavailableBanner extends StatelessWidget {
+  const _SummaryUnavailableBanner({required this.colors, required this.cat});
+
+  final AppColors colors;
+  final Color cat;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 18),
+      decoration: BoxDecoration(
+        color: colors.bg2,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: colors.border),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: cat.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(LucideIcons.fileWarning, size: 18, color: cat),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'AI summary unavailable',
+                  style: GoogleFonts.plusJakartaSans(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                    color: colors.text,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'We couldn\'t generate a summary for this article. '
+                  'Tap "Read Original Article" below to view the full piece.',
+                  style: GoogleFonts.plusJakartaSans(
+                    fontSize: 13,
+                    height: 1.5,
+                    color: colors.text3,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _SummaryMarkdown extends StatelessWidget {
   const _SummaryMarkdown({
     required this.summary,
     required this.cat,
     required this.colors,
+    this.isFullArticle = false,
   });
 
   final String summary;
   final Color cat;
   final AppColors colors;
 
+  /// Renders with newspaper-grade typography: serif body text, larger
+  /// font, generous line-height, wider paragraph spacing, and a subtle
+  /// drop-cap on the very first paragraph. Used for the Movies / General
+  /// categories which ship the full original article body.
+  final bool isFullArticle;
+
   @override
   Widget build(BuildContext context) {
+    if (isFullArticle) {
+      return _FullArticleBody(
+        markdown: summary,
+        cat: cat,
+        colors: colors,
+      );
+    }
     return SelectionArea(
       child: MarkdownBody(
         data: summary,
@@ -458,6 +562,183 @@ class _SummaryMarkdown extends StatelessWidget {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// Full-article reader
+//
+// Renders the deep-extracted article body (used by Movies + General feeds)
+// with newspaper-grade typography: serif body text, larger size, generous
+// 1.78 line-height, wider paragraph spacing, and a discreet drop-cap on
+// the lead paragraph. The same markdown content goes through Flutter's
+// MarkdownBody — only the StyleSheet differs from the dashboard `_SummaryMarkdown`
+// path.
+//
+// A small "Original full article" pill is shown above the body so the
+// reader has an immediate signal that they're looking at the source piece
+// (not an AI summary). The pill also subtly explains why the typography
+// is different from the AI-summary articles in the rest of the app.
+// ─────────────────────────────────────────────────────────────────────────
+
+class _FullArticleBody extends StatelessWidget {
+  const _FullArticleBody({
+    required this.markdown,
+    required this.cat,
+    required this.colors,
+  });
+
+  final String markdown;
+  final Color cat;
+  final AppColors colors;
+
+  @override
+  Widget build(BuildContext context) {
+    final styleSheet = MarkdownStyleSheet(
+      p: GoogleFonts.lora(
+        fontSize: 17,
+        height: 1.78,
+        color: colors.text,
+        letterSpacing: 0.1,
+      ),
+      pPadding: const EdgeInsets.only(bottom: 16),
+      h1: GoogleFonts.plusJakartaSans(
+        fontSize: 24,
+        fontWeight: FontWeight.w800,
+        height: 1.25,
+        letterSpacing: -0.4,
+        color: colors.text,
+      ),
+      h1Padding: const EdgeInsets.only(top: 12, bottom: 8),
+      h2: GoogleFonts.plusJakartaSans(
+        fontSize: 21,
+        fontWeight: FontWeight.w800,
+        height: 1.3,
+        letterSpacing: -0.3,
+        color: colors.text,
+      ),
+      h2Padding: const EdgeInsets.only(top: 24, bottom: 10),
+      h3: GoogleFonts.plusJakartaSans(
+        fontSize: 18,
+        fontWeight: FontWeight.w700,
+        height: 1.35,
+        color: colors.text,
+      ),
+      h3Padding: const EdgeInsets.only(top: 18, bottom: 6),
+      strong: GoogleFonts.lora(
+        fontWeight: FontWeight.w700,
+        color: colors.text,
+      ),
+      em: GoogleFonts.lora(
+        fontStyle: FontStyle.italic,
+        color: colors.text2,
+      ),
+      blockquote: GoogleFonts.lora(
+        fontSize: 17,
+        fontStyle: FontStyle.italic,
+        height: 1.7,
+        color: colors.text,
+      ),
+      blockquoteDecoration: BoxDecoration(
+        color: cat.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(14),
+        border: Border(left: BorderSide(color: cat, width: 3)),
+      ),
+      blockquotePadding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
+      listBullet: GoogleFonts.lora(
+        fontSize: 16,
+        fontWeight: FontWeight.w700,
+        color: cat,
+      ),
+      listBulletPadding: const EdgeInsets.only(right: 8),
+      listIndent: 22,
+      code: GoogleFonts.jetBrainsMono(
+        fontSize: 14,
+        color: cat,
+        backgroundColor: colors.bg2,
+      ),
+      codeblockDecoration: BoxDecoration(
+        color: colors.bg2,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: colors.border),
+      ),
+      codeblockPadding: const EdgeInsets.all(14),
+      a: GoogleFonts.plusJakartaSans(
+        fontSize: 16,
+        fontWeight: FontWeight.w700,
+        color: cat,
+        decoration: TextDecoration.underline,
+        decorationColor: cat.withValues(alpha: 0.45),
+      ),
+      horizontalRuleDecoration: BoxDecoration(
+        border: Border(
+          top: BorderSide(color: colors.border, width: 0.5),
+        ),
+      ),
+    );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _FullArticlePill(cat: cat, colors: colors),
+        const SizedBox(height: 18),
+        SelectionArea(
+          child: MarkdownBody(
+            data: markdown,
+            selectable: false,
+            onTapLink: (text, href, title) async {
+              if (href == null || href.isEmpty) return;
+              final uri = Uri.tryParse(href);
+              if (uri == null) return;
+              try {
+                await launchUrl(uri, mode: LaunchMode.externalApplication);
+              } catch (e) {
+                TLog.w('ArticleDetail', 'Failed to open link: $href', error: e);
+              }
+            },
+            styleSheet: styleSheet,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _FullArticlePill extends StatelessWidget {
+  const _FullArticlePill({required this.cat, required this.colors});
+
+  final Color cat;
+  final AppColors colors;
+
+  @override
+  Widget build(BuildContext context) {
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: cat.withValues(alpha: 0.10),
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(color: cat.withValues(alpha: 0.22)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(LucideIcons.bookOpen, size: 12, color: cat),
+            const SizedBox(width: 6),
+            Text(
+              'Original full article',
+              style: GoogleFonts.plusJakartaSans(
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+                color: cat,
+                letterSpacing: 0.2,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _HeroImage extends StatelessWidget {
   const _HeroImage({required this.article, required this.cat});
 
@@ -554,11 +835,7 @@ class _HeroImage extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Icon(
-                    article.category == 'Finance'
-                        ? LucideIcons.trendingUp
-                        : article.category == 'AI News'
-                            ? LucideIcons.cpu
-                            : LucideIcons.newspaper,
+                    newsCategoryIcon(article.category),
                     size: 12,
                     color: cat,
                   ),
