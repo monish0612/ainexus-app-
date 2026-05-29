@@ -187,6 +187,109 @@ void main() {
     });
   });
 
+  group('ArticleDetailModal — Gizbot review meta card', () {
+    // The backend prepends a structured Markdown header to Gizbot review
+    // articles: rating + pros + cons separated from the body by `---`.
+    // The Flutter parser must extract that block and render it as a
+    // color-coded card, leaving only the prose body to the MarkdownBody.
+
+    const gizbotMarkdown = '''
+**⭐ Rating: 4.8 / 5**
+
+#### ✅ Pros
+
+- Stunning 3K OLED display
+- Excellent battery life
+- Premium ceraluminum chassis
+
+#### ❌ Cons
+
+- Weak integrated GPU
+- No SD card slot
+
+---
+
+The ASUS Zenbook S14 is a genuine attempt at getting the trade-offs right for an ultraportable. Here is the rest of the body.
+
+Second paragraph describes the build quality and chassis materials.
+''';
+
+    testWidgets('renders Rating pill + Pros + Cons sections', (tester) async {
+      final article = _article(
+        category: 'General',
+        summaryMarkdown: gizbotMarkdown,
+      );
+      await _pumpDetail(tester, article: article);
+
+      // Rating pill shows "Rating" label + value
+      expect(find.text('Rating'), findsOneWidget,
+          reason: 'Rating pill label must appear.');
+      expect(find.text('4.8 / 5'), findsOneWidget,
+          reason: 'Rating value must appear next to the label.');
+
+      // Pros / Cons section headings (rendered uppercase by the widget)
+      expect(find.text('PROS'), findsOneWidget);
+      expect(find.text('CONS'), findsOneWidget);
+
+      // Individual list items render
+      expect(find.text('Stunning 3K OLED display'), findsOneWidget);
+      expect(find.text('Excellent battery life'), findsOneWidget);
+      expect(find.text('Weak integrated GPU'), findsOneWidget);
+
+      await _drain(tester);
+    });
+
+    testWidgets('strips meta block from MarkdownBody (no raw markdown leaks)',
+        (tester) async {
+      final article = _article(
+        category: 'General',
+        summaryMarkdown: gizbotMarkdown,
+      );
+      await _pumpDetail(tester, article: article);
+
+      // The body prose AFTER the `---` separator must still render.
+      expect(
+          find.textContaining('ASUS Zenbook S14 is a genuine attempt'),
+          findsOneWidget,
+          reason: 'Body prose after the meta block must still display.');
+
+      // Raw markdown sentinel like `**⭐ Rating:` must NOT appear as text —
+      // the meta block should be consumed by the parser and rendered as
+      // the rich card instead.
+      final all = find.byType(RichText).evaluate().map((e) {
+        final r = e.widget as RichText;
+        return r.text.toPlainText();
+      }).join(' || ');
+      expect(all.contains('**⭐ Rating'), isFalse,
+          reason: 'Meta block must not leak raw markdown into the prose.');
+      expect(all.contains('#### ✅ Pros'), isFalse);
+      expect(all.contains('#### ❌ Cons'), isFalse);
+
+      await _drain(tester);
+    });
+
+    testWidgets('articles without meta block render unchanged (no card)',
+        (tester) async {
+      final article = _article(
+        category: 'General',
+        summaryMarkdown:
+            'A regular TechCrunch article without any rating / pros / cons.\n\nSecond paragraph.\n\nThird.',
+      );
+      await _pumpDetail(tester, article: article);
+
+      // No Rating / PROS / CONS controls when there's no meta header.
+      expect(find.text('Rating'), findsNothing);
+      expect(find.text('PROS'), findsNothing);
+      expect(find.text('CONS'), findsNothing);
+
+      // But the body still renders and the full-article pill still appears.
+      expect(find.text('Original full article'), findsOneWidget);
+      expect(find.textContaining('regular TechCrunch article'), findsOneWidget);
+
+      await _drain(tester);
+    });
+  });
+
   group('ArticleDetailModal — save action wiring (unchanged contract)', () {
     testWidgets('tapping the Save pill fires onToggleSave(true) for a Movies article',
         (tester) async {

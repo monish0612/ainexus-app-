@@ -578,6 +578,105 @@ class _SummaryMarkdown extends StatelessWidget {
 // is different from the AI-summary articles in the rest of the app.
 // ─────────────────────────────────────────────────────────────────────────
 
+/// Parsed review meta block (Gizbot). Stable shape guaranteed by
+/// `buildReviewMetaMarkdown` on the backend:
+///
+///     **⭐ Rating: 4.8 / 5**
+///
+///     #### ✅ Pros
+///     - …
+///
+///     #### ❌ Cons
+///     - …
+///
+///     ---
+///
+/// We strip the block from the markdown body and render it as a rich,
+/// color-coded card above the prose for a much better mobile UX than
+/// raw bullets. When `_ReviewMeta.tryParse` returns null, the article
+/// has no structured meta and the body renders unchanged.
+@immutable
+class _ReviewMeta {
+  const _ReviewMeta({
+    required this.rating,
+    required this.pros,
+    required this.cons,
+    required this.bodyAfter,
+  });
+
+  final String rating; // raw, may include "/ 5" or just "4.8"
+  final List<String> pros;
+  final List<String> cons;
+
+  /// The markdown body with the meta block removed — what the standard
+  /// `MarkdownBody` should render below the card.
+  final String bodyAfter;
+
+  bool get isEmpty => rating.isEmpty && pros.isEmpty && cons.isEmpty;
+
+  static _ReviewMeta? tryParse(String markdown) {
+    // Detection sentinel — the literal phrase the backend emits as the
+    // FIRST line of the meta header. Anything else (regular article body,
+    // empty-content fallback prose, etc.) leaves the markdown untouched.
+    final ratingRx = RegExp(r'^\*\*⭐\s*Rating:\s*([^*]+?)\*\*');
+    final firstLine = markdown.trimLeft();
+    final m = ratingRx.firstMatch(firstLine);
+    if (m == null) return null;
+
+    // The meta block always ends with a standalone `---` on its own
+    // line, followed by a blank line, then the body. If we can't find
+    // that separator within the first ~1200 chars (the meta block is
+    // small by construction), give up to avoid mis-parsing — `---` is
+    // also used elsewhere as a section break.
+    final searchSlice = markdown.substring(0, markdown.length.clamp(0, 1500));
+    final sepRx = RegExp(r'\n\s*---\s*\n');
+    final sepMatch = sepRx.firstMatch(searchSlice);
+    if (sepMatch == null) return null;
+
+    final header = markdown.substring(0, sepMatch.start);
+    final bodyAfter = markdown.substring(sepMatch.end).trimLeft();
+
+    final rating = m.group(1)?.trim() ?? '';
+
+    List<String> collectAfterHeading(RegExp headingRx) {
+      final lines = header.split('\n');
+      final out = <String>[];
+      var inSection = false;
+      for (final raw in lines) {
+        final line = raw.trimRight();
+        if (headingRx.hasMatch(line)) {
+          inSection = true;
+          continue;
+        }
+        if (inSection) {
+          // A new heading at any level OR a blank-then-heading boundary
+          // closes the section. We treat any line starting with `####`
+          // (the level the backend uses) as a new section.
+          if (line.startsWith('#### ')) break;
+          final bullet = RegExp(r'^\s*[-*]\s+(.*)$').firstMatch(line);
+          if (bullet != null) {
+            final text = bullet.group(1)?.trim();
+            if (text != null && text.isNotEmpty) out.add(text);
+          }
+        }
+      }
+      return out;
+    }
+
+    final pros = collectAfterHeading(RegExp(r'^####\s*✅\s*Pros\b'));
+    final cons = collectAfterHeading(RegExp(r'^####\s*❌\s*Cons\b'));
+
+    final meta = _ReviewMeta(
+      rating: rating,
+      pros: pros,
+      cons: cons,
+      bodyAfter: bodyAfter,
+    );
+    if (meta.isEmpty) return null;
+    return meta;
+  }
+}
+
 class _FullArticleBody extends StatelessWidget {
   const _FullArticleBody({
     required this.markdown,
@@ -591,6 +690,11 @@ class _FullArticleBody extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // If the article opens with a Gizbot review meta block, strip it out
+    // and render it as a rich card above the prose.
+    final meta = _ReviewMeta.tryParse(markdown);
+    final effectiveMarkdown = meta?.bodyAfter ?? markdown;
+
     final styleSheet = MarkdownStyleSheet(
       p: GoogleFonts.lora(
         fontSize: 17,
@@ -679,9 +783,13 @@ class _FullArticleBody extends StatelessWidget {
       children: [
         _FullArticlePill(cat: cat, colors: colors),
         const SizedBox(height: 18),
+        if (meta != null) ...[
+          _ReviewMetaCard(meta: meta, cat: cat, colors: colors),
+          const SizedBox(height: 22),
+        ],
         SelectionArea(
           child: MarkdownBody(
-            data: markdown,
+            data: effectiveMarkdown,
             selectable: false,
             onTapLink: (text, href, title) async {
               if (href == null || href.isEmpty) return;
@@ -697,6 +805,202 @@ class _FullArticleBody extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// Color-coded card that fronts a Gizbot review with its overall rating,
+/// pros, and cons. Designed to be visually distinct from the surrounding
+/// prose so users can size up a review at a glance.
+///
+/// Layout:
+///   • Top-left rating pill (gold accent).
+///   • Two-column pros / cons block on tablets / wide screens; stacks
+///     vertically on phones (typical case).
+///   • Pros card uses an emerald tint with check icons; cons card uses
+///     a coral tint with X icons. Both clamp at 8 visible bullets — the
+///     backend already enforces the same cap.
+class _ReviewMetaCard extends StatelessWidget {
+  const _ReviewMetaCard({
+    required this.meta,
+    required this.cat,
+    required this.colors,
+  });
+
+  final _ReviewMeta meta;
+  final Color cat;
+  final AppColors colors;
+
+  static const Color _prosColor = Color(0xFF10B981); // emerald-500
+  static const Color _consColor = Color(0xFFEF4444); // red-500
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+      decoration: BoxDecoration(
+        color: colors.bg1,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: colors.border, width: 1),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (meta.rating.isNotEmpty) _RatingPill(rating: meta.rating, colors: colors),
+          if (meta.rating.isNotEmpty &&
+              (meta.pros.isNotEmpty || meta.cons.isNotEmpty))
+            const SizedBox(height: 14),
+          if (meta.pros.isNotEmpty)
+            _ProsConsList(
+              title: 'Pros',
+              items: meta.pros,
+              accent: _prosColor,
+              icon: LucideIcons.check,
+              colors: colors,
+            ),
+          if (meta.pros.isNotEmpty && meta.cons.isNotEmpty)
+            const SizedBox(height: 12),
+          if (meta.cons.isNotEmpty)
+            _ProsConsList(
+              title: 'Cons',
+              items: meta.cons,
+              accent: _consColor,
+              icon: LucideIcons.x,
+              colors: colors,
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _RatingPill extends StatelessWidget {
+  const _RatingPill({required this.rating, required this.colors});
+
+  final String rating;
+  final AppColors colors;
+
+  static const Color _amber = Color(0xFFF59E0B);
+
+  @override
+  Widget build(BuildContext context) {
+    // Normalise: "4.8" → "4.8 / 5", but keep "4.8 / 5" or text verdicts
+    // ("Good", "Excellent") verbatim.
+    final hasScale = RegExp(r'/\s*\d').hasMatch(rating);
+    final display = hasScale ? rating : '$rating / 5';
+
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+        decoration: BoxDecoration(
+          color: _amber.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(color: _amber.withValues(alpha: 0.30)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(LucideIcons.star, size: 14, color: _amber),
+            const SizedBox(width: 6),
+            Text(
+              'Rating',
+              style: GoogleFonts.plusJakartaSans(
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+                color: _amber,
+                letterSpacing: 0.4,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              display,
+              style: GoogleFonts.plusJakartaSans(
+                fontSize: 14,
+                fontWeight: FontWeight.w800,
+                color: colors.text,
+                letterSpacing: -0.2,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ProsConsList extends StatelessWidget {
+  const _ProsConsList({
+    required this.title,
+    required this.items,
+    required this.accent,
+    required this.icon,
+    required this.colors,
+  });
+
+  final String title;
+  final List<String> items;
+  final Color accent;
+  final IconData icon;
+  final AppColors colors;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      decoration: BoxDecoration(
+        color: accent.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: accent.withValues(alpha: 0.22)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title.toUpperCase(),
+            style: GoogleFonts.plusJakartaSans(
+              fontSize: 11,
+              fontWeight: FontWeight.w800,
+              color: accent,
+              letterSpacing: 1.2,
+            ),
+          ),
+          const SizedBox(height: 8),
+          ...items.take(8).map(
+                (text) => Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.only(top: 3),
+                        child: Container(
+                          width: 18,
+                          height: 18,
+                          decoration: BoxDecoration(
+                            color: accent.withValues(alpha: 0.18),
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: Icon(icon, size: 11, color: accent),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          text,
+                          style: GoogleFonts.plusJakartaSans(
+                            fontSize: 14,
+                            height: 1.5,
+                            color: colors.text2,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+        ],
+      ),
     );
   }
 }
