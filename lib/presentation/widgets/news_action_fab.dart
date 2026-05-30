@@ -22,6 +22,15 @@ enum NewsFabAction { summarize, clearAll }
 ///
 /// The FAB is a single self-contained `Stack` overlay so it can be dropped
 /// onto any tab. It only renders when [unreadCount] > 0.
+///
+/// When [clearOnly] is `true` (used for the Movies and General chips — whose
+/// articles ship the FULL body and are deliberately excluded from the
+/// AI-summarize batch flow), the sheet collapses to a single `Clear All`
+/// action: no Summarize row, no scope toggle, and scope is forced to the
+/// current category. This is the production rule for the "no-summarize"
+/// categories declared in `kNoSummarizeCategories` (news_entities.dart) —
+/// the host computes the boolean from that set so adding a new no-summarize
+/// category is a one-line change.
 class NewsActionFab extends StatefulWidget {
   const NewsActionFab({
     super.key,
@@ -30,6 +39,7 @@ class NewsActionFab extends StatefulWidget {
     required this.unreadCountInCategory,
     required this.activeCategory,
     required this.onAction,
+    this.clearOnly = false,
   });
 
   final AppColors colors;
@@ -47,6 +57,12 @@ class NewsActionFab extends StatefulWidget {
   /// Fires after the user picks an action and (for Clear All) confirms it.
   /// The host is responsible for the actual repo calls + navigation.
   final void Function(NewsFabAction action, NewsFabScope scope) onAction;
+
+  /// When `true`, the speed-dial collapses to a single `Clear All` action
+  /// scoped to the current category — Summarize and the scope toggle are
+  /// hidden. Set by the host for chips whose feed is in
+  /// `kNoSummarizeCategories` (Movies, General).
+  final bool clearOnly;
 
   @override
   State<NewsActionFab> createState() => _NewsActionFabState();
@@ -99,15 +115,35 @@ class _NewsActionFabState extends State<NewsActionFab>
   }
 
   int get _scopeCount {
+    // Movies / General etc. → only the current-category count is meaningful.
+    // The "All categories" pile deliberately excludes those feeds (see
+    // `kNoSummarizeCategories` in news_entities.dart), so falling back to
+    // [widget.unreadCount] would render a misleading "Mark 17 as read"
+    // when only e.g. 3 General articles actually exist.
+    if (widget.clearOnly) return widget.unreadCountInCategory;
     if (widget.activeCategory == 'All') return widget.unreadCount;
     return _scope == NewsFabScope.all
         ? widget.unreadCount
         : widget.unreadCountInCategory;
   }
 
+  /// The scope to forward to the host when the user picks an action.
+  /// `clearOnly` chips have no scope toggle, so we always operate on the
+  /// currently-active category — that's the entire point of the simplified
+  /// sheet for Movies/General.
+  NewsFabScope get _effectiveScope =>
+      widget.clearOnly ? NewsFabScope.currentCategory : _scope;
+
   @override
   Widget build(BuildContext context) {
-    if (widget.unreadCount <= 0) return const SizedBox.shrink();
+    // For "clear-only" chips the FAB must render whenever there's at least
+    // one article in THIS category, regardless of the cross-category total.
+    // For the regular flow (All / Finance / AI News) we keep the original
+    // `unreadCount > 0` guard so the FAB still hides when the All pile is
+    // empty.
+    final visibleCount =
+        widget.clearOnly ? widget.unreadCountInCategory : widget.unreadCount;
+    if (visibleCount <= 0) return const SizedBox.shrink();
 
     return Stack(
       children: [
@@ -156,13 +192,14 @@ class _NewsActionFabState extends State<NewsActionFab>
                       scope: _scope,
                       onScope: (s) => setState(() => _scope = s),
                       countInScope: _scopeCount,
+                      clearOnly: widget.clearOnly,
                       onSummarize: () {
                         _close();
                         Future<void>.delayed(
                           const Duration(milliseconds: 220),
                           () => widget.onAction(
                             NewsFabAction.summarize,
-                            _scope,
+                            _effectiveScope,
                           ),
                         );
                       },
@@ -172,7 +209,7 @@ class _NewsActionFabState extends State<NewsActionFab>
                           const Duration(milliseconds: 220),
                           () => widget.onAction(
                             NewsFabAction.clearAll,
-                            _scope,
+                            _effectiveScope,
                           ),
                         );
                       },
@@ -191,7 +228,8 @@ class _NewsActionFabState extends State<NewsActionFab>
           child: _FabCircle(
             pulse: _pulseCtrl,
             expand: _expand,
-            unreadCount: widget.unreadCount,
+            unreadCount: visibleCount,
+            clearOnly: widget.clearOnly,
             onTap: _toggle,
           ),
         ),
@@ -206,12 +244,18 @@ class _FabCircle extends StatelessWidget {
     required this.expand,
     required this.unreadCount,
     required this.onTap,
+    this.clearOnly = false,
   });
 
   final AnimationController pulse;
   final Animation<double> expand;
   final int unreadCount;
   final VoidCallback onTap;
+
+  /// In `clearOnly` mode (Movies/General chips) the FAB swaps the sparkles
+  /// icon for an eraser so the user reads the affordance correctly before
+  /// even opening the sheet — there is no Summarize action here.
+  final bool clearOnly;
 
   @override
   Widget build(BuildContext context) {
@@ -232,19 +276,27 @@ class _FabCircle extends StatelessWidget {
                 height: 60,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  gradient: const LinearGradient(
+                  gradient: LinearGradient(
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
-                    colors: [Color(0xFF6366F1), Color(0xFFA855F7)],
+                    colors: clearOnly
+                        ? const [Color(0xFFEF4444), Color(0xFFF97316)]
+                        : const [Color(0xFF6366F1), Color(0xFFA855F7)],
                   ),
                   boxShadow: [
                     BoxShadow(
-                      color: const Color(0xFF6366F1).withValues(alpha: 0.45),
+                      color: (clearOnly
+                              ? const Color(0xFFEF4444)
+                              : const Color(0xFF6366F1))
+                          .withValues(alpha: 0.45),
                       blurRadius: 22,
                       spreadRadius: 1,
                     ),
                     BoxShadow(
-                      color: const Color(0xFFA855F7).withValues(alpha: 0.30),
+                      color: (clearOnly
+                              ? const Color(0xFFF97316)
+                              : const Color(0xFFA855F7))
+                          .withValues(alpha: 0.30),
                       blurRadius: 32,
                       offset: const Offset(0, 12),
                     ),
@@ -255,8 +307,8 @@ class _FabCircle extends StatelessWidget {
                   children: [
                     Transform.rotate(
                       angle: rotate,
-                      child: const Icon(
-                        LucideIcons.sparkles,
+                      child: Icon(
+                        clearOnly ? LucideIcons.eraser : LucideIcons.sparkles,
                         size: 24,
                         color: Colors.white,
                       ),
@@ -311,6 +363,7 @@ class _SheetContent extends StatelessWidget {
     required this.countInScope,
     required this.onSummarize,
     required this.onClearAll,
+    this.clearOnly = false,
   });
 
   final AppColors colors;
@@ -321,11 +374,19 @@ class _SheetContent extends StatelessWidget {
   final VoidCallback onSummarize;
   final VoidCallback onClearAll;
 
+  /// Collapses the sheet to a single Clear-All action card. The scope
+  /// toggle and Summarize row are suppressed entirely — see the
+  /// [NewsActionFab.clearOnly] doc for the rationale.
+  final bool clearOnly;
+
   @override
   Widget build(BuildContext context) {
     final screenW = MediaQuery.sizeOf(context).width;
     final width = (screenW - 32).clamp(280.0, 360.0);
-    final hasFilter = activeCategory != 'All';
+    // Scope toggle only makes sense when there are two real scopes to
+    // toggle between AND the user can actually pick. clearOnly forces
+    // current-category, so we drop the toggle to keep the sheet honest.
+    final hasFilter = activeCategory != 'All' && !clearOnly;
 
     return ClipRRect(
       borderRadius: BorderRadius.circular(22),
@@ -366,23 +427,27 @@ class _SheetContent extends StatelessWidget {
                   ),
                   const SizedBox(height: 12),
                 ],
-                _ActionRow(
-                  icon: LucideIcons.sparkles,
-                  iconBg: const Color(0xFF6366F1),
-                  iconBg2: const Color(0xFFA855F7),
-                  title: 'Summarize',
-                  subtitle:
-                      'Quick AI summary of $countInScope unread article${countInScope == 1 ? '' : 's'}',
-                  colors: colors,
-                  onTap: onSummarize,
-                ),
-                const SizedBox(height: 10),
+                if (!clearOnly) ...[
+                  _ActionRow(
+                    icon: LucideIcons.sparkles,
+                    iconBg: const Color(0xFF6366F1),
+                    iconBg2: const Color(0xFFA855F7),
+                    title: 'Summarize',
+                    subtitle:
+                        'Quick AI summary of $countInScope unread article${countInScope == 1 ? '' : 's'}',
+                    colors: colors,
+                    onTap: onSummarize,
+                  ),
+                  const SizedBox(height: 10),
+                ],
                 _ActionRow(
                   icon: LucideIcons.eraser,
                   iconBg: const Color(0xFFEF4444),
                   iconBg2: const Color(0xFFF97316),
                   title: 'Clear All',
-                  subtitle: 'Mark $countInScope as read',
+                  subtitle: clearOnly
+                      ? 'Remove $countInScope article${countInScope == 1 ? '' : 's'} from $activeCategory'
+                      : 'Mark $countInScope as read',
                   destructive: true,
                   colors: colors,
                   onTap: onClearAll,
@@ -391,14 +456,16 @@ class _SheetContent extends StatelessWidget {
                 Row(
                   children: [
                     Icon(
-                      LucideIcons.bookmark,
+                      clearOnly ? LucideIcons.info : LucideIcons.bookmark,
                       size: 12,
                       color: colors.text4,
                     ),
                     const SizedBox(width: 6),
                     Expanded(
                       child: Text(
-                        'Saved articles are never touched',
+                        clearOnly
+                            ? 'Tip: swipe a card left or right to delete just that one'
+                            : 'Saved articles are never touched',
                         style: GoogleFonts.plusJakartaSans(
                           fontSize: 11,
                           fontWeight: FontWeight.w500,

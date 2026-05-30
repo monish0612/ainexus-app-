@@ -12,9 +12,11 @@ import '../../../core/services/news_summarize_store.dart';
 import '../../../core/services/notification_service.dart';
 import '../../../core/services/telegram_logger.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../../core/utils/retry.dart';
 import '../../../domain/entities/news_entities.dart';
 import '../../widgets/compact_header.dart';
 import '../../widgets/news_action_fab.dart';
+import '../../widgets/swipe_to_delete.dart';
 import '../settings/settings_controller.dart';
 import '../settings/settings_modal.dart';
 import 'article_detail_modal.dart';
@@ -306,6 +308,98 @@ class _NewsScreenState extends ConsumerState<NewsScreen>
     }
   }
 
+  /// Swipe-to-delete handler used by Movies/General list rows.
+  ///
+  /// Semantics:
+  ///   • Local DB is mutated first (mark as read) so the row disappears
+  ///     instantly — the Drift stream rebuilds the feed within one frame.
+  ///   • Article follow-up chat state is wiped (mirrors the Saved-tab
+  ///     `onRemove` contract).
+  ///   • All work is wrapped in [_runWithRetry] so a transient local-DB
+  ///     failure (very rare — main-thread SQLite contention) gets one quiet
+  ///     retry before we surface the error to the user.
+  ///   • Successes are logged at info, failures at error. Both flow through
+  ///     the production [TLog] pipeline (batched + exponential-backoff
+  ///     Telegram delivery). Error logs are flushed immediately.
+  ///
+  /// The remote leg (already-built `markRead` repo API) is best-effort and
+  /// fire-and-forget — the user-visible UX never blocks on the network.
+  Future<void> _deleteArticle(Article article) async {
+    final id = article.id;
+    final category = article.category;
+
+    TLog.d('News', 'Swipe-delete requested id=$id category=$category');
+
+    try {
+      await runWithRetry<void>(
+        tag: 'News',
+        operation: 'swipe-delete[$category]',
+        attempts: 3,
+        action: () async {
+          await ref.read(newsControllerProvider.notifier).markRead(id);
+        },
+      );
+      ArticleFollowUpStore.instance.clear(id);
+      TLog.i('News',
+          'Swipe-delete ✓ id=$id category=$category title="${_safeTitle(article.title)}"');
+    } catch (e, st) {
+      TLog.e(
+        'News',
+        'Swipe-delete failed id=$id category=$category',
+        error: e,
+        st: st,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+        ..clearSnackBars()
+        ..showSnackBar(
+          SnackBar(
+            content: Text(
+              'Could not remove article. Please try again.',
+              style: GoogleFonts.plusJakartaSans(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12)),
+            margin: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+            duration: const Duration(seconds: 3),
+            backgroundColor: const Color(0xFFEF4444),
+          ),
+        );
+      return;
+    }
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..clearSnackBars()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(
+            'Removed from $category',
+            style: GoogleFonts.plusJakartaSans(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          behavior: SnackBarBehavior.floating,
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          margin: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+          duration: const Duration(milliseconds: 1600),
+          backgroundColor: const Color(0xFF34D399),
+        ),
+      );
+  }
+
+  /// Trim noisy titles so logs stay compact (Telegram has hard limits and
+  /// our batches go through the chunker — keeping each line short means
+  /// more entries fit per chunk).
+  String _safeTitle(String s) =>
+      s.length <= 60 ? s : '${s.substring(0, 57)}…';
+
   Future<void> _openSummaryReader(List<Article> articles) async {
     final service = ref.read(newsSummarizeServiceProvider);
     final repo = ref.read(newsRepositoryProvider);
@@ -329,6 +423,15 @@ class _NewsScreenState extends ConsumerState<NewsScreen>
 
   Future<void> _confirmClearAll(List<Article> articles) async {
     final colors = Theme.of(context).extension<AppColors>()!;
+    // Category scope label drives the confirm sheet copy. When every
+    // article in the batch belongs to the same category (the Movies /
+    // General clearOnly path always does), we surface that category name
+    // so the user sees exactly which pile they're about to nuke. Mixed
+    // batches keep the original "all unread" wording.
+    final categories = <String>{for (final a in articles) a.category};
+    final scopeLabel =
+        categories.length == 1 ? categories.first : null;
+
     final confirmed = await showModalBottomSheet<bool>(
       context: context,
       backgroundColor: Colors.transparent,
@@ -336,24 +439,72 @@ class _NewsScreenState extends ConsumerState<NewsScreen>
       builder: (_) => _ClearAllConfirmSheet(
         colors: colors,
         count: articles.length,
+        scopeLabel: scopeLabel,
       ),
     );
     if (confirmed != true || !mounted) return;
 
     final ids = articles.map((a) => a.id).toList(growable: false);
+    final logScope = scopeLabel ?? 'mixed';
+
+    var updated = 0;
     try {
-      await ref.read(newsControllerProvider.notifier).markManyRead(ids);
-    } catch (e) {
-      TLog.w('News', 'Clear All failed', error: e);
+      updated = await runWithRetry<int>(
+        tag: 'News',
+        operation: 'clearAll[$logScope]',
+        attempts: 3,
+        action: () =>
+            ref.read(newsControllerProvider.notifier).markManyRead(ids),
+      );
+      for (final id in ids) {
+        ArticleFollowUpStore.instance.clear(id);
+      }
+      TLog.i(
+        'News',
+        'Clear All ✓ scope=$logScope requested=${ids.length} updated=$updated',
+      );
+    } catch (e, st) {
+      TLog.e(
+        'News',
+        'Clear All failed scope=$logScope requested=${ids.length}',
+        error: e,
+        st: st,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+        ..clearSnackBars()
+        ..showSnackBar(
+          SnackBar(
+            content: Text(
+              'Could not clear articles. Please try again.',
+              style: GoogleFonts.plusJakartaSans(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12)),
+            margin: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+            duration: const Duration(seconds: 3),
+            backgroundColor: const Color(0xFFEF4444),
+          ),
+        );
+      return;
     }
+
     if (!mounted) return;
 
+    final shownCount = updated > 0 ? updated : ids.length;
+    final successMsg = scopeLabel != null
+        ? 'Cleared $shownCount from $scopeLabel'
+        : 'Cleared $shownCount article${shownCount == 1 ? '' : 's'}';
     ScaffoldMessenger.of(context)
       ..clearSnackBars()
       ..showSnackBar(
         SnackBar(
           content: Text(
-            'Cleared ${ids.length} article${ids.length == 1 ? '' : 's'}',
+            successMsg,
             style: GoogleFonts.plusJakartaSans(
               fontSize: 13,
               fontWeight: FontWeight.w600,
@@ -483,6 +634,15 @@ class _NewsScreenState extends ConsumerState<NewsScreen>
                         onOpen: _openArticle,
                         unreadCountAll: unfilteredFeed.length,
                         unreadCountInCategory: feed.length,
+                        // Movies / General chips swap to the clearOnly FAB
+                        // (single "Clear All" action, no Summarize, no
+                        // scope toggle) AND enable per-row swipe-delete.
+                        // Driven off `kNoSummarizeCategories` so the same
+                        // declarative set governs every place we treat
+                        // these feeds specially.
+                        clearOnly:
+                            kNoSummarizeCategories.contains(_category),
+                        onSwipeDelete: _deleteArticle,
                         onFabAction: (action, scope) => _handleFabAction(
                           action: action,
                           scope: scope,
@@ -594,6 +754,8 @@ class _ForYouTab extends StatelessWidget {
     required this.onFabAction,
     required this.activeSummaryProgress,
     required this.onResumeSummary,
+    required this.clearOnly,
+    required this.onSwipeDelete,
   });
 
   final AppColors colors;
@@ -623,6 +785,16 @@ class _ForYouTab extends StatelessWidget {
   /// Re-opens the reader bound to the live session.
   final VoidCallback onResumeSummary;
 
+  /// `true` when the active chip is in `kNoSummarizeCategories` (Movies
+  /// or General). Drives both the FAB layout (clear-only mode) and the
+  /// per-row swipe-to-delete affordance.
+  final bool clearOnly;
+
+  /// Per-article delete handler — invoked from the swipe-to-delete
+  /// affordance on Movies/General rows. Hosted by the parent screen so
+  /// it can run with retry + Telegram logging + show snackbars.
+  final ValueChanged<Article> onSwipeDelete;
+
   @override
   Widget build(BuildContext context) {
     return Stack(
@@ -646,11 +818,23 @@ class _ForYouTab extends StatelessWidget {
           if (featured != null) ...[
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
-              child: _FeaturedCard(
-                article: featured!,
-                colors: colors,
-                onTap: () => onOpen(featured!),
-              ),
+              child: clearOnly
+                  ? SwipeToDelete(
+                      key: ValueKey<String>('swipe-featured-${featured!.id}'),
+                      onDelete: () => onSwipeDelete(featured!),
+                      borderRadius: 24,
+                      contentHeight: 280,
+                      child: _FeaturedCard(
+                        article: featured!,
+                        colors: colors,
+                        onTap: () => onOpen(featured!),
+                      ),
+                    )
+                  : _FeaturedCard(
+                      article: featured!,
+                      colors: colors,
+                      onTap: () => onOpen(featured!),
+                    ),
             ),
           ],
           SizedBox(
@@ -731,11 +915,22 @@ class _ForYouTab extends StatelessWidget {
               child: Column(
                 children: [
                   for (var i = 0; i < rest.length; i++)
-                    _NewsListCard(
-                      article: rest[i],
-                      colors: colors,
-                      onTap: () => onOpen(rest[i]),
-                    ),
+                    if (clearOnly)
+                      SwipeToDelete(
+                        key: ValueKey<String>('swipe-row-${rest[i].id}'),
+                        onDelete: () => onSwipeDelete(rest[i]),
+                        child: _NewsListCard(
+                          article: rest[i],
+                          colors: colors,
+                          onTap: () => onOpen(rest[i]),
+                        ),
+                      )
+                    else
+                      _NewsListCard(
+                        article: rest[i],
+                        colors: colors,
+                        onTap: () => onOpen(rest[i]),
+                      ),
                 ],
               ),
             ),
@@ -751,6 +946,7 @@ class _ForYouTab extends StatelessWidget {
               unreadCount: unreadCountAll,
               unreadCountInCategory: unreadCountInCategory,
               activeCategory: category,
+              clearOnly: clearOnly,
               onAction: onFabAction,
             ),
           ),
@@ -1839,14 +2035,30 @@ class _NotificationPanelState extends State<_NotificationPanel>
 // ─────────────────────────────────────────────────────────────────────────
 
 class _ClearAllConfirmSheet extends StatelessWidget {
-  const _ClearAllConfirmSheet({required this.colors, required this.count});
+  const _ClearAllConfirmSheet({
+    required this.colors,
+    required this.count,
+    this.scopeLabel,
+  });
 
   final AppColors colors;
   final int count;
 
+  /// Optional category name to show in the title + body — set when every
+  /// article in the about-to-be-cleared batch shares a single category
+  /// (e.g. Movies/General `clearOnly` flow). `null` falls back to the
+  /// legacy "Clear all unread?" copy used by the mixed-feed path.
+  final String? scopeLabel;
+
   @override
   Widget build(BuildContext context) {
     final bottomInset = MediaQuery.viewPaddingOf(context).bottom;
+    final titleText = scopeLabel != null
+        ? 'Clear all from $scopeLabel?'
+        : 'Clear all unread?';
+    final bodyText = scopeLabel != null
+        ? '$count article${count == 1 ? '' : 's'} from $scopeLabel will be removed from your feed. Saved articles are not affected.'
+        : '$count article${count == 1 ? '' : 's'} will be marked as read and disappear from For You. Saved articles are not affected.';
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Container(
@@ -1883,7 +2095,7 @@ class _ClearAllConfirmSheet extends StatelessWidget {
             ),
             const SizedBox(height: 14),
             Text(
-              'Clear all unread?',
+              titleText,
               style: GoogleFonts.plusJakartaSans(
                 fontSize: 18,
                 fontWeight: FontWeight.w800,
@@ -1893,7 +2105,7 @@ class _ClearAllConfirmSheet extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             Text(
-              '$count article${count == 1 ? '' : 's'} will be marked as read and disappear from For You. Saved articles are not affected.',
+              bodyText,
               textAlign: TextAlign.center,
               style: GoogleFonts.plusJakartaSans(
                 fontSize: 13,
