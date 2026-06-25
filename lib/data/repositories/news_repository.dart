@@ -249,6 +249,25 @@ class NewsRepository {
     final isFeatured =
         _boolOr(apiArticle['isFeatured'], existingMeta['isFeatured'] == true);
 
+    // Resolve the article category up-front so the `isFullContent` fallback
+    // can key off it (Movies/General ship full bodies today, before the
+    // backend emits an explicit flag).
+    final resolvedCategory = _stringOrNull(apiArticle['category']) ??
+        existingRow?.category ??
+        'Technology';
+
+    // `isFullContent` precedence:
+    //   1. explicit backend flag on the incoming payload, else
+    //   2. previously-stored value in meta, else
+    //   3. category membership in [domain.kNoSummarizeCategories]
+    //      (Movies/General) — the pre-flag behaviour.
+    final isFullContent = apiArticle.containsKey('isFullContent')
+        ? _boolOr(apiArticle['isFullContent'], false)
+        : _boolOr(
+            existingMeta['isFullContent'],
+            domain.kNoSummarizeCategories.contains(resolvedCategory),
+          );
+
     final meta = <String, dynamic>{
       if (summaryMarkdown != null && summaryMarkdown.isNotEmpty)
         'summaryMarkdown': summaryMarkdown,
@@ -259,6 +278,7 @@ class NewsRepository {
       if (publishedAt != null && publishedAt.isNotEmpty)
         'publishedAt': publishedAt,
       'isFeatured': isFeatured,
+      'isFullContent': isFullContent,
       'blocks': incomingBlocks ?? existingBlocks,
     };
 
@@ -278,9 +298,7 @@ class NewsRepository {
       source: _stringOrNull(apiArticle['source']) ??
           existingRow?.source ??
           'Source',
-      category: _stringOrNull(apiArticle['category']) ??
-          existingRow?.category ??
-          'Technology',
+      category: resolvedCategory,
       imageUrl:
           _stringOrNull(apiArticle['imageUrl']) ?? existingRow?.imageUrl ?? '',
       readTime: _intOr(apiArticle['readTime'], existingRow?.readTime ?? 1),
@@ -320,6 +338,10 @@ class NewsRepository {
           publishedAtRaw == null ? null : DateTime.tryParse(publishedAtRaw),
       isSaved: row.isSaved,
       isRead: row.isRead,
+      isFullContent: _boolOr(
+        meta['isFullContent'],
+        domain.kNoSummarizeCategories.contains(row.category),
+      ),
     );
   }
 

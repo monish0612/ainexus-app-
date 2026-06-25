@@ -16,6 +16,7 @@ class ExpenseData {
     required this.cardType,
     required this.date,
     this.isManualCategory = false,
+    this.comments = '',
   });
 
   final String id;
@@ -26,6 +27,7 @@ class ExpenseData {
   final String cardType;
   final String date;
   final bool isManualCategory;
+  final String comments;
 }
 
 /// Swipeable expense row matching [docs/figma_source/ExpenseItem.tsx] behavior and layout.
@@ -35,11 +37,16 @@ class ExpenseItem extends StatefulWidget {
     required this.expense,
     required this.onEdit,
     required this.onDelete,
+    this.onTap,
   });
 
   final ExpenseData expense;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
+
+  /// Optional row tap (e.g. open a full detail view). When the swipe actions
+  /// are revealed, a tap closes them instead of firing this.
+  final VoidCallback? onTap;
 
   @override
   State<ExpenseItem> createState() => _ExpenseItemState();
@@ -226,6 +233,15 @@ class _ExpenseItemState extends State<ExpenseItem>
               onHorizontalDragStart: _onHorizontalDragStart,
               onHorizontalDragUpdate: _onHorizontalDragUpdate,
               onHorizontalDragEnd: _onHorizontalDragEnd,
+              onTap: widget.onTap == null
+                  ? null
+                  : () {
+                      if (_revealed) {
+                        _snapTo(0);
+                      } else {
+                        widget.onTap!();
+                      }
+                    },
               behavior: HitTestBehavior.opaque,
               child: Container(
                 decoration: BoxDecoration(
@@ -300,6 +316,29 @@ class _ExpenseItemState extends State<ExpenseItem>
                               ),
                             ],
                           ),
+                          if (e.comments.trim().isNotEmpty) ...[
+                            const SizedBox(height: 4),
+                            Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text('📝', style: TextStyle(fontSize: 9)),
+                                const SizedBox(width: 4),
+                                Expanded(
+                                  child: Text(
+                                    e.comments.trim(),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: GoogleFonts.plusJakartaSans(
+                                      fontSize: 10,
+                                      fontStyle: FontStyle.italic,
+                                      fontWeight: FontWeight.w400,
+                                      color: c.text4,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
                         ],
                       ),
                     ),

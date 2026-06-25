@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:math';
 
 import 'package:drift/drift.dart' as drift;
 import 'package:flutter/material.dart';
@@ -33,6 +32,7 @@ import '../../widgets/provider_picker.dart';
 import '../../widgets/sources_disclosure.dart';
 import '../settings/settings_controller.dart';
 import '../settings/settings_modal.dart';
+import 'coach_diff.dart';
 import 'deep_research_sheet.dart';
 import 'image_followup_sheet.dart';
 import 'saved_search_detail_sheet.dart';
@@ -212,97 +212,6 @@ String _coachLabelEmoji(String label) {
   }
 }
 
-// ── Word-level diff ──────────────────────────────────────────────────────────
-
-List<InlineSpan> _correctionDiffSpans({
-  required String original,
-  required String corrected,
-  required Color textColor,
-  required Color removedColor,
-  required Color addedColor,
-}) {
-  final ow =
-      original.trim().split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
-  final cw =
-      corrected.trim().split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
-  final n = ow.length;
-  final m = cw.length;
-
-  final dp = List.generate(n + 1, (_) => List<int>.filled(m + 1, 0));
-  for (var i = n - 1; i >= 0; i--) {
-    for (var j = m - 1; j >= 0; j--) {
-      dp[i][j] =
-          ow[i] == cw[j] ? 1 + dp[i + 1][j + 1] : max(dp[i + 1][j], dp[i][j + 1]);
-    }
-  }
-
-  final spans = <InlineSpan>[];
-  var i = 0;
-  var j = 0;
-
-  void gap() {
-    if (spans.isNotEmpty) {
-      spans.add(TextSpan(text: ' ', style: TextStyle(color: textColor)));
-    }
-  }
-
-  while (i < n && j < m) {
-    if (ow[i] == cw[j]) {
-      gap();
-      spans.add(TextSpan(text: ow[i], style: TextStyle(color: textColor)));
-      i++;
-      j++;
-    } else if (dp[i + 1][j] >= dp[i][j + 1]) {
-      gap();
-      spans.add(
-        TextSpan(
-          text: ow[i],
-          style: TextStyle(
-            color: removedColor,
-            decoration: TextDecoration.lineThrough,
-            decorationColor: removedColor,
-          ),
-        ),
-      );
-      i++;
-    } else {
-      gap();
-      spans.add(
-        TextSpan(
-          text: cw[j],
-          style: TextStyle(color: addedColor, fontWeight: FontWeight.w600),
-        ),
-      );
-      j++;
-    }
-  }
-  while (i < n) {
-    gap();
-    spans.add(
-      TextSpan(
-        text: ow[i],
-        style: TextStyle(
-          color: removedColor,
-          decoration: TextDecoration.lineThrough,
-          decorationColor: removedColor,
-        ),
-      ),
-    );
-    i++;
-  }
-  while (j < m) {
-    gap();
-    spans.add(
-      TextSpan(
-        text: cw[j],
-        style: TextStyle(color: addedColor, fontWeight: FontWeight.w600),
-      ),
-    );
-    j++;
-  }
-  return spans;
-}
-
 // ── Screen ───────────────────────────────────────────────────────────────────
 
 /// Callback to switch the Tutor tab controller from outside.
@@ -337,6 +246,12 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
   // Coach
   bool _coachLoading = false;
   CoachResult? _coachResult;
+
+  /// Corrected-view mode. `false` (default) shows the clean, ready-to-use
+  /// corrected sentence with only the improvements highlighted; `true` reveals
+  /// the full word-level diff (struck-out removals) for users who want to see
+  /// exactly what changed.
+  bool _coachShowDiff = false;
 
   // ── Voice (hold-to-speak) ───────────────────────────────────────────────
   // All robustness (auto-restart on Android silence-timeout, final-result
@@ -840,6 +755,7 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
     setState(() {
       _coachLoading = true;
       _coachResult = null;
+      _coachShowDiff = false;
     });
 
     try {
@@ -2310,80 +2226,140 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      'ORIGINAL',
-                      style: GoogleFonts.plusJakartaSans(
-                        fontSize: 10,
-                        fontWeight: FontWeight.w700,
-                        color: colors.text5,
-                        letterSpacing: 1,
-                      ),
+                    Row(
+                      children: [
+                        Icon(LucideIcons.quote, size: 12, color: colors.text5),
+                        const SizedBox(width: 6),
+                        Text(
+                          'YOU SAID',
+                          style: GoogleFonts.plusJakartaSans(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
+                            color: colors.text5,
+                            letterSpacing: 1,
+                          ),
+                        ),
+                      ],
                     ),
                     const SizedBox(height: 8),
                     Text(
                       _coachCtrl.text,
                       style: GoogleFonts.plusJakartaSans(
-                        fontSize: 14,
+                        fontSize: 13.5,
                         height: 1.55,
-                        color: removedRed,
-                        decoration: TextDecoration.lineThrough,
-                        decorationColor: removedRed,
+                        color: colors.text3,
                       ),
                     ),
                   ],
                 ),
               ),
               Divider(height: 1, color: colors.border2),
-              Padding(
+              Container(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      AppColors.accent.withValues(alpha: 0.06),
+                      Colors.transparent,
+                    ],
+                  ),
+                ),
                 padding: const EdgeInsets.all(16),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Row(
                       children: [
+                        Container(
+                          width: 22,
+                          height: 22,
+                          decoration: BoxDecoration(
+                            color: addedGreen.withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(7),
+                          ),
+                          child: Icon(
+                            LucideIcons.check,
+                            size: 13,
+                            color: addedGreen,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
                         Expanded(
                           child: Text(
                             'CORRECTED',
                             style: GoogleFonts.plusJakartaSans(
-                              fontSize: 10,
-                              fontWeight: FontWeight.w700,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w800,
                               color: AppColors.accent,
-                              letterSpacing: 1,
+                              letterSpacing: 0.8,
                             ),
                           ),
                         ),
-                        TextButton.icon(
-                          onPressed: () => _copy(result.correctedText),
-                          icon: Icon(
-                            LucideIcons.copy,
-                            size: 13,
-                            color: colors.text3,
-                          ),
-                          label: Text(
-                            'Copy',
-                            style: GoogleFonts.plusJakartaSans(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w700,
-                              color: colors.text3,
+                        GestureDetector(
+                          onTap: () => _copy(result.correctedText),
+                          behavior: HitTestBehavior.opaque,
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 6, vertical: 4),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(LucideIcons.copy,
+                                    size: 13, color: colors.text3),
+                                const SizedBox(width: 5),
+                                Text(
+                                  'Copy',
+                                  style: GoogleFonts.plusJakartaSans(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w700,
+                                    color: colors.text3,
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
                         ),
                       ],
                     ),
-                    const SizedBox(height: 4),
-                    SelectableText.rich(
-                      TextSpan(
-                        style: GoogleFonts.plusJakartaSans(
-                          fontSize: 17,
-                          height: 1.65,
-                          color: colors.text,
+                    const SizedBox(height: 12),
+                    _coachViewToggle(colors, addedGreen),
+                    const SizedBox(height: 14),
+                    AnimatedSize(
+                      duration: const Duration(milliseconds: 220),
+                      curve: Curves.easeOutCubic,
+                      alignment: Alignment.topCenter,
+                      child: AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 220),
+                        switchInCurve: Curves.easeOut,
+                        switchOutCurve: Curves.easeIn,
+                        transitionBuilder: (child, anim) => FadeTransition(
+                          opacity: anim,
+                          child: child,
                         ),
-                        children: _correctionDiffSpans(
-                          original: _coachCtrl.text,
-                          corrected: result.correctedText,
-                          textColor: colors.text,
-                          removedColor: removedRed,
-                          addedColor: addedGreen,
+                        child: SelectableText.rich(
+                          key: ValueKey<bool>(_coachShowDiff),
+                          TextSpan(
+                            style: GoogleFonts.plusJakartaSans(
+                              fontSize: 17,
+                              height: 1.7,
+                              color: colors.text,
+                            ),
+                            children: _coachShowDiff
+                                ? coachDiffSpans(
+                                    original: _coachCtrl.text,
+                                    corrected: result.correctedText,
+                                    textColor: colors.text,
+                                    removedColor: removedRed,
+                                    addedColor: addedGreen,
+                                  )
+                                : coachCleanSpans(
+                                    original: _coachCtrl.text,
+                                    corrected: result.correctedText,
+                                    textColor: colors.text,
+                                    addedColor: addedGreen,
+                                  ),
+                          ),
                         ),
                       ),
                     ),
@@ -2444,6 +2420,7 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
             setState(() {
               _coachCtrl.clear();
               _coachResult = null;
+              _coachShowDiff = false;
             });
           },
           icon: Icon(LucideIcons.rotateCcw, size: 16, color: colors.text4),
@@ -2464,6 +2441,72 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
           ),
         ),
       ],
+    );
+  }
+
+  /// Segmented toggle that switches the corrected text between the clean
+  /// ready-to-use result (default) and the full word-level diff.
+  Widget _coachViewToggle(AppColors colors, Color addedGreen) {
+    Widget seg(String label, IconData icon, bool diff) {
+      final selected = _coachShowDiff == diff;
+      final activeColor = diff ? const Color(0xFFF87171) : addedGreen;
+      return Expanded(
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () {
+            if (_coachShowDiff != diff) {
+              setState(() => _coachShowDiff = diff);
+            }
+          },
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.easeOut,
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            decoration: BoxDecoration(
+              color: selected
+                  ? activeColor.withValues(alpha: 0.16)
+                  : Colors.transparent,
+              borderRadius: BorderRadius.circular(9),
+              border: Border.all(
+                color: selected
+                    ? activeColor.withValues(alpha: 0.45)
+                    : Colors.transparent,
+              ),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(icon,
+                    size: 13, color: selected ? activeColor : colors.text4),
+                const SizedBox(width: 6),
+                Text(
+                  label,
+                  style: GoogleFonts.plusJakartaSans(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: selected ? activeColor : colors.text4,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(
+        color: colors.bg3,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          seg('Corrected', LucideIcons.sparkles, false),
+          const SizedBox(width: 3),
+          seg('Changes', LucideIcons.eye, true),
+        ],
+      ),
     );
   }
 

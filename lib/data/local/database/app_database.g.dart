@@ -56,6 +56,14 @@ class $ExpensesTable extends Expenses with TableInfo<$ExpensesTable, Expense> {
       defaultConstraints: GeneratedColumn.constraintIsAlways(
           'CHECK ("is_manual_category" IN (0, 1))'),
       defaultValue: const Constant(false));
+  static const VerificationMeta _commentsMeta =
+      const VerificationMeta('comments');
+  @override
+  late final GeneratedColumn<String> comments = GeneratedColumn<String>(
+      'comments', aliasedName, false,
+      type: DriftSqlType.string,
+      requiredDuringInsert: false,
+      defaultValue: const Constant(''));
   @override
   List<GeneratedColumn> get $columns => [
         id,
@@ -65,7 +73,8 @@ class $ExpensesTable extends Expenses with TableInfo<$ExpensesTable, Expense> {
         bank,
         cardType,
         date,
-        isManualCategory
+        isManualCategory,
+        comments
       ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -126,6 +135,10 @@ class $ExpensesTable extends Expenses with TableInfo<$ExpensesTable, Expense> {
           isManualCategory.isAcceptableOrUnknown(
               data['is_manual_category']!, _isManualCategoryMeta));
     }
+    if (data.containsKey('comments')) {
+      context.handle(_commentsMeta,
+          comments.isAcceptableOrUnknown(data['comments']!, _commentsMeta));
+    }
     return context;
   }
 
@@ -151,6 +164,8 @@ class $ExpensesTable extends Expenses with TableInfo<$ExpensesTable, Expense> {
           .read(DriftSqlType.string, data['${effectivePrefix}date'])!,
       isManualCategory: attachedDatabase.typeMapping.read(
           DriftSqlType.bool, data['${effectivePrefix}is_manual_category'])!,
+      comments: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}comments'])!,
     );
   }
 
@@ -169,6 +184,11 @@ class Expense extends DataClass implements Insertable<Expense> {
   final String cardType;
   final String date;
   final bool isManualCategory;
+
+  /// Optional free-form note/reminder attached at log time (manual, voice, or
+  /// PDF/scan flows). NULL/'' = no comment. Local-only-friendly: synced when the
+  /// backend supports it, otherwise preserved locally.
+  final String comments;
   const Expense(
       {required this.id,
       required this.amount,
@@ -177,7 +197,8 @@ class Expense extends DataClass implements Insertable<Expense> {
       required this.bank,
       required this.cardType,
       required this.date,
-      required this.isManualCategory});
+      required this.isManualCategory,
+      required this.comments});
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
@@ -189,6 +210,7 @@ class Expense extends DataClass implements Insertable<Expense> {
     map['card_type'] = Variable<String>(cardType);
     map['date'] = Variable<String>(date);
     map['is_manual_category'] = Variable<bool>(isManualCategory);
+    map['comments'] = Variable<String>(comments);
     return map;
   }
 
@@ -202,6 +224,7 @@ class Expense extends DataClass implements Insertable<Expense> {
       cardType: Value(cardType),
       date: Value(date),
       isManualCategory: Value(isManualCategory),
+      comments: Value(comments),
     );
   }
 
@@ -217,6 +240,7 @@ class Expense extends DataClass implements Insertable<Expense> {
       cardType: serializer.fromJson<String>(json['cardType']),
       date: serializer.fromJson<String>(json['date']),
       isManualCategory: serializer.fromJson<bool>(json['isManualCategory']),
+      comments: serializer.fromJson<String>(json['comments']),
     );
   }
   @override
@@ -231,6 +255,7 @@ class Expense extends DataClass implements Insertable<Expense> {
       'cardType': serializer.toJson<String>(cardType),
       'date': serializer.toJson<String>(date),
       'isManualCategory': serializer.toJson<bool>(isManualCategory),
+      'comments': serializer.toJson<String>(comments),
     };
   }
 
@@ -242,7 +267,8 @@ class Expense extends DataClass implements Insertable<Expense> {
           String? bank,
           String? cardType,
           String? date,
-          bool? isManualCategory}) =>
+          bool? isManualCategory,
+          String? comments}) =>
       Expense(
         id: id ?? this.id,
         amount: amount ?? this.amount,
@@ -252,6 +278,7 @@ class Expense extends DataClass implements Insertable<Expense> {
         cardType: cardType ?? this.cardType,
         date: date ?? this.date,
         isManualCategory: isManualCategory ?? this.isManualCategory,
+        comments: comments ?? this.comments,
       );
   Expense copyWithCompanion(ExpensesCompanion data) {
     return Expense(
@@ -266,6 +293,7 @@ class Expense extends DataClass implements Insertable<Expense> {
       isManualCategory: data.isManualCategory.present
           ? data.isManualCategory.value
           : this.isManualCategory,
+      comments: data.comments.present ? data.comments.value : this.comments,
     );
   }
 
@@ -279,14 +307,15 @@ class Expense extends DataClass implements Insertable<Expense> {
           ..write('bank: $bank, ')
           ..write('cardType: $cardType, ')
           ..write('date: $date, ')
-          ..write('isManualCategory: $isManualCategory')
+          ..write('isManualCategory: $isManualCategory, ')
+          ..write('comments: $comments')
           ..write(')'))
         .toString();
   }
 
   @override
   int get hashCode => Object.hash(id, amount, description, category, bank,
-      cardType, date, isManualCategory);
+      cardType, date, isManualCategory, comments);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -298,7 +327,8 @@ class Expense extends DataClass implements Insertable<Expense> {
           other.bank == this.bank &&
           other.cardType == this.cardType &&
           other.date == this.date &&
-          other.isManualCategory == this.isManualCategory);
+          other.isManualCategory == this.isManualCategory &&
+          other.comments == this.comments);
 }
 
 class ExpensesCompanion extends UpdateCompanion<Expense> {
@@ -310,6 +340,7 @@ class ExpensesCompanion extends UpdateCompanion<Expense> {
   final Value<String> cardType;
   final Value<String> date;
   final Value<bool> isManualCategory;
+  final Value<String> comments;
   final Value<int> rowid;
   const ExpensesCompanion({
     this.id = const Value.absent(),
@@ -320,6 +351,7 @@ class ExpensesCompanion extends UpdateCompanion<Expense> {
     this.cardType = const Value.absent(),
     this.date = const Value.absent(),
     this.isManualCategory = const Value.absent(),
+    this.comments = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   ExpensesCompanion.insert({
@@ -331,6 +363,7 @@ class ExpensesCompanion extends UpdateCompanion<Expense> {
     required String cardType,
     required String date,
     this.isManualCategory = const Value.absent(),
+    this.comments = const Value.absent(),
     this.rowid = const Value.absent(),
   })  : id = Value(id),
         amount = Value(amount),
@@ -348,6 +381,7 @@ class ExpensesCompanion extends UpdateCompanion<Expense> {
     Expression<String>? cardType,
     Expression<String>? date,
     Expression<bool>? isManualCategory,
+    Expression<String>? comments,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -359,6 +393,7 @@ class ExpensesCompanion extends UpdateCompanion<Expense> {
       if (cardType != null) 'card_type': cardType,
       if (date != null) 'date': date,
       if (isManualCategory != null) 'is_manual_category': isManualCategory,
+      if (comments != null) 'comments': comments,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -372,6 +407,7 @@ class ExpensesCompanion extends UpdateCompanion<Expense> {
       Value<String>? cardType,
       Value<String>? date,
       Value<bool>? isManualCategory,
+      Value<String>? comments,
       Value<int>? rowid}) {
     return ExpensesCompanion(
       id: id ?? this.id,
@@ -382,6 +418,7 @@ class ExpensesCompanion extends UpdateCompanion<Expense> {
       cardType: cardType ?? this.cardType,
       date: date ?? this.date,
       isManualCategory: isManualCategory ?? this.isManualCategory,
+      comments: comments ?? this.comments,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -413,6 +450,9 @@ class ExpensesCompanion extends UpdateCompanion<Expense> {
     if (isManualCategory.present) {
       map['is_manual_category'] = Variable<bool>(isManualCategory.value);
     }
+    if (comments.present) {
+      map['comments'] = Variable<String>(comments.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -430,6 +470,7 @@ class ExpensesCompanion extends UpdateCompanion<Expense> {
           ..write('cardType: $cardType, ')
           ..write('date: $date, ')
           ..write('isManualCategory: $isManualCategory, ')
+          ..write('comments: $comments, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -655,6 +696,271 @@ class BudgetEntriesCompanion extends UpdateCompanion<BudgetEntry> {
   String toString() {
     return (StringBuffer('BudgetEntriesCompanion(')
           ..write('id: $id, ')
+          ..write('amount: $amount, ')
+          ..write('setAt: $setAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $SalaryEntriesTable extends SalaryEntries
+    with TableInfo<$SalaryEntriesTable, SalaryEntry> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $SalaryEntriesTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+      'id', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _monthMeta = const VerificationMeta('month');
+  @override
+  late final GeneratedColumn<String> month = GeneratedColumn<String>(
+      'month', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _amountMeta = const VerificationMeta('amount');
+  @override
+  late final GeneratedColumn<double> amount = GeneratedColumn<double>(
+      'amount', aliasedName, false,
+      type: DriftSqlType.double, requiredDuringInsert: true);
+  static const VerificationMeta _setAtMeta = const VerificationMeta('setAt');
+  @override
+  late final GeneratedColumn<String> setAt = GeneratedColumn<String>(
+      'set_at', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  @override
+  List<GeneratedColumn> get $columns => [id, month, amount, setAt];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'salary_entries';
+  @override
+  VerificationContext validateIntegrity(Insertable<SalaryEntry> instance,
+      {bool isInserting = false}) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('month')) {
+      context.handle(
+          _monthMeta, month.isAcceptableOrUnknown(data['month']!, _monthMeta));
+    } else if (isInserting) {
+      context.missing(_monthMeta);
+    }
+    if (data.containsKey('amount')) {
+      context.handle(_amountMeta,
+          amount.isAcceptableOrUnknown(data['amount']!, _amountMeta));
+    } else if (isInserting) {
+      context.missing(_amountMeta);
+    }
+    if (data.containsKey('set_at')) {
+      context.handle(
+          _setAtMeta, setAt.isAcceptableOrUnknown(data['set_at']!, _setAtMeta));
+    } else if (isInserting) {
+      context.missing(_setAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {month};
+  @override
+  SalaryEntry map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return SalaryEntry(
+      id: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}id'])!,
+      month: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}month'])!,
+      amount: attachedDatabase.typeMapping
+          .read(DriftSqlType.double, data['${effectivePrefix}amount'])!,
+      setAt: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}set_at'])!,
+    );
+  }
+
+  @override
+  $SalaryEntriesTable createAlias(String alias) {
+    return $SalaryEntriesTable(attachedDatabase, alias);
+  }
+}
+
+class SalaryEntry extends DataClass implements Insertable<SalaryEntry> {
+  final String id;
+  final String month;
+  final double amount;
+  final String setAt;
+  const SalaryEntry(
+      {required this.id,
+      required this.month,
+      required this.amount,
+      required this.setAt});
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['month'] = Variable<String>(month);
+    map['amount'] = Variable<double>(amount);
+    map['set_at'] = Variable<String>(setAt);
+    return map;
+  }
+
+  SalaryEntriesCompanion toCompanion(bool nullToAbsent) {
+    return SalaryEntriesCompanion(
+      id: Value(id),
+      month: Value(month),
+      amount: Value(amount),
+      setAt: Value(setAt),
+    );
+  }
+
+  factory SalaryEntry.fromJson(Map<String, dynamic> json,
+      {ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return SalaryEntry(
+      id: serializer.fromJson<String>(json['id']),
+      month: serializer.fromJson<String>(json['month']),
+      amount: serializer.fromJson<double>(json['amount']),
+      setAt: serializer.fromJson<String>(json['setAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'month': serializer.toJson<String>(month),
+      'amount': serializer.toJson<double>(amount),
+      'setAt': serializer.toJson<String>(setAt),
+    };
+  }
+
+  SalaryEntry copyWith(
+          {String? id, String? month, double? amount, String? setAt}) =>
+      SalaryEntry(
+        id: id ?? this.id,
+        month: month ?? this.month,
+        amount: amount ?? this.amount,
+        setAt: setAt ?? this.setAt,
+      );
+  SalaryEntry copyWithCompanion(SalaryEntriesCompanion data) {
+    return SalaryEntry(
+      id: data.id.present ? data.id.value : this.id,
+      month: data.month.present ? data.month.value : this.month,
+      amount: data.amount.present ? data.amount.value : this.amount,
+      setAt: data.setAt.present ? data.setAt.value : this.setAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('SalaryEntry(')
+          ..write('id: $id, ')
+          ..write('month: $month, ')
+          ..write('amount: $amount, ')
+          ..write('setAt: $setAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(id, month, amount, setAt);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is SalaryEntry &&
+          other.id == this.id &&
+          other.month == this.month &&
+          other.amount == this.amount &&
+          other.setAt == this.setAt);
+}
+
+class SalaryEntriesCompanion extends UpdateCompanion<SalaryEntry> {
+  final Value<String> id;
+  final Value<String> month;
+  final Value<double> amount;
+  final Value<String> setAt;
+  final Value<int> rowid;
+  const SalaryEntriesCompanion({
+    this.id = const Value.absent(),
+    this.month = const Value.absent(),
+    this.amount = const Value.absent(),
+    this.setAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  SalaryEntriesCompanion.insert({
+    required String id,
+    required String month,
+    required double amount,
+    required String setAt,
+    this.rowid = const Value.absent(),
+  })  : id = Value(id),
+        month = Value(month),
+        amount = Value(amount),
+        setAt = Value(setAt);
+  static Insertable<SalaryEntry> custom({
+    Expression<String>? id,
+    Expression<String>? month,
+    Expression<double>? amount,
+    Expression<String>? setAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (month != null) 'month': month,
+      if (amount != null) 'amount': amount,
+      if (setAt != null) 'set_at': setAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  SalaryEntriesCompanion copyWith(
+      {Value<String>? id,
+      Value<String>? month,
+      Value<double>? amount,
+      Value<String>? setAt,
+      Value<int>? rowid}) {
+    return SalaryEntriesCompanion(
+      id: id ?? this.id,
+      month: month ?? this.month,
+      amount: amount ?? this.amount,
+      setAt: setAt ?? this.setAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (month.present) {
+      map['month'] = Variable<String>(month.value);
+    }
+    if (amount.present) {
+      map['amount'] = Variable<double>(amount.value);
+    }
+    if (setAt.present) {
+      map['set_at'] = Variable<String>(setAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('SalaryEntriesCompanion(')
+          ..write('id: $id, ')
+          ..write('month: $month, ')
           ..write('amount: $amount, ')
           ..write('setAt: $setAt, ')
           ..write('rowid: $rowid')
@@ -4578,6 +4884,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
   late final $ExpensesTable expenses = $ExpensesTable(this);
   late final $BudgetEntriesTable budgetEntries = $BudgetEntriesTable(this);
+  late final $SalaryEntriesTable salaryEntries = $SalaryEntriesTable(this);
   late final $NewsArticlesTable newsArticles = $NewsArticlesTable(this);
   late final $CloudFilesTable cloudFiles = $CloudFilesTable(this);
   late final $SavedWordsTable savedWords = $SavedWordsTable(this);
@@ -4600,6 +4907,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   List<DatabaseSchemaEntity> get allSchemaEntities => [
         expenses,
         budgetEntries,
+        salaryEntries,
         newsArticles,
         cloudFiles,
         savedWords,
@@ -4622,6 +4930,7 @@ typedef $$ExpensesTableCreateCompanionBuilder = ExpensesCompanion Function({
   required String cardType,
   required String date,
   Value<bool> isManualCategory,
+  Value<String> comments,
   Value<int> rowid,
 });
 typedef $$ExpensesTableUpdateCompanionBuilder = ExpensesCompanion Function({
@@ -4633,6 +4942,7 @@ typedef $$ExpensesTableUpdateCompanionBuilder = ExpensesCompanion Function({
   Value<String> cardType,
   Value<String> date,
   Value<bool> isManualCategory,
+  Value<String> comments,
   Value<int> rowid,
 });
 
@@ -4669,6 +4979,9 @@ class $$ExpensesTableFilterComposer
   ColumnFilters<bool> get isManualCategory => $composableBuilder(
       column: $table.isManualCategory,
       builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get comments => $composableBuilder(
+      column: $table.comments, builder: (column) => ColumnFilters(column));
 }
 
 class $$ExpensesTableOrderingComposer
@@ -4704,6 +5017,9 @@ class $$ExpensesTableOrderingComposer
   ColumnOrderings<bool> get isManualCategory => $composableBuilder(
       column: $table.isManualCategory,
       builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get comments => $composableBuilder(
+      column: $table.comments, builder: (column) => ColumnOrderings(column));
 }
 
 class $$ExpensesTableAnnotationComposer
@@ -4738,6 +5054,9 @@ class $$ExpensesTableAnnotationComposer
 
   GeneratedColumn<bool> get isManualCategory => $composableBuilder(
       column: $table.isManualCategory, builder: (column) => column);
+
+  GeneratedColumn<String> get comments =>
+      $composableBuilder(column: $table.comments, builder: (column) => column);
 }
 
 class $$ExpensesTableTableManager extends RootTableManager<
@@ -4771,6 +5090,7 @@ class $$ExpensesTableTableManager extends RootTableManager<
             Value<String> cardType = const Value.absent(),
             Value<String> date = const Value.absent(),
             Value<bool> isManualCategory = const Value.absent(),
+            Value<String> comments = const Value.absent(),
             Value<int> rowid = const Value.absent(),
           }) =>
               ExpensesCompanion(
@@ -4782,6 +5102,7 @@ class $$ExpensesTableTableManager extends RootTableManager<
             cardType: cardType,
             date: date,
             isManualCategory: isManualCategory,
+            comments: comments,
             rowid: rowid,
           ),
           createCompanionCallback: ({
@@ -4793,6 +5114,7 @@ class $$ExpensesTableTableManager extends RootTableManager<
             required String cardType,
             required String date,
             Value<bool> isManualCategory = const Value.absent(),
+            Value<String> comments = const Value.absent(),
             Value<int> rowid = const Value.absent(),
           }) =>
               ExpensesCompanion.insert(
@@ -4804,6 +5126,7 @@ class $$ExpensesTableTableManager extends RootTableManager<
             cardType: cardType,
             date: date,
             isManualCategory: isManualCategory,
+            comments: comments,
             rowid: rowid,
           ),
           withReferenceMapper: (p0) => p0
@@ -4967,6 +5290,164 @@ typedef $$BudgetEntriesTableProcessedTableManager = ProcessedTableManager<
       BaseReferences<_$AppDatabase, $BudgetEntriesTable, BudgetEntry>
     ),
     BudgetEntry,
+    PrefetchHooks Function()>;
+typedef $$SalaryEntriesTableCreateCompanionBuilder = SalaryEntriesCompanion
+    Function({
+  required String id,
+  required String month,
+  required double amount,
+  required String setAt,
+  Value<int> rowid,
+});
+typedef $$SalaryEntriesTableUpdateCompanionBuilder = SalaryEntriesCompanion
+    Function({
+  Value<String> id,
+  Value<String> month,
+  Value<double> amount,
+  Value<String> setAt,
+  Value<int> rowid,
+});
+
+class $$SalaryEntriesTableFilterComposer
+    extends Composer<_$AppDatabase, $SalaryEntriesTable> {
+  $$SalaryEntriesTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+      column: $table.id, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get month => $composableBuilder(
+      column: $table.month, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<double> get amount => $composableBuilder(
+      column: $table.amount, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get setAt => $composableBuilder(
+      column: $table.setAt, builder: (column) => ColumnFilters(column));
+}
+
+class $$SalaryEntriesTableOrderingComposer
+    extends Composer<_$AppDatabase, $SalaryEntriesTable> {
+  $$SalaryEntriesTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+      column: $table.id, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get month => $composableBuilder(
+      column: $table.month, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<double> get amount => $composableBuilder(
+      column: $table.amount, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get setAt => $composableBuilder(
+      column: $table.setAt, builder: (column) => ColumnOrderings(column));
+}
+
+class $$SalaryEntriesTableAnnotationComposer
+    extends Composer<_$AppDatabase, $SalaryEntriesTable> {
+  $$SalaryEntriesTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get month =>
+      $composableBuilder(column: $table.month, builder: (column) => column);
+
+  GeneratedColumn<double> get amount =>
+      $composableBuilder(column: $table.amount, builder: (column) => column);
+
+  GeneratedColumn<String> get setAt =>
+      $composableBuilder(column: $table.setAt, builder: (column) => column);
+}
+
+class $$SalaryEntriesTableTableManager extends RootTableManager<
+    _$AppDatabase,
+    $SalaryEntriesTable,
+    SalaryEntry,
+    $$SalaryEntriesTableFilterComposer,
+    $$SalaryEntriesTableOrderingComposer,
+    $$SalaryEntriesTableAnnotationComposer,
+    $$SalaryEntriesTableCreateCompanionBuilder,
+    $$SalaryEntriesTableUpdateCompanionBuilder,
+    (
+      SalaryEntry,
+      BaseReferences<_$AppDatabase, $SalaryEntriesTable, SalaryEntry>
+    ),
+    SalaryEntry,
+    PrefetchHooks Function()> {
+  $$SalaryEntriesTableTableManager(_$AppDatabase db, $SalaryEntriesTable table)
+      : super(TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$SalaryEntriesTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$SalaryEntriesTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$SalaryEntriesTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback: ({
+            Value<String> id = const Value.absent(),
+            Value<String> month = const Value.absent(),
+            Value<double> amount = const Value.absent(),
+            Value<String> setAt = const Value.absent(),
+            Value<int> rowid = const Value.absent(),
+          }) =>
+              SalaryEntriesCompanion(
+            id: id,
+            month: month,
+            amount: amount,
+            setAt: setAt,
+            rowid: rowid,
+          ),
+          createCompanionCallback: ({
+            required String id,
+            required String month,
+            required double amount,
+            required String setAt,
+            Value<int> rowid = const Value.absent(),
+          }) =>
+              SalaryEntriesCompanion.insert(
+            id: id,
+            month: month,
+            amount: amount,
+            setAt: setAt,
+            rowid: rowid,
+          ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ));
+}
+
+typedef $$SalaryEntriesTableProcessedTableManager = ProcessedTableManager<
+    _$AppDatabase,
+    $SalaryEntriesTable,
+    SalaryEntry,
+    $$SalaryEntriesTableFilterComposer,
+    $$SalaryEntriesTableOrderingComposer,
+    $$SalaryEntriesTableAnnotationComposer,
+    $$SalaryEntriesTableCreateCompanionBuilder,
+    $$SalaryEntriesTableUpdateCompanionBuilder,
+    (
+      SalaryEntry,
+      BaseReferences<_$AppDatabase, $SalaryEntriesTable, SalaryEntry>
+    ),
+    SalaryEntry,
     PrefetchHooks Function()>;
 typedef $$NewsArticlesTableCreateCompanionBuilder = NewsArticlesCompanion
     Function({
@@ -7002,6 +7483,8 @@ class $AppDatabaseManager {
       $$ExpensesTableTableManager(_db, _db.expenses);
   $$BudgetEntriesTableTableManager get budgetEntries =>
       $$BudgetEntriesTableTableManager(_db, _db.budgetEntries);
+  $$SalaryEntriesTableTableManager get salaryEntries =>
+      $$SalaryEntriesTableTableManager(_db, _db.salaryEntries);
   $$NewsArticlesTableTableManager get newsArticles =>
       $$NewsArticlesTableTableManager(_db, _db.newsArticles);
   $$CloudFilesTableTableManager get cloudFiles =>

@@ -10,6 +10,16 @@ import '../../core/services/telegram_logger.dart';
 import '../../domain/entities/expense_entities.dart' as domain;
 import '../local/database/app_database.dart' as db;
 
+/// Ordering options for [ExpenseRepository.getExpensesPage]. Newest-first is
+/// the default; amount ordering powers AI queries like "highest expense".
+enum ExpenseSort { dateDesc, dateAsc, amountDesc, amountAsc }
+
+/// Visualization the AI search may request. [none] renders the plain list.
+enum ExpenseChart { none, category, daily, monthly }
+
+/// A single aggregated time bucket (day or month) for chart visualizations.
+typedef ExpenseBucket = ({String bucket, double total, int count});
+
 class ExpenseRepository {
   ExpenseRepository(this._db, this._api, this._prefs);
 
@@ -475,6 +485,7 @@ class ExpenseRepository {
           cardType: item['cardType']?.toString() ?? item['card_type']?.toString() ?? '',
           date: item['date']?.toString() ?? '',
           isManualCategory: item['isManualCategory'] == true || item['is_manual_category'] == true,
+          comments: item['comments']?.toString() ?? '',
         );
 
         await _db.into(_db.expenses).insertOnConflictUpdate(
@@ -501,6 +512,7 @@ class ExpenseRepository {
       cardType: row.cardType,
       date: row.date,
       isManualCategory: row.isManualCategory,
+      comments: row.comments,
     );
   }
 
@@ -514,6 +526,7 @@ class ExpenseRepository {
       cardType: e.cardType,
       date: e.date,
       isManualCategory: Value(e.isManualCategory),
+      comments: Value(e.comments),
     );
   }
 
@@ -527,6 +540,277 @@ class ExpenseRepository {
       cardType: Value(e.cardType),
       date: Value(e.date),
       isManualCategory: Value(e.isManualCategory),
+      comments: Value(e.comments),
     );
+  }
+
+  // ── Timeframe drill-down (paginated, DB-level — stays fluid at 1M+ rows) ──
+
+  /// One page of expenses whose `date` is `>= startIso` (and `< endIso` when
+  /// provided), ordered newest-first. Filtering + ordering + LIMIT/OFFSET all
+  /// run in SQLite (indexed on `date`) so we never load the whole history into
+  /// memory.
+  Future<List<domain.Expense>> getExpensesPage({
+    String? startIso,
+    String? endIso,
+    String? category,
+    String? search,
+    List<String> searchTerms = const [],
+    ExpenseSort sort = ExpenseSort.dateDesc,
+    required int limit,
+    required int offset,
+  }) async {
+    try {
+      final q = _db.select(_db.expenses)
+        ..orderBy(_orderingFor(sort))
+        ..limit(limit, offset: offset);
+      _applyRangeFilters(q, startIso, endIso, category, search, searchTerms);
+      final rows = await q.get();
+      return rows.map(_rowToExpense).toList();
+    } catch (e) {
+      TLog.e('ExpenseRepo', 'getExpensesPage failed '
+          '(start=$startIso offset=$offset)', error: e);
+      rethrow;
+    }
+  }
+
+  /// Aggregate count + total spend for a timeframe — computed in SQL so it is
+  /// instant regardless of history size.
+  Future<({int count, double total})> rangeSummary({
+    String? startIso,
+    String? endIso,
+    String? category,
+    String? search,
+    List<String> searchTerms = const [],
+  }) async {
+    try {
+      final countExp = _db.expenses.id.count();
+      final totalExp = _db.expenses.amount.sum();
+      final q = _db.selectOnly(_db.expenses)..addColumns([countExp, totalExp]);
+      _applyRangeFiltersJoin(q, startIso, endIso, category, search, searchTerms);
+      final row = await q.getSingle();
+      return (
+        count: row.read(countExp) ?? 0,
+        total: (row.read(totalExp) ?? 0).toDouble(),
+      );
+    } catch (e) {
+      TLog.w('ExpenseRepo', 'rangeSummary failed (start=$startIso)', error: e);
+      return (count: 0, total: 0.0);
+    }
+  }
+
+  /// Reactive month-to-date total for a 'YYYY-MM' key, computed as a SQL
+  /// `SUM(amount)` over the indexed `date` range — never loads rows into
+  /// memory, so it stays O(log n) + aggregation even with millions of rows and
+  /// re-emits automatically whenever any expense in that month changes. Powers
+  /// the salary stats so they don't depend on the full in-memory expense list.
+  Stream<double> watchMonthTotal(String monthKey) {
+    final (start, end) = _monthBounds(monthKey);
+    final totalExp = _db.expenses.amount.sum();
+    final q = _db.selectOnly(_db.expenses)..addColumns([totalExp]);
+    q.where(_db.expenses.date.isBiggerOrEqualValue(start));
+    q.where(_db.expenses.date.isSmallerThanValue(end));
+    return q.watchSingle().map((row) => (row.read(totalExp) ?? 0).toDouble());
+  }
+
+  /// Inclusive start ('YYYY-MM-01') and exclusive end (first day of next month)
+  /// date-prefix bounds for a 'YYYY-MM' key. Lexicographic on the ISO date
+  /// strings, which is correct because they share the fixed 'YYYY-MM-DD…' shape.
+  (String, String) _monthBounds(String monthKey) {
+    final parts = monthKey.split('-');
+    final y = int.tryParse(parts.isNotEmpty ? parts[0] : '') ??
+        DateTime.now().year;
+    final m = parts.length > 1 ? (int.tryParse(parts[1]) ?? 1) : 1;
+    final start =
+        '${y.toString().padLeft(4, '0')}-${m.toString().padLeft(2, '0')}-01';
+    final ny = m == 12 ? y + 1 : y;
+    final nm = m == 12 ? 1 : m + 1;
+    final end =
+        '${ny.toString().padLeft(4, '0')}-${nm.toString().padLeft(2, '0')}-01';
+    return (start, end);
+  }
+
+  /// Per-category totals for a timeframe (newest-first by spend), in SQL.
+  Future<List<({String category, double total, int count})>> categoryBreakdown({
+    String? startIso,
+    String? endIso,
+    String? search,
+    List<String> searchTerms = const [],
+  }) async {
+    try {
+      final totalExp = _db.expenses.amount.sum();
+      final countExp = _db.expenses.id.count();
+      final q = _db.selectOnly(_db.expenses)
+        ..addColumns([_db.expenses.category, totalExp, countExp])
+        ..groupBy([_db.expenses.category])
+        ..orderBy([OrderingTerm(expression: totalExp, mode: OrderingMode.desc)]);
+      _applyRangeFiltersJoin(q, startIso, endIso, null, search, searchTerms);
+      final rows = await q.get();
+      return rows
+          .map((r) => (
+                category: r.read(_db.expenses.category) ?? 'Others',
+                total: (r.read(totalExp) ?? 0).toDouble(),
+                count: r.read(countExp) ?? 0,
+              ))
+          .toList();
+    } catch (e) {
+      TLog.w('ExpenseRepo', 'categoryBreakdown failed', error: e);
+      return const [];
+    }
+  }
+
+  /// Ordering clause(s) for a [ExpenseSort]. A secondary `id` term keeps
+  /// pagination deterministic when the primary key (e.g. amount) ties.
+  List<OrderClauseGenerator<db.$ExpensesTable>> _orderingFor(ExpenseSort sort) {
+    switch (sort) {
+      case ExpenseSort.dateAsc:
+        return [
+          (t) => OrderingTerm(expression: t.date, mode: OrderingMode.asc),
+          (t) => OrderingTerm(expression: t.id, mode: OrderingMode.asc),
+        ];
+      case ExpenseSort.amountDesc:
+        return [
+          (t) => OrderingTerm(expression: t.amount, mode: OrderingMode.desc),
+          (t) => OrderingTerm(expression: t.date, mode: OrderingMode.desc),
+          (t) => OrderingTerm(expression: t.id, mode: OrderingMode.asc),
+        ];
+      case ExpenseSort.amountAsc:
+        return [
+          (t) => OrderingTerm(expression: t.amount, mode: OrderingMode.asc),
+          (t) => OrderingTerm(expression: t.date, mode: OrderingMode.desc),
+          (t) => OrderingTerm(expression: t.id, mode: OrderingMode.asc),
+        ];
+      case ExpenseSort.dateDesc:
+        return [
+          (t) => OrderingTerm(expression: t.date, mode: OrderingMode.desc),
+          (t) => OrderingTerm(expression: t.id, mode: OrderingMode.asc),
+        ];
+    }
+  }
+
+  /// Per-time-bucket totals (day or month) for chart visualizations, computed
+  /// entirely in SQL via `GROUP BY substr(date, ...)`. Buckets are returned in
+  /// chronological order. Scales to very large histories — only the (small)
+  /// set of distinct buckets is materialized, never the rows themselves.
+  Future<List<ExpenseBucket>> timeBreakdown({
+    required bool monthly,
+    String? startIso,
+    String? endIso,
+    String? category,
+    String? search,
+    List<String> searchTerms = const [],
+  }) async {
+    try {
+      // ISO dates are 'YYYY-MM-DDThh:mm:ss…' so substr(1,10)=day, (1,7)=month.
+      final bucketExp =
+          CustomExpression<String>('substr(expenses.date, 1, ${monthly ? 7 : 10})');
+      final totalExp = _db.expenses.amount.sum();
+      final countExp = _db.expenses.id.count();
+      final q = _db.selectOnly(_db.expenses)
+        ..addColumns([bucketExp, totalExp, countExp])
+        ..groupBy([bucketExp])
+        ..orderBy([OrderingTerm(expression: bucketExp, mode: OrderingMode.asc)]);
+      _applyRangeFiltersJoin(q, startIso, endIso, category, search, searchTerms);
+      final rows = await q.get();
+      return rows
+          .map((r) => (
+                bucket: r.read(bucketExp) ?? '',
+                total: (r.read(totalExp) ?? 0).toDouble(),
+                count: r.read(countExp) ?? 0,
+              ))
+          .where((b) => b.bucket.isNotEmpty)
+          .toList();
+    } catch (e) {
+      TLog.w('ExpenseRepo', 'timeBreakdown failed (monthly=$monthly)', error: e);
+      return const [];
+    }
+  }
+
+  void _applyRangeFilters(
+    SimpleSelectStatement<db.$ExpensesTable, db.Expense> q,
+    String? startIso,
+    String? endIso,
+    String? category,
+    String? search,
+    List<String> searchTerms,
+  ) {
+    if (startIso != null) {
+      q.where((t) => t.date.isBiggerOrEqualValue(startIso));
+    }
+    if (endIso != null) {
+      q.where((t) => t.date.isSmallerThanValue(endIso));
+    }
+    if (category != null && category.isNotEmpty) {
+      q.where((t) => t.category.equals(category));
+    }
+    // User's editable text (AND) — narrows within the result set.
+    final searchExpr = _searchExpr(search);
+    if (searchExpr != null) q.where((_) => searchExpr);
+    // Semantic OR-group from AI query expansion — a row must match ANY term.
+    final anyExpr = _searchAnyExpr(searchTerms);
+    if (anyExpr != null) q.where((_) => anyExpr);
+  }
+
+  void _applyRangeFiltersJoin(
+    JoinedSelectStatement q,
+    String? startIso,
+    String? endIso,
+    String? category,
+    String? search,
+    List<String> searchTerms,
+  ) {
+    final t = _db.expenses;
+    if (startIso != null) q.where(t.date.isBiggerOrEqualValue(startIso));
+    if (endIso != null) q.where(t.date.isSmallerThanValue(endIso));
+    if (category != null && category.isNotEmpty) {
+      q.where(t.category.equals(category));
+    }
+    final searchExpr = _searchExpr(search);
+    if (searchExpr != null) q.where(searchExpr);
+    final anyExpr = _searchAnyExpr(searchTerms);
+    if (anyExpr != null) q.where(anyExpr);
+  }
+
+  /// SQL fragment matching a single term (case-insensitive contains) against
+  /// description / category / comments.
+  ///
+  /// LIKE wildcards (`%`, `_`) and the escape char (`\`) in the user's input
+  /// are escaped so they match literally (e.g. searching "50%" finds only rows
+  /// containing "50%", not every row with "50"). The needle is embedded as a
+  /// single-quote-escaped SQL string literal — SQLite-safe, no injection — and
+  /// an explicit `ESCAPE '\'` clause makes the wildcard-escaping take effect.
+  String _termLikeSql(String rawTerm) {
+    final escaped = rawTerm
+        .replaceAll('\\', r'\\')
+        .replaceAll('%', r'\%')
+        .replaceAll('_', r'\_')
+        .replaceAll("'", "''");
+    final lit = "'%$escaped%'";
+    return '(expenses.description LIKE $lit ESCAPE \'\\\' '
+        'OR expenses.category LIKE $lit ESCAPE \'\\\' '
+        'OR expenses.comments LIKE $lit ESCAPE \'\\\')';
+  }
+
+  /// Single editable search term (the user's text box).
+  Expression<bool>? _searchExpr(String? search) {
+    final raw = search?.trim() ?? '';
+    if (raw.isEmpty) return null;
+    return CustomExpression<bool>(_termLikeSql(raw));
+  }
+
+  /// Semantic OR-group: a row matches if it contains ANY of [terms] (each term
+  /// matched literally across the three text columns). Powers AI query
+  /// expansion ("anything related to my car" → car/fuel/garage/service/…).
+  /// Results are always real DB rows — the model only supplies the terms, so it
+  /// can never fabricate an expense.
+  Expression<bool>? _searchAnyExpr(List<String> terms) {
+    final cleaned = <String>{};
+    for (final t in terms) {
+      final v = t.trim();
+      if (v.isNotEmpty) cleaned.add(v);
+    }
+    if (cleaned.isEmpty) return null;
+    final parts = cleaned.map(_termLikeSql).join(' OR ');
+    return CustomExpression<bool>('($parts)');
   }
 }

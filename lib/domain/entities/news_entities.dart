@@ -37,6 +37,7 @@ class Article {
     this.publishedAt,
     this.isSaved = false,
     this.isRead = false,
+    this.isFullContent = false,
   });
 
   final String id;
@@ -61,6 +62,16 @@ class Article {
   final bool isSaved;
   final bool isRead;
 
+  /// `true` when this article carries the FULL original article body (no AI
+  /// summarization) and should be rendered in the interactive reader by
+  /// default, with AI summarization offered as an explicit on-demand action.
+  ///
+  /// Driven by the backend `isFullContent` flag (feeds flagged
+  /// `skip_summary`). Falls back to a [kNoSummarizeCategories] membership
+  /// check in the repository so the existing Movies/General feeds behave
+  /// identically before the backend starts emitting the flag.
+  final bool isFullContent;
+
   Article copyWith({
     String? id,
     String? title,
@@ -80,6 +91,7 @@ class Article {
     DateTime? publishedAt,
     bool? isSaved,
     bool? isRead,
+    bool? isFullContent,
   }) {
     return Article(
       id: id ?? this.id,
@@ -100,6 +112,7 @@ class Article {
       publishedAt: publishedAt ?? this.publishedAt,
       isSaved: isSaved ?? this.isSaved,
       isRead: isRead ?? this.isRead,
+      isFullContent: isFullContent ?? this.isFullContent,
     );
   }
 }

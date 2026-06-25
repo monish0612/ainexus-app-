@@ -49,6 +49,7 @@ class _EditExpenseSheetState extends State<_EditExpenseSheet>
     with SingleTickerProviderStateMixin {
   late final TextEditingController _amountCtrl;
   late final TextEditingController _descCtrl;
+  late final TextEditingController _commentsCtrl;
   late String _bank;
   late String _cardType;
   late String _category;
@@ -66,6 +67,7 @@ class _EditExpenseSheetState extends State<_EditExpenseSheet>
     final e = widget.expense;
     _amountCtrl = TextEditingController(text: e.amount.toStringAsFixed(0));
     _descCtrl = TextEditingController(text: e.description);
+    _commentsCtrl = TextEditingController(text: e.comments);
     _bank = widget.banks.contains(e.bank) ? e.bank : widget.banks.first;
     _cardType = expenseCardTypes.contains(e.cardType)
         ? e.cardType
@@ -80,6 +82,7 @@ class _EditExpenseSheetState extends State<_EditExpenseSheet>
     _shakeCtrl.dispose();
     _amountCtrl.dispose();
     _descCtrl.dispose();
+    _commentsCtrl.dispose();
     super.dispose();
   }
 
@@ -113,6 +116,7 @@ class _EditExpenseSheetState extends State<_EditExpenseSheet>
         bank: _bank,
         cardType: _cardType,
         isManualCategory: true,
+        comments: _commentsCtrl.text.trim(),
       ),
     );
     Navigator.of(context).pop();
@@ -557,6 +561,81 @@ class _EditExpenseSheetState extends State<_EditExpenseSheet>
                           ),
                         ],
                       ],
+                    ),
+                    const SizedBox(height: 16),
+                    Row(
+                      children: [
+                        const Text('📝', style: TextStyle(fontSize: 12)),
+                        const SizedBox(width: 6),
+                        Text(
+                          'COMMENTS',
+                          style: GoogleFonts.plusJakartaSans(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            color: colors.text4,
+                            letterSpacing: 1,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          'optional',
+                          style: GoogleFonts.plusJakartaSans(
+                            fontSize: 9,
+                            fontWeight: FontWeight.w600,
+                            color: colors.text5,
+                            letterSpacing: 0.5,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: _commentsCtrl,
+                      minLines: 1,
+                      maxLines: 4,
+                      maxLength: 280,
+                      textCapitalization: TextCapitalization.sentences,
+                      style: textTheme.bodyMedium?.copyWith(color: colors.text),
+                      buildCounter: (_, {required currentLength, required isFocused, maxLength}) => null,
+                      decoration: InputDecoration(
+                        filled: true,
+                        fillColor: colors.bg2,
+                        hintText: 'Add a reminder or note',
+                        hintStyle: GoogleFonts.plusJakartaSans(
+                          fontSize: 12,
+                          color: colors.text5,
+                        ),
+                        prefixIcon: Padding(
+                          padding: const EdgeInsets.only(left: 12, right: 8),
+                          child: Icon(
+                            LucideIcons.stickyNote,
+                            size: 16,
+                            color: _commentsCtrl.text.trim().isNotEmpty
+                                ? AppColors.accent
+                                : colors.text4,
+                          ),
+                        ),
+                        prefixIconConstraints:
+                            const BoxConstraints(minWidth: 0, minHeight: 0),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(16),
+                          borderSide: BorderSide(color: colors.border),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(16),
+                          borderSide: BorderSide(color: colors.border),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(16),
+                          borderSide:
+                              const BorderSide(color: AppColors.accent, width: 1.5),
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 14,
+                        ),
+                      ),
+                      onChanged: (_) => setState(() {}),
                     ),
                     const SizedBox(height: 24),
                     FilledButton(

@@ -41,6 +41,7 @@ class ExpenseSubmitPayload {
     required this.cardType,
     required this.isManualCategory,
     required this.date,
+    this.comments = '',
   });
 
   final double amount;
@@ -50,6 +51,7 @@ class ExpenseSubmitPayload {
   final String cardType;
   final bool isManualCategory;
   final String date;
+  final String comments;
 }
 
 typedef CategorizeFunction = Future<AICategoryResult> Function(
@@ -174,6 +176,7 @@ class _AddExpenseSheetState extends State<_AddExpenseSheet>
 
   final _amountCtrl = TextEditingController();
   final _descCtrl = TextEditingController();
+  final _commentsCtrl = TextEditingController();
   final _imagePicker = ImagePicker();
 
   String _bank = '';
@@ -366,6 +369,7 @@ class _AddExpenseSheetState extends State<_AddExpenseSheet>
     _descCtrl.removeListener(_onDescriptionChanged);
     _amountCtrl.dispose();
     _descCtrl.dispose();
+    _commentsCtrl.dispose();
     super.dispose();
   }
 
@@ -1213,6 +1217,7 @@ class _AddExpenseSheetState extends State<_AddExpenseSheet>
         cardType: _cardType,
         isManualCategory: _categoryIsManual,
         date: resolvedDate.toIso8601String(),
+        comments: _commentsCtrl.text.trim(),
       ),
       finalIsManual,
       SuccessMeta(
@@ -2260,6 +2265,12 @@ class _AddExpenseSheetState extends State<_AddExpenseSheet>
             ],
           ),
         ),
+        const SizedBox(height: 16),
+        _CommentsField(
+          controller: _commentsCtrl,
+          colors: colors,
+          textTheme: textTheme,
+        ),
         const SizedBox(height: 20),
         FilledButton.icon(
           onPressed: _submit,
@@ -2472,6 +2483,147 @@ class _FormLabel extends StatelessWidget {
           letterSpacing: 1.5,
         ),
       ),
+    );
+  }
+}
+
+/// Optional free-form "Comments" / reminder field shown across all add-expense
+/// flows (manual, voice, PDF/scan). Live character counter, collapses to a
+/// single helper line until tapped. Stored verbatim on the expense.
+class _CommentsField extends StatefulWidget {
+  const _CommentsField({
+    required this.controller,
+    required this.colors,
+    required this.textTheme,
+  });
+
+  final TextEditingController controller;
+  final AppColors colors;
+  final TextTheme textTheme;
+
+  @override
+  State<_CommentsField> createState() => _CommentsFieldState();
+}
+
+class _CommentsFieldState extends State<_CommentsField> {
+  static const int _maxChars = 280;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.controller.addListener(_onChanged);
+  }
+
+  @override
+  void dispose() {
+    widget.controller.removeListener(_onChanged);
+    super.dispose();
+  }
+
+  void _onChanged() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = widget.colors;
+    final textTheme = widget.textTheme;
+    final len = widget.controller.text.characters.length;
+    final hasText = widget.controller.text.trim().isNotEmpty;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Row(
+                children: [
+                  const Text('📝', style: TextStyle(fontSize: 12)),
+                  const SizedBox(width: 6),
+                  _FormLabel('COMMENTS', colors),
+                  const SizedBox(width: 6),
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Text(
+                      'optional',
+                      style: GoogleFonts.plusJakartaSans(
+                        fontSize: 9,
+                        fontWeight: FontWeight.w600,
+                        color: colors.text5,
+                        letterSpacing: 0.5,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (hasText)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Text(
+                  '$len/$_maxChars',
+                  style: GoogleFonts.plusJakartaSans(
+                    fontSize: 9,
+                    fontWeight: FontWeight.w600,
+                    color: len > _maxChars
+                        ? const Color(0xFFEF4444)
+                        : colors.text5,
+                  ),
+                ),
+              ),
+          ],
+        ),
+        TextField(
+          controller: widget.controller,
+          minLines: 1,
+          maxLines: 4,
+          maxLength: _maxChars,
+          textCapitalization: TextCapitalization.sentences,
+          style: textTheme.bodyMedium?.copyWith(color: colors.text),
+          buildCounter: (_, {required currentLength, required isFocused, maxLength}) =>
+              null,
+          decoration: InputDecoration(
+            filled: true,
+            fillColor: colors.bg2,
+            hintText: 'Add a reminder or note — e.g. "split with Riya", '
+                '"reimburse from office"',
+            hintMaxLines: 2,
+            hintStyle: GoogleFonts.plusJakartaSans(
+              fontSize: 12,
+              color: colors.text5,
+              height: 1.4,
+            ),
+            prefixIcon: Padding(
+              padding: const EdgeInsets.only(left: 12, right: 8),
+              child: Icon(
+                LucideIcons.stickyNote,
+                size: 16,
+                color: hasText ? AppColors.accent : colors.text4,
+              ),
+            ),
+            prefixIconConstraints: const BoxConstraints(minWidth: 0, minHeight: 0),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(16),
+              borderSide: BorderSide(color: colors.border),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(16),
+              borderSide: BorderSide(
+                color: hasText
+                    ? AppColors.accent.withValues(alpha: 0.4)
+                    : colors.border,
+              ),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(16),
+              borderSide: const BorderSide(color: AppColors.accent, width: 1.5),
+            ),
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+          ),
+        ),
+      ],
     );
   }
 }

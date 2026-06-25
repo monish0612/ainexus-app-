@@ -41,6 +41,17 @@ const _kNewsLastCountKey = 'last_news_unread_count';
 
 const _kNewsSlots = <int>[730, 1100, 1400, 1700, 2100];
 
+// ── Salary Notification Constants ────────────────────────────────────────────
+
+const _kSalaryTask = 'monthlySalaryReminder';
+const _kSalaryUniqueId = 'app.ainexus.monthly_salary_1st';
+const _kSalaryChannelId = 'nexus_salary_reminder';
+const _kSalaryChannelName = 'Monthly Salary Reminder';
+const _kSalaryChannelDesc =
+    'Reminder on the 1st of each month to enter your in-hand salary';
+const _kSalaryNotifId = 9200;
+const _kSalaryLastMonthKey = 'last_salary_notif_month';
+
 // ── Category Emojis (Expense) ────────────────────────────────────────────────
 
 const _categoryEmojis = <String, String>{
@@ -96,6 +107,9 @@ void notificationCallbackDispatcher() {
       } else if (taskName == _kNewsTask) {
         await _NewsBot.execute();
         _TaskScheduler.scheduleNextNews();
+      } else if (taskName == _kSalaryTask) {
+        await _SalaryBot.execute();
+        _TaskScheduler.scheduleNextSalary();
       }
     } catch (e, st) {
       TLog.e('Notif', 'Background task "$taskName" crashed', error: e, st: st);
@@ -180,6 +194,32 @@ class _TaskScheduler {
       constraints: Constraints(networkType: NetworkType.not_required),
     );
   }
+
+  // ── Salary: 1st of each month at 10:00 IST ────────────────────────────────
+
+  static Duration durationUntilNextSalaryReminder() {
+    final now = _nowIST();
+    final ist = tz.getLocation('Asia/Kolkata');
+    var next = tz.TZDateTime(ist, now.year, now.month, 1, 10, 0);
+    // If we're already past the 1st @10:00 this month, jump to next month's 1st.
+    if (!now.isBefore(next)) {
+      final nextYear = now.month == 12 ? now.year + 1 : now.year;
+      final nextMonth = now.month == 12 ? 1 : now.month + 1;
+      next = tz.TZDateTime(ist, nextYear, nextMonth, 1, 10, 0);
+    }
+    return next.difference(now);
+  }
+
+  static void scheduleNextSalary() {
+    final delay = durationUntilNextSalaryReminder();
+    Workmanager().registerOneOffTask(
+      _kSalaryUniqueId,
+      _kSalaryTask,
+      initialDelay: delay,
+      existingWorkPolicy: ExistingWorkPolicy.replace,
+      constraints: Constraints(networkType: NetworkType.not_required),
+    );
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -229,6 +269,28 @@ class _ExpenseDataFetcher {
         budget: budgetRow?.amount,
         categoryBreakdown: byCategory,
       );
+    } finally {
+      await db.close();
+    }
+  }
+}
+
+// ── Salary ─────────────────────────────────────────────────────────────────
+
+class _SalaryDataFetcher {
+  _SalaryDataFetcher._();
+
+  /// True when the current calendar month already has a positive salary entry.
+  static Future<bool> currentMonthHasSalary() async {
+    final db = AppDatabase.background();
+    try {
+      final now = DateTime.now();
+      final key = '${now.year.toString().padLeft(4, '0')}-'
+          '${now.month.toString().padLeft(2, '0')}';
+      final row = await (db.select(db.salaryEntries)
+            ..where((t) => t.month.equals(key)))
+          .getSingleOrNull();
+      return row != null && row.amount > 0;
     } finally {
       await db.close();
     }
@@ -494,6 +556,60 @@ class _NotificationUI {
       payload: 'news_tab',
     );
   }
+
+  // ── Salary Reminder ─────────────────────────────────────────────────────────
+
+  static Future<void> showSalary({
+    FlutterLocalNotificationsPlugin? plugin,
+  }) async {
+    final fln = plugin ?? await _backgroundFln();
+
+    final monthName = DateFormat('MMMM').format(DateTime.now());
+    final title = '\u{1F4B0} Add your $monthName salary';
+    const body =
+        'A new month has started! Tap to enter the salary you received this '
+        'month so your savings rate, budget and income stats stay accurate.';
+
+    final details = AndroidNotificationDetails(
+      _kSalaryChannelId,
+      _kSalaryChannelName,
+      channelDescription: _kSalaryChannelDesc,
+      importance: Importance.high,
+      priority: Priority.high,
+      styleInformation: BigTextStyleInformation(
+        body,
+        contentTitle: title,
+        summaryText: 'Tap to log your monthly salary',
+      ),
+      color: _kAccent,
+      ledColor: _kAccent,
+      ledOnMs: 1000,
+      ledOffMs: 500,
+      enableLights: true,
+      category: AndroidNotificationCategory.reminder,
+      visibility: NotificationVisibility.secret,
+      actions: <AndroidNotificationAction>[
+        const AndroidNotificationAction(
+          'enter_salary',
+          '\u{1F4B0} Enter salary',
+          showsUserInterface: true,
+        ),
+        const AndroidNotificationAction(
+          'dismiss',
+          'Later',
+          cancelNotification: true,
+        ),
+      ],
+    );
+
+    await fln.show(
+      _kSalaryNotifId,
+      title,
+      body,
+      NotificationDetails(android: details),
+      payload: 'expense_tab',
+    );
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -558,6 +674,33 @@ class _NewsBot {
   }
 }
 
+class _SalaryBot {
+  _SalaryBot._();
+
+  static Future<void> execute() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final now = DateTime.now();
+      final monthKey = '${now.year.toString().padLeft(4, '0')}-'
+          '${now.month.toString().padLeft(2, '0')}';
+
+      // Only one salary nudge per month, and never when it's already entered.
+      if (prefs.getString(_kSalaryLastMonthKey) == monthKey) return;
+
+      final hasSalary = await _SalaryDataFetcher.currentMonthHasSalary();
+      if (hasSalary) {
+        await prefs.setString(_kSalaryLastMonthKey, monthKey);
+        return;
+      }
+
+      await _NotificationUI.showSalary();
+      await prefs.setString(_kSalaryLastMonthKey, monthKey);
+    } catch (e, st) {
+      TLog.e('Notif', 'Salary notification failed', error: e, st: st);
+    }
+  }
+}
+
 String _todayDateString() {
   final now = DateTime.now();
   return '${now.year}-${now.month.toString().padLeft(2, '0')}-'
@@ -619,7 +762,9 @@ class NotificationService {
   void _handleResponse(NotificationResponse response) {
     final payload = response.payload;
     final actionId = response.actionId;
-    if (actionId == 'add_expense' || payload == 'expense_tab') {
+    if (actionId == 'add_expense' ||
+        actionId == 'enter_salary' ||
+        payload == 'expense_tab') {
       _onTap?.call('expense_tab');
     } else if (actionId == 'open_news' || payload == 'news_tab') {
       _onTap?.call('news_tab');
@@ -659,6 +804,19 @@ class NotificationService {
       existingWorkPolicy: ExistingWorkPolicy.replace,
       constraints: Constraints(networkType: NetworkType.not_required),
     );
+
+    final salaryDelay = _TaskScheduler.durationUntilNextSalaryReminder();
+    TLog.i(
+      'Notif',
+      'Salary reminder in ${salaryDelay.inDays}d ${salaryDelay.inHours % 24}h',
+    );
+    await Workmanager().registerOneOffTask(
+      _kSalaryUniqueId,
+      _kSalaryTask,
+      initialDelay: salaryDelay,
+      existingWorkPolicy: ExistingWorkPolicy.replace,
+      constraints: Constraints(networkType: NetworkType.not_required),
+    );
   }
 
   @Deprecated('Use scheduleAll() instead')
@@ -671,10 +829,13 @@ class NotificationService {
   }
 
   /// Fire a test notification immediately (debug only).
-  Future<void> debugFireNow({bool news = false}) async {
+  Future<void> debugFireNow({bool news = false, bool salary = false}) async {
     if (!PlatformCapabilities.canUseNotifications) return;
-    TLog.i('Notif', 'DEBUG: firing ${news ? 'news' : 'expense'} notification');
-    if (news) {
+    TLog.i('Notif',
+        'DEBUG: firing ${salary ? 'salary' : news ? 'news' : 'expense'} notification');
+    if (salary) {
+      await _NotificationUI.showSalary(plugin: _fln);
+    } else if (news) {
       final summary = await _NewsDataFetcher.fetchUnreadSummary();
       TLog.i('Notif', 'DEBUG: unread=${summary.unreadCount}');
       await _NotificationUI.showNews(summary, plugin: _fln);

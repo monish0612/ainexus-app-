@@ -8,6 +8,7 @@ import 'package:intl/intl.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import './expense_item.dart';
+import './salary_insights_card.dart';
 
 class InsightsTab extends StatefulWidget {
   const InsightsTab({
@@ -608,6 +609,8 @@ class _InsightsTabState extends State<InsightsTab> {
       child: ListView(
         padding: const EdgeInsets.only(bottom: 120),
         children: [
+          // ── Salary & income summary (tap → full salary stats) ──
+          const SalaryInsightsCard(),
           // ── Search Bar ──
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 8, 20, 4),

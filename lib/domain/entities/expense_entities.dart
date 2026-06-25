@@ -67,6 +67,7 @@ class Expense extends Equatable {
     required this.cardType,
     required this.date,
     required this.isManualCategory,
+    this.comments = '',
   });
 
   final String id;
@@ -78,6 +79,9 @@ class Expense extends Equatable {
   final String date;
   final bool isManualCategory;
 
+  /// Optional free-form note/reminder attached at log time. '' = none.
+  final String comments;
+
   Expense copyWith({
     String? id,
     double? amount,
@@ -87,6 +91,7 @@ class Expense extends Equatable {
     String? cardType,
     String? date,
     bool? isManualCategory,
+    String? comments,
   }) {
     return Expense(
       id: id ?? this.id,
@@ -97,6 +102,7 @@ class Expense extends Equatable {
       cardType: cardType ?? this.cardType,
       date: date ?? this.date,
       isManualCategory: isManualCategory ?? this.isManualCategory,
+      comments: comments ?? this.comments,
     );
   }
 
@@ -109,6 +115,7 @@ class Expense extends Equatable {
         'cardType': cardType,
         'date': date,
         'isManualCategory': isManualCategory,
+        'comments': comments,
       };
 
   factory Expense.fromJson(Map<String, dynamic> json) {
@@ -124,6 +131,7 @@ class Expense extends Equatable {
       date: (json['date'] ?? '').toString(),
       isManualCategory: json['isManualCategory'] == true ||
           json['is_manual_category'] == true,
+      comments: (json['comments'] ?? '').toString(),
     );
   }
 
@@ -137,6 +145,7 @@ class Expense extends Equatable {
         cardType,
         date,
         isManualCategory,
+        comments,
       ];
 }
 

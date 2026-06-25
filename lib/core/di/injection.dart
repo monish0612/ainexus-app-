@@ -4,7 +4,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../data/local/database/app_database.dart';
 import '../../data/repositories/expense_repository.dart';
 import '../../data/repositories/news_repository.dart';
+import '../../data/repositories/salary_repository.dart';
 import '../../data/services/ai_categorize_service.dart';
+import '../../data/services/expense_ai_search_service.dart';
 import '../../data/services/news_summarize_service.dart';
 import '../../data/services/tutor_ai_service.dart';
 import '../../data/services/user_preferences_service.dart';
@@ -33,6 +35,14 @@ final expenseRepositoryProvider = Provider<ExpenseRepository>((ref) {
   );
 });
 
+final salaryRepositoryProvider = Provider<SalaryRepository>((ref) {
+  return SalaryRepository(
+    ref.watch(appDatabaseProvider),
+    ref.watch(apiClientProvider),
+    ref.watch(sharedPreferencesProvider),
+  );
+});
+
 final newsRepositoryProvider = Provider<NewsRepository>((ref) {
   return NewsRepository(
     ref.watch(appDatabaseProvider),
@@ -42,6 +52,10 @@ final newsRepositoryProvider = Provider<NewsRepository>((ref) {
 
 final aiCategorizeServiceProvider = Provider<AICategorizeService>((ref) {
   return AICategorizeService(ref.watch(apiClientProvider));
+});
+
+final expenseAiSearchServiceProvider = Provider<ExpenseAiSearchService>((ref) {
+  return ExpenseAiSearchService(ref.watch(apiClientProvider));
 });
 
 final tutorAiServiceProvider = Provider<TutorAiService>((ref) {

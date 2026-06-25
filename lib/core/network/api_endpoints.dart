@@ -11,6 +11,10 @@ abstract final class ApiEndpoints {
   static String get budget => '$_base/api/v1/budget';
   static String get budgetHistory => '$_base/api/v1/budget/history';
 
+  // Salary (monthly in-hand income — one entry per 'YYYY-MM')
+  static String get salary => '$_base/api/v1/salary';
+  static String get salaryHistory => '$_base/api/v1/salary/history';
+
   // AI
   static String get aiCategorize => '$_base/api/v1/ai/categorize';
   static String get aiRephrase => '$_base/api/v1/ai/rephrase';
@@ -88,6 +92,9 @@ abstract final class ApiEndpoints {
 
   // AI Smart Parse (voice expense)
   static String get aiSmartParse => '$_base/api/v1/ai/smart-parse';
+
+  // AI Expense Query (natural-language → structured local query spec)
+  static String get aiExpenseQuery => '$_base/api/v1/ai/expense-query';
 
   // Category Learnings
   static String get categoryLearnings => '$_base/api/v1/category-learnings';

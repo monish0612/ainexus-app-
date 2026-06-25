@@ -1,20 +1,82 @@
+import 'dart:async';
+import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../../core/di/injection.dart';
+import '../../../core/services/on_demand_summarize_store.dart';
 import '../../../core/services/telegram_logger.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../data/services/article_tts_service.dart';
 import '../../../domain/entities/news_entities.dart';
 import '../../widgets/wave_visualizer.dart';
+import '../settings/settings_controller.dart';
 import 'article_followup_sheet.dart';
 import 'news_screen.dart' show newsCategoryIcon;
+import 'widgets/news_summary_view.dart';
+
+/// Which body the article detail is currently showing.
+enum _ArticleView { full, summary }
+
+/// Renders an inline article image (`![alt](src)`) from the full-content
+/// markdown: cached, rounded, full-width, with a graceful placeholder and a
+/// silent collapse on error so a single dead image URL never leaves an ugly
+/// broken-image box in the middle of the prose.
+class _MarkdownArticleImage extends StatelessWidget {
+  const _MarkdownArticleImage({required this.uri, required this.colors});
+
+  final Uri uri;
+  final AppColors colors;
+
+  @override
+  Widget build(BuildContext context) {
+    final src = uri.toString();
+    if (src.isEmpty || !(src.startsWith('http://') || src.startsWith('https://'))) {
+      return const SizedBox.shrink();
+    }
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: colors.border),
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(16),
+          child: CachedNetworkImage(
+            imageUrl: src,
+            // fitWidth = fill the column width and let height follow the
+            // image's natural aspect ratio. No fixed height → no cropping
+            // and no overflow regardless of the source image dimensions.
+            fit: BoxFit.fitWidth,
+            width: double.infinity,
+            placeholder: (_, __) => Container(
+              height: 180,
+              color: colors.bg2,
+              child: Center(
+                child: Icon(
+                  LucideIcons.image,
+                  size: 28,
+                  color: colors.text5,
+                ),
+              ),
+            ),
+            // A dead inline image should vanish, not show a broken-image glyph.
+            errorWidget: (_, __, ___) => const SizedBox.shrink(),
+          ),
+        ),
+      ),
+    );
+  }
+}
 
 Color newsCategoryColor(String category) {
   final hex = CAT_COLOR[category] ?? '#818CF8';
@@ -33,7 +95,7 @@ bool _isFullContentArticle(Article article) =>
     kNoSummarizeCategories.contains(article.category);
 
 /// Full-screen article detail (open with [Navigator.push]).
-class ArticleDetailModal extends StatefulWidget {
+class ArticleDetailModal extends ConsumerStatefulWidget {
   const ArticleDetailModal({
     super.key,
     required this.article,
@@ -46,27 +108,152 @@ class ArticleDetailModal extends StatefulWidget {
   final VoidCallback onMarkRead;
 
   @override
-  State<ArticleDetailModal> createState() => _ArticleDetailModalState();
+  ConsumerState<ArticleDetailModal> createState() => _ArticleDetailModalState();
 }
 
-class _ArticleDetailModalState extends State<ArticleDetailModal> {
+class _ArticleDetailModalState extends ConsumerState<ArticleDetailModal> {
   late bool _saved;
   late bool _read;
   final ScrollController _scroll = ScrollController();
   bool _scrolled = false;
   late final ArticleTtsService _tts;
 
+  /// On-demand AI summary state. [_summaryText] is seeded from the article's
+  /// cached [Article.summaryShort] (populated either by a previous tap here
+  /// or by the For You batch flow) so re-opening never re-spends AI.
+  _ArticleView _view = _ArticleView.full;
+  String? _summaryText;
+  bool _summarizing = false;
+  String? _summaryError;
+
   @override
   void initState() {
     super.initState();
     _saved = widget.article.isSaved;
     _read = widget.article.isRead;
+    final cached = widget.article.summaryShort?.trim();
+    _summaryText = (cached != null && cached.isNotEmpty) ? cached : null;
     _scroll.addListener(_onScroll);
     _tts = ArticleTtsService();
+
+    // Re-attach to any background summarize already running / finished for
+    // this article (e.g. the user tapped Summarize, minimised the app, and
+    // re-opened the reader). The store is the source of truth across the
+    // widget lifecycle, so we hydrate from it and subscribe for updates.
+    OnDemandSummarizeStore.instance
+        .addListener(widget.article.id, _onSummaryStoreUpdate);
+    _onSummaryStoreUpdate();
   }
+
+  /// Pulls the latest background-summarize state for this article and folds it
+  /// into the local view state. Runs on every store transition (loading →
+  /// ready / error) so the UI stays live even if the work finished while the
+  /// modal was closed and re-opened.
+  void _onSummaryStoreUpdate() {
+    final s = OnDemandSummarizeStore.instance.stateOf(widget.article.id);
+    switch (s.status) {
+      case OnDemandStatus.loading:
+        if (!mounted) return;
+        setState(() {
+          _summarizing = true;
+          _summaryError = null;
+          if (_view == _ArticleView.full && !_hasSummary) {
+            _view = _ArticleView.summary;
+          }
+        });
+        break;
+      case OnDemandStatus.ready:
+        final summary = s.summary?.trim();
+        if (summary == null || summary.isEmpty) return;
+        if (!mounted) return;
+        setState(() {
+          _summaryText = summary;
+          _summarizing = false;
+          _summaryError = null;
+        });
+        break;
+      case OnDemandStatus.error:
+        if (!mounted) return;
+        setState(() {
+          _summarizing = false;
+          _summaryError = s.error ??
+              'Could not summarize this article right now. Please try again.';
+        });
+        break;
+      case OnDemandStatus.idle:
+        break;
+    }
+  }
+
+  /// `true` when this article ships the full original body and should default
+  /// to the interactive reader with AI summarization offered on demand.
+  /// Combines the backend-driven [Article.isFullContent] flag with the
+  /// pre-existing Movies/General category check so behaviour is unchanged for
+  /// articles created before the flag existed (and for the widget tests).
+  bool get _showFullContent =>
+      widget.article.isFullContent || _isFullContentArticle(widget.article);
+
+  bool get _hasSummary => (_summaryText?.trim().isNotEmpty ?? false);
+
+  /// Generates (or reveals a cached) AI summary on demand and switches the
+  /// body to the summary view. Cheap path first: if we already hold a cached
+  /// summary we just toggle — zero AI cost.
+  /// Generates (or reveals a cached) AI summary on demand and switches the
+  /// body to the summary view.
+  ///
+  /// Cheap path first: a cached summary just toggles (zero AI cost). Otherwise
+  /// the work is handed to [OnDemandSummarizeStore], which runs it under a
+  /// foreground service so it survives the app being minimised and persists
+  /// the result even if this modal is closed mid-flight. UI state is driven
+  /// back via [_onSummaryStoreUpdate].
+  Future<void> _onSummarize() async {
+    if (_summarizing) return;
+
+    if (_hasSummary) {
+      setState(() => _view = _ArticleView.summary);
+      return;
+    }
+
+    setState(() {
+      _summarizing = true;
+      _summaryError = null;
+      _view = _ArticleView.summary;
+    });
+
+    final store = OnDemandSummarizeStore.instance
+      ..init(
+        ref.read(newsSummarizeServiceProvider),
+        ref.read(newsRepositoryProvider),
+      );
+    final liteModel = ref.read(settingsProvider).liteModel;
+    TLog.i('ArticleDetail', 'On-demand summarize requested id=${widget.article.id}');
+    store.summarize(article: widget.article, liteModel: liteModel);
+  }
+
+  void _onRetrySummarize() {
+    if (_summarizing) return;
+    setState(() {
+      _summarizing = true;
+      _summaryError = null;
+      _view = _ArticleView.summary;
+    });
+    OnDemandSummarizeStore.instance
+      ..init(
+        ref.read(newsSummarizeServiceProvider),
+        ref.read(newsRepositoryProvider),
+      )
+      ..summarize(
+        article: widget.article,
+        liteModel: ref.read(settingsProvider).liteModel,
+      );
+  }
+
+  void _showFull() => setState(() => _view = _ArticleView.full);
 
   @override
   void dispose() {
+    OnDemandSummarizeStore.instance
+        .removeListener(widget.article.id, _onSummaryStoreUpdate);
     _tts.dispose();
     _scroll.removeListener(_onScroll);
     _scroll.dispose();
@@ -210,9 +397,46 @@ class _ArticleDetailModalState extends State<ArticleDetailModal> {
                       article: widget.article,
                       accentColor: cat,
                       colors: colors,
+                      isFullContent: _showFullContent,
                     ),
                     const SizedBox(height: 20),
-                    if (hasSummaryMarkdown)
+                    if (_showFullContent) ...[
+                      // Full-content articles render the original body in the
+                      // interactive reader by default and offer AI
+                      // summarization as an explicit, cached, on-demand action.
+                      _SummarizeToggleBar(
+                        view: _view,
+                        summarizing: _summarizing,
+                        hasSummary: _hasSummary,
+                        cat: cat,
+                        colors: colors,
+                        onSummarize: _onSummarize,
+                        onShowFull: _showFull,
+                      ),
+                      const SizedBox(height: 18),
+                      if (_view == _ArticleView.summary)
+                        _OnDemandSummarySection(
+                          summarizing: _summarizing,
+                          error: _summaryError,
+                          summary: _summaryText,
+                          cat: cat,
+                          colors: colors,
+                          onRetry: _onRetrySummarize,
+                        )
+                      else if (hasSummaryMarkdown)
+                        _SummaryMarkdown(
+                          summary: summaryMarkdown,
+                          cat: cat,
+                          colors: colors,
+                          isFullArticle: true,
+                        )
+                      else
+                        _BlockList(
+                          blocks: widget.article.blocks,
+                          cat: cat,
+                          colors: colors,
+                        ),
+                    ] else if (hasSummaryMarkdown)
                       _SummaryMarkdown(
                         summary: summaryMarkdown,
                         cat: cat,
@@ -443,6 +667,8 @@ class _SummaryMarkdown extends StatelessWidget {
       child: MarkdownBody(
         data: summary,
         selectable: false,
+        sizedImageBuilder: (config) =>
+            _MarkdownArticleImage(uri: config.uri, colors: colors),
         onTapLink: (text, href, title) async {
           if (href == null || href.isEmpty) return;
           final uri = Uri.tryParse(href);
@@ -677,6 +903,564 @@ class _ReviewMeta {
   }
 }
 
+// ---------------------------------------------------------------------------
+// On-demand AI summarize controls
+//
+// Full-content articles show their original body by default. The user can
+// tap "AI Summarize" to generate (once, then cached) a quick summary and
+// toggle between the two views. This keeps AI spend explicit and minimal.
+// ---------------------------------------------------------------------------
+
+class _SummarizeToggleBar extends StatelessWidget {
+  const _SummarizeToggleBar({
+    required this.view,
+    required this.summarizing,
+    required this.hasSummary,
+    required this.cat,
+    required this.colors,
+    required this.onSummarize,
+    required this.onShowFull,
+  });
+
+  final _ArticleView view;
+  final bool summarizing;
+  final bool hasSummary;
+  final Color cat;
+  final AppColors colors;
+  final VoidCallback onSummarize;
+  final VoidCallback onShowFull;
+
+  @override
+  Widget build(BuildContext context) {
+    // First-run call-to-action: no summary exists yet and nothing is in
+    // flight — show a single prominent "AI Summarize" button.
+    if (!hasSummary && !summarizing) {
+      return _AiSummarizeCta(cat: cat, colors: colors, onTap: onSummarize);
+    }
+
+    // Once a summary exists (or is generating), show a segmented toggle so
+    // the user can flip between the original article and its summary.
+    return Container(
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: colors.bg2,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: colors.border),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: _SegmentButton(
+              label: 'Article',
+              icon: LucideIcons.fileText,
+              selected: view == _ArticleView.full,
+              cat: cat,
+              colors: colors,
+              onTap: onShowFull,
+            ),
+          ),
+          const SizedBox(width: 4),
+          Expanded(
+            child: _SegmentButton(
+              label: 'AI Summary',
+              icon: LucideIcons.sparkles,
+              selected: view == _ArticleView.summary,
+              busy: summarizing,
+              cat: cat,
+              colors: colors,
+              onTap: onSummarize,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AiSummarizeCta extends StatelessWidget {
+  const _AiSummarizeCta({
+    required this.cat,
+    required this.colors,
+    required this.onTap,
+  });
+
+  final Color cat;
+  final AppColors colors;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      borderRadius: BorderRadius.circular(14),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(14),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            gradient: const LinearGradient(
+              colors: [Color(0xFF6366F1), Color(0xFFA855F7)],
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: const Color(0xFF8B5CF6).withValues(alpha: 0.30),
+                blurRadius: 16,
+                offset: const Offset(0, 6),
+              ),
+            ],
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.18),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(LucideIcons.sparkles,
+                    size: 18, color: Colors.white),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'AI Summarize',
+                      style: GoogleFonts.plusJakartaSans(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w800,
+                        color: Colors.white,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Condense this article into a quick read',
+                      style: GoogleFonts.plusJakartaSans(
+                        fontSize: 11,
+                        color: Colors.white.withValues(alpha: 0.85),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Icon(LucideIcons.chevronRight, size: 18, color: Colors.white),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SegmentButton extends StatelessWidget {
+  const _SegmentButton({
+    required this.label,
+    required this.icon,
+    required this.selected,
+    required this.cat,
+    required this.colors,
+    required this.onTap,
+    this.busy = false,
+  });
+
+  final String label;
+  final IconData icon;
+  final bool selected;
+  final bool busy;
+  final Color cat;
+  final AppColors colors;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final fg = selected ? Colors.white : colors.text2;
+    return Material(
+      color: selected ? cat : Colors.transparent,
+      borderRadius: BorderRadius.circular(10),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(10),
+        child: Container(
+          height: 38,
+          alignment: Alignment.center,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (busy)
+                SizedBox(
+                  width: 13,
+                  height: 13,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: selected ? Colors.white : cat,
+                  ),
+                )
+              else
+                Icon(icon, size: 14, color: selected ? Colors.white : colors.text3),
+              const SizedBox(width: 7),
+              Text(
+                label,
+                style: GoogleFonts.plusJakartaSans(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w700,
+                  color: fg,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _OnDemandSummarySection extends StatelessWidget {
+  const _OnDemandSummarySection({
+    required this.summarizing,
+    required this.error,
+    required this.summary,
+    required this.cat,
+    required this.colors,
+    required this.onRetry,
+  });
+
+  final bool summarizing;
+  final String? error;
+  final String? summary;
+  final Color cat;
+  final AppColors colors;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    if (summarizing) {
+      return _SummaryLoadingCard(cat: cat, colors: colors);
+    }
+    if (error != null) {
+      return _SummaryErrorCard(
+        message: error!,
+        cat: cat,
+        colors: colors,
+        onRetry: onRetry,
+      );
+    }
+    final s = summary?.trim();
+    if (s == null || s.isEmpty) {
+      return _SummaryErrorCard(
+        message: 'No summary available yet. Tap to generate one.',
+        cat: cat,
+        colors: colors,
+        onRetry: onRetry,
+      );
+    }
+    return NewsSummaryView(summary: s, colors: colors, cat: cat);
+  }
+}
+
+/// Premium, fluid loading state for an in-flight AI summary.
+///
+/// Replaces the old static spinner with a living card: a pulsing gradient
+/// "AI orb", a status line that cycles through the phases of the work, and a
+/// shimmering skeleton that previews the shape of the summary that's coming.
+/// Purely cosmetic + self-contained (single [AnimationController] + one
+/// [Timer]); no extra packages.
+class _SummaryLoadingCard extends StatefulWidget {
+  const _SummaryLoadingCard({required this.cat, required this.colors});
+
+  final Color cat;
+  final AppColors colors;
+
+  @override
+  State<_SummaryLoadingCard> createState() => _SummaryLoadingCardState();
+}
+
+class _SummaryLoadingCardState extends State<_SummaryLoadingCard>
+    with SingleTickerProviderStateMixin {
+  static const _gradA = Color(0xFF6366F1);
+  static const _gradB = Color(0xFFA855F7);
+  static const _phases = <String>[
+    'Reading the article…',
+    'Distilling the key points…',
+    'Writing your summary…',
+    'Polishing the highlights…',
+  ];
+
+  late final AnimationController _c;
+  Timer? _phaseTimer;
+  int _phase = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _c = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1500),
+    )..repeat();
+    _phaseTimer = Timer.periodic(const Duration(milliseconds: 1900), (_) {
+      if (!mounted) return;
+      setState(() => _phase = (_phase + 1) % _phases.length);
+    });
+  }
+
+  @override
+  void dispose() {
+    _phaseTimer?.cancel();
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = widget.colors;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(18, 18, 18, 20),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: _gradB.withValues(alpha: 0.22)),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            _gradA.withValues(alpha: colors.isDark ? 0.10 : 0.06),
+            _gradB.withValues(alpha: colors.isDark ? 0.10 : 0.06),
+          ],
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              _PulsingOrb(anim: _c),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'AI is summarizing',
+                      style: GoogleFonts.plusJakartaSans(
+                        fontSize: 14.5,
+                        fontWeight: FontWeight.w800,
+                        color: colors.text,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 350),
+                      transitionBuilder: (child, anim) => FadeTransition(
+                        opacity: anim,
+                        child: SlideTransition(
+                          position: Tween<Offset>(
+                            begin: const Offset(0, 0.35),
+                            end: Offset.zero,
+                          ).animate(anim),
+                          child: child,
+                        ),
+                      ),
+                      child: Text(
+                        _phases[_phase],
+                        key: ValueKey<int>(_phase),
+                        style: GoogleFonts.plusJakartaSans(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w600,
+                          color: colors.text3,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 18),
+          _ShimmerLines(anim: _c, colors: colors),
+        ],
+      ),
+    );
+  }
+}
+
+/// Pulsing, glowing gradient circle with a sparkles glyph. Scale + glow are
+/// driven off a sine of the shared controller so the motion feels organic.
+class _PulsingOrb extends StatelessWidget {
+  const _PulsingOrb({required this.anim});
+
+  final Animation<double> anim;
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: anim,
+      builder: (context, child) {
+        final wave = (math.sin(anim.value * 2 * math.pi) + 1) / 2; // 0..1
+        final scale = 1.0 + wave * 0.10;
+        return Transform.scale(
+          scale: scale,
+          child: Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: const LinearGradient(
+                colors: [
+                  _SummaryLoadingCardState._gradA,
+                  _SummaryLoadingCardState._gradB,
+                ],
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: _SummaryLoadingCardState._gradB
+                      .withValues(alpha: 0.25 + wave * 0.30),
+                  blurRadius: 14 + wave * 10,
+                  spreadRadius: wave * 2,
+                ),
+              ],
+            ),
+            child: const Icon(LucideIcons.sparkles,
+                size: 20, color: Colors.white),
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// Three skeleton bars with a left-to-right shimmer sweep, previewing the
+/// summary layout while it streams in.
+class _ShimmerLines extends StatelessWidget {
+  const _ShimmerLines({required this.anim, required this.colors});
+
+  final Animation<double> anim;
+  final AppColors colors;
+
+  @override
+  Widget build(BuildContext context) {
+    final base = colors.isDark
+        ? Colors.white.withValues(alpha: 0.07)
+        : Colors.black.withValues(alpha: 0.06);
+    final highlight = colors.isDark
+        ? Colors.white.withValues(alpha: 0.18)
+        : Colors.black.withValues(alpha: 0.13);
+
+    Widget bar(double widthFactor) => FractionallySizedBox(
+          alignment: Alignment.centerLeft,
+          widthFactor: widthFactor,
+          child: Container(
+            height: 11,
+            decoration: BoxDecoration(
+              color: base,
+              borderRadius: BorderRadius.circular(6),
+            ),
+          ),
+        );
+
+    return AnimatedBuilder(
+      animation: anim,
+      builder: (context, child) {
+        final pos = anim.value * 2 - 1; // -1 → 1 sweep
+        return ShaderMask(
+          blendMode: BlendMode.srcATop,
+          shaderCallback: (rect) {
+            return LinearGradient(
+              begin: Alignment(pos - 0.35, 0),
+              end: Alignment(pos + 0.35, 0),
+              colors: [base, highlight, base],
+              stops: const [0.35, 0.5, 0.65],
+            ).createShader(rect);
+          },
+          child: child,
+        );
+      },
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          bar(1.0),
+          const SizedBox(height: 9),
+          bar(0.94),
+          const SizedBox(height: 9),
+          bar(0.66),
+        ],
+      ),
+    );
+  }
+}
+
+class _SummaryErrorCard extends StatelessWidget {
+  const _SummaryErrorCard({
+    required this.message,
+    required this.cat,
+    required this.colors,
+    required this.onRetry,
+  });
+
+  final String message;
+  final Color cat;
+  final AppColors colors;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 14, 12, 14),
+      decoration: BoxDecoration(
+        color: const Color(0x14EF4444),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0x33EF4444)),
+      ),
+      child: Row(
+        children: [
+          const Icon(LucideIcons.alertTriangle,
+              size: 16, color: Color(0xFFEF4444)),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              message,
+              style: GoogleFonts.plusJakartaSans(
+                fontSize: 13,
+                color: colors.text2,
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Material(
+            color: const Color(0xFFEF4444),
+            borderRadius: BorderRadius.circular(999),
+            child: InkWell(
+              onTap: onRetry,
+              borderRadius: BorderRadius.circular(999),
+              child: Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(LucideIcons.refreshCw,
+                        size: 11, color: Colors.white),
+                    const SizedBox(width: 5),
+                    Text(
+                      'Retry',
+                      style: GoogleFonts.plusJakartaSans(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _FullArticleBody extends StatelessWidget {
   const _FullArticleBody({
     required this.markdown,
@@ -791,6 +1575,8 @@ class _FullArticleBody extends StatelessWidget {
           child: MarkdownBody(
             data: effectiveMarkdown,
             selectable: false,
+            sizedImageBuilder: (config) =>
+                _MarkdownArticleImage(uri: config.uri, colors: colors),
             onTapLink: (text, href, title) async {
               if (href == null || href.isEmpty) return;
               final uri = Uri.tryParse(href);
@@ -1554,6 +2340,7 @@ class _BarPill extends StatelessWidget {
           ),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
             children: [
               Icon(
                 icon,
@@ -1561,14 +2348,16 @@ class _BarPill extends StatelessWidget {
                 color: filled ? accent : colors.text2,
               ),
               const SizedBox(width: 8),
-              Text(
-                label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: GoogleFonts.plusJakartaSans(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700,
-                  color: filled ? accent : colors.text2,
+              Flexible(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.plusJakartaSans(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: filled ? accent : colors.text2,
+                  ),
                 ),
               ),
             ],
@@ -1589,12 +2378,17 @@ class _TtsPlayerBar extends StatelessWidget {
     required this.article,
     required this.accentColor,
     required this.colors,
+    this.isFullContent = false,
   });
 
   final ArticleTtsService ttsService;
   final Article article;
   final Color accentColor;
   final AppColors colors;
+
+  /// When the article ships the full original body, the player narrates the
+  /// article itself (not an AI summary), so the label reflects that.
+  final bool isFullContent;
 
   @override
   Widget build(BuildContext context) {
@@ -1647,7 +2441,7 @@ class _TtsPlayerBar extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Listen to Summary',
+                      isFullContent ? 'Listen to Article' : 'Listen to Summary',
                       style: GoogleFonts.plusJakartaSans(
                         fontSize: 13,
                         fontWeight: FontWeight.w700,

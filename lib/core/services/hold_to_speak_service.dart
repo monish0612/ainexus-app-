@@ -40,6 +40,60 @@ enum HoldToSpeakStatus {
   error,
 }
 
+/// Append [addition] to [existing] while removing any duplicated or
+/// overlapping region, so auto-restarts and cumulative engine finals can
+/// never double the transcript (the "every word repeated twice" bug seen when
+/// holding the mic).
+///
+/// Android's recognizer produces three real-world shapes that all have to
+/// collapse to a single clean transcript:
+///   1. **Exact re-send** — a trailing/late final restates text we already
+///      committed (`existing` already ends with / contains `addition`).
+///   2. **Cumulative superset** — the engine re-emits everything so far plus a
+///      few new words (`addition` starts with / contains `existing`).
+///   3. **Boundary overlap** — the new chunk's first words repeat our last
+///      words (e.g. "…pick up my" + "my son so…").
+/// Anything that is genuinely new is appended with a single space.
+///
+/// Comparisons are case-insensitive; the original casing of the retained text
+/// is preserved.
+String mergeVoiceTranscript(String existing, String addition) {
+  final a = existing.trim();
+  final b = addition.trim();
+  if (a.isEmpty) return b;
+  if (b.isEmpty) return a;
+
+  final al = a.toLowerCase();
+  final bl = b.toLowerCase();
+  final aw = a.split(RegExp(r'\s+'));
+  final bw = b.split(RegExp(r'\s+'));
+  // Containment shortcuts are only safe for multi-word chunks — a single
+  // common word ("the", "my") legitimately recurs and must not be dropped.
+  final bSubstantial = bw.length >= 2;
+
+  // (1) Addition contributes nothing new.
+  if (al == bl || al.endsWith(bl)) return a;
+  if (bSubstantial && al.contains(bl)) return a;
+  // (2) Addition is a superset of what we already have.
+  if (bl.startsWith(al)) return b;
+  if (bSubstantial && bl.contains(al)) return b;
+
+  // (3) Stitch on the largest word-level overlap between a's tail and b's
+  //     head, dropping the repeated head words from b.
+  final maxOverlap = min(aw.length, bw.length);
+  var overlap = 0;
+  for (var k = maxOverlap; k > 0; k--) {
+    final aTail = aw.sublist(aw.length - k).join(' ').toLowerCase();
+    final bHead = bw.sublist(0, k).join(' ').toLowerCase();
+    if (aTail == bHead) {
+      overlap = k;
+      break;
+    }
+  }
+  if (overlap == 0) return '$a $b';
+  return <String>[...aw, ...bw.sublist(overlap)].join(' ');
+}
+
 /// Snapshot returned by [HoldToSpeakController.stop].
 @immutable
 class HoldToSpeakResult {
@@ -211,11 +265,13 @@ class HoldToSpeakController extends ChangeNotifier {
   String get partialText => _partialText;
 
   /// What UI should show while the user is holding — a continuous string
-  /// of committed + current partial, joined by a single space.
+  /// of committed + current partial. We merge (rather than blindly join) so a
+  /// cumulative partial that already restates the committed text — or one that
+  /// overlaps it at the word boundary — never renders the same words twice.
   String get displayText {
     if (_partialText.isEmpty) return _committedText;
     if (_committedText.isEmpty) return _partialText;
-    return '$_committedText $_partialText';
+    return mergeVoiceTranscript(_committedText, _partialText);
   }
 
   /// Current microphone input level, normalized to 0..1. Prefer listening to
@@ -589,11 +645,7 @@ class HoldToSpeakController extends ChangeNotifier {
   void _commitFinalText(String words) {
     final clean = words.trim();
     if (clean.isEmpty) return;
-    if (_committedText.isEmpty) {
-      _committedText = clean;
-    } else {
-      _committedText = '$_committedText $clean';
-    }
+    _committedText = mergeVoiceTranscript(_committedText, clean);
   }
 
   void _onSoundLevel(double level) {

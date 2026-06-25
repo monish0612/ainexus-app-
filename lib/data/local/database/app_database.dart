@@ -16,6 +16,11 @@ class Expenses extends Table {
   BoolColumn get isManualCategory =>
       boolean().withDefault(const Constant(false))();
 
+  /// Optional free-form note/reminder attached at log time (manual, voice, or
+  /// PDF/scan flows). NULL/'' = no comment. Local-only-friendly: synced when the
+  /// backend supports it, otherwise preserved locally.
+  TextColumn get comments => text().withDefault(const Constant(''))();
+
   @override
   Set<Column> get primaryKey => {id};
 }
@@ -27,6 +32,20 @@ class BudgetEntries extends Table {
 
   @override
   Set<Column> get primaryKey => {id};
+}
+
+/// One in-hand salary entry per calendar month. [month] is the canonical
+/// 'YYYY-MM' key and is the primary key, so re-entering a month's salary simply
+/// upserts (the monthly "reset" the user wants). [setAt] is an ISO-8601 UTC
+/// timestamp of when it was entered/updated.
+class SalaryEntries extends Table {
+  TextColumn get id => text()();
+  TextColumn get month => text()();
+  RealColumn get amount => real()();
+  TextColumn get setAt => text()();
+
+  @override
+  Set<Column> get primaryKey => {month};
 }
 
 class NewsArticles extends Table {
@@ -194,6 +213,7 @@ class SavedSearchChatSummaries extends Table {
   tables: [
     Expenses,
     BudgetEntries,
+    SalaryEntries,
     NewsArticles,
     CloudFiles,
     SavedWords,
@@ -219,7 +239,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.executor);
 
   @override
-  int get schemaVersion => 6;
+  int get schemaVersion => 8;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -241,6 +261,20 @@ class AppDatabase extends _$AppDatabase {
         await migrator.createTable(savedSearchChatMessages);
         await migrator.createTable(savedSearchChatSummaries);
       }
+      if (from < 7) {
+        await migrator.addColumn(expenses, expenses.comments);
+      }
+      if (from < 8) {
+        await migrator.createTable(salaryEntries);
+      }
+    },
+    beforeOpen: (details) async {
+      // Index the expenses date column so timeframe drill-down range queries
+      // (ORDER BY date DESC + range filter) stay fluid even with very large
+      // histories. IF NOT EXISTS keeps this idempotent on every open.
+      await customStatement(
+        'CREATE INDEX IF NOT EXISTS idx_expenses_date ON expenses (date)',
+      );
     },
   );
 }

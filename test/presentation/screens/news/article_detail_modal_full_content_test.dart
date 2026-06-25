@@ -26,6 +26,7 @@
 import 'package:ai_nexus/core/theme/app_colors.dart';
 import 'package:ai_nexus/domain/entities/news_entities.dart';
 import 'package:ai_nexus/presentation/screens/news/article_detail_modal.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -132,6 +133,32 @@ void main() {
       // The body markdown text should be present in the rendered tree.
       expect(
           find.textContaining('First paragraph of the movie review'),
+          findsOneWidget);
+      await _drain(tester);
+    });
+
+    testWidgets('inline image markdown in the body renders as a cached image',
+        (tester) async {
+      const imgUrl = 'https://cdn.example.com/inline-chart.png';
+      final article = _article(
+        category: 'General',
+        summaryMarkdown:
+            'Opening paragraph of the report.\n\n![A chart]($imgUrl)\n\nClosing paragraph after the chart.',
+      );
+      await _pumpDetail(tester, article: article);
+
+      // The hero uses a gradient (imageUrl == ''), so the only
+      // CachedNetworkImage in the tree is the inline body image — proving the
+      // sizedImageBuilder wired the markdown image through.
+      final cached = find
+          .byType(CachedNetworkImage)
+          .evaluate()
+          .map((e) => (e.widget as CachedNetworkImage).imageUrl)
+          .toList();
+      expect(cached, contains(imgUrl),
+          reason: 'Inline ![](...) markdown must render via CachedNetworkImage.');
+      // Surrounding prose still renders.
+      expect(find.textContaining('Opening paragraph of the report'),
           findsOneWidget);
       await _drain(tester);
     });

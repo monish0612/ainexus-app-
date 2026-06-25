@@ -28,6 +28,7 @@ class TrackerTab extends StatefulWidget {
     required this.onEditExpense,
     required this.onShowTrend,
     required this.onShowBudgetHistory,
+    required this.onOpenTimeframe,
   });
 
   final List<ExpenseData> expenses;
@@ -42,6 +43,10 @@ class TrackerTab extends StatefulWidget {
   final void Function(ExpenseData expense) onEditExpense;
   final VoidCallback onShowTrend;
   final VoidCallback onShowBudgetHistory;
+
+  /// Opens the full-screen drill-down for the spending-analysis period at
+  /// [index] (0=Today, 1=7D, 2=1M, 3=6M, 4=All).
+  final void Function(int index) onOpenTimeframe;
 
   @override
   State<TrackerTab> createState() => _TrackerTabState();
@@ -405,15 +410,23 @@ class _TrackerTabState extends State<TrackerTab> {
               pageController: _analysisPageController,
               onPageChanged: _onAnalysisPageChanged,
               onChipSelected: _goAnalysis,
+              onOpen: widget.onOpenTimeframe,
               pageBuilder: (pageIndex) {
                 final list = _analysisExpenses(pageIndex, now);
                 final spent = _sumAmounts(list);
                 final slices = _categorySlices(list);
-                return _AnalysisPageBody(
-                  colors: colors,
-                  slices: slices,
-                  spent: spent,
-                  periodLabel: _analysisLabels[pageIndex],
+                // Tapping empty space inside a period page opens that period's
+                // full editable drill-down. The pie chart / legend keep their
+                // own tap handlers (they win the gesture arena for their area).
+                return GestureDetector(
+                  behavior: HitTestBehavior.translucent,
+                  onTap: () => widget.onOpenTimeframe(pageIndex),
+                  child: _AnalysisPageBody(
+                    colors: colors,
+                    slices: slices,
+                    spent: spent,
+                    periodLabel: _analysisLabels[pageIndex],
+                  ),
                 );
               },
             ),
@@ -880,6 +893,7 @@ class _SpendingAnalysisSection extends StatelessWidget {
     required this.pageController,
     required this.onPageChanged,
     required this.onChipSelected,
+    required this.onOpen,
     required this.pageBuilder,
   });
 
@@ -890,6 +904,7 @@ class _SpendingAnalysisSection extends StatelessWidget {
   final PageController pageController;
   final ValueChanged<int> onPageChanged;
   final ValueChanged<int> onChipSelected;
+  final ValueChanged<int> onOpen;
   final Widget Function(int pageIndex) pageBuilder;
 
   @override
@@ -904,17 +919,47 @@ class _SpendingAnalysisSection extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-            child: Text(
-              'Spending Analysis',
-              style: GoogleFonts.plusJakartaSans(
-                fontSize: 16,
-                fontWeight: FontWeight.w700,
-                color: colors.text,
+            padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
+            child: Material(
+              color: Colors.transparent,
+              borderRadius: BorderRadius.circular(12),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(12),
+                onTap: () => onOpen(analysisIndex),
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(8, 8, 8, 6),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          'Spending Analysis',
+                          style: GoogleFonts.plusJakartaSans(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w700,
+                            color: colors.text,
+                          ),
+                        ),
+                      ),
+                      Text(
+                        'View all',
+                        style: GoogleFonts.plusJakartaSans(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: const Color(0xFF818CF8),
+                        ),
+                      ),
+                      const Icon(
+                        LucideIcons.chevronRight,
+                        size: 15,
+                        color: Color(0xFF818CF8),
+                      ),
+                    ],
+                  ),
+                ),
               ),
             ),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 6),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 12),
             child: LayoutBuilder(

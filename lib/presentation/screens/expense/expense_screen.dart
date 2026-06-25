@@ -12,10 +12,12 @@ import '../../../domain/entities/expense_entities.dart';
 import '../../widgets/compact_header.dart';
 import '../settings/settings_controller.dart';
 import '../settings/settings_modal.dart';
+import 'expense_timeframe_screen.dart';
 import 'widgets/tracker_tab.dart';
 import 'widgets/insights_tab.dart';
 import 'widgets/expense_item.dart';
 import 'modals/add_expense_modal.dart';
+import 'modals/expense_ai_ask_sheet.dart';
 import 'modals/set_budget_modal.dart';
 import 'modals/edit_expense_modal.dart';
 import 'modals/expense_trend_modal.dart';
@@ -108,6 +110,9 @@ class _ExpenseScreenState extends ConsumerState<ExpenseScreen>
       repo.syncFromServer();
       repo.syncBudgetFromServer();
       repo.retryPendingClears();
+      final salaryRepo = ref.read(salaryRepositoryProvider);
+      salaryRepo.syncSalaryFromServer();
+      salaryRepo.retryPendingClear();
     });
   }
 
@@ -128,6 +133,7 @@ class _ExpenseScreenState extends ConsumerState<ExpenseScreen>
               cardType: e.cardType,
               date: e.date,
               isManualCategory: e.isManualCategory,
+              comments: e.comments,
             ))
         .toList();
   }
@@ -142,6 +148,7 @@ class _ExpenseScreenState extends ConsumerState<ExpenseScreen>
       cardType: d.cardType,
       date: d.date,
       isManualCategory: d.isManualCategory,
+      comments: d.comments,
     );
   }
 
@@ -197,6 +204,7 @@ class _ExpenseScreenState extends ConsumerState<ExpenseScreen>
           cardType: payload.cardType,
           date: payload.date,
           isManualCategory: isManual,
+          comments: payload.comments,
         );
         final sw = Stopwatch()..start();
         try {
@@ -318,6 +326,41 @@ class _ExpenseScreenState extends ConsumerState<ExpenseScreen>
     }
   }
 
+  void _openTimeframe(int index) {
+    final now = DateTime.now();
+    String label;
+    DateTime? start;
+    switch (index) {
+      case 0:
+        label = 'Today';
+        start = DateTime(now.year, now.month, now.day);
+      case 1:
+        label = '7D';
+        start = DateTime(now.year, now.month, now.day)
+            .subtract(const Duration(days: 6));
+      case 2:
+        label = '1M';
+        start = DateTime(now.year, now.month, 1);
+      case 3:
+        label = '6M';
+        start = DateTime(now.year, now.month - 6, 1);
+      default:
+        label = 'All';
+        start = null;
+    }
+    showExpenseTimeframeScreen(
+      context,
+      ExpenseTimeframe(
+        label: label,
+        startIso: start?.toIso8601String(),
+      ),
+    );
+  }
+
+  void _openAiSearch() {
+    showExpenseAiAskSheet(context);
+  }
+
   void _openTrendModal() {
     final expenses = ref.read(expensesStreamProvider).valueOrNull ?? [];
     final budget = ref.read(currentBudgetProvider);
@@ -360,6 +403,7 @@ class _ExpenseScreenState extends ConsumerState<ExpenseScreen>
           cardType: payload.cardType,
           date: payload.date,
           isManualCategory: isManual,
+          comments: payload.comments,
         );
         final sw = Stopwatch()..start();
         try {
@@ -456,6 +500,7 @@ class _ExpenseScreenState extends ConsumerState<ExpenseScreen>
                     onEditExpense: _openEditExpenseModal,
                     onShowTrend: _openTrendModal,
                     onShowBudgetHistory: _openBudgetHistoryModal,
+                    onOpenTimeframe: _openTimeframe,
                   ),
                   InsightsTab(
                     expenses: expenseData,
@@ -463,6 +508,27 @@ class _ExpenseScreenState extends ConsumerState<ExpenseScreen>
                     onEasterEgg: _handleEasterEgg,
                   ),
                 ],
+              ),
+              Positioned(
+                left: 20,
+                right: 84,
+                bottom: 22,
+                child: AnimatedBuilder(
+                  animation: _tabCtrl,
+                  builder: (context, child) {
+                    final onTracker =
+                        _tabCtrl.index == 0 && !_tabCtrl.indexIsChanging;
+                    return AnimatedOpacity(
+                      opacity: onTracker ? 1.0 : 0.0,
+                      duration: const Duration(milliseconds: 200),
+                      child: IgnorePointer(
+                        ignoring: !onTracker,
+                        child: child,
+                      ),
+                    );
+                  },
+                  child: _AiSearchPill(onTap: _openAiSearch),
+                ),
               ),
               Positioned(
                 right: 20,
@@ -488,6 +554,84 @@ class _ExpenseScreenState extends ConsumerState<ExpenseScreen>
           ),
         ),
       ],
+    );
+  }
+}
+
+/// Bottom "Ask AI" search pill — opens the natural-language expense search.
+class _AiSearchPill extends StatefulWidget {
+  const _AiSearchPill({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  State<_AiSearchPill> createState() => _AiSearchPillState();
+}
+
+class _AiSearchPillState extends State<_AiSearchPill> {
+  bool _pressed = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).extension<AppColors>()!;
+    return GestureDetector(
+      onTapDown: (_) => setState(() => _pressed = true),
+      onTapCancel: () => setState(() => _pressed = false),
+      onTapUp: (_) => setState(() => _pressed = false),
+      onTap: widget.onTap,
+      child: AnimatedScale(
+        scale: _pressed ? 0.97 : 1.0,
+        duration: const Duration(milliseconds: 90),
+        child: Container(
+          height: 50,
+          padding: const EdgeInsets.symmetric(horizontal: 14),
+          decoration: BoxDecoration(
+            color: colors.isDark
+                ? Colors.white.withValues(alpha: 0.06)
+                : Colors.white,
+            borderRadius: BorderRadius.circular(25),
+            border: Border.all(color: AppColors.accent.withValues(alpha: 0.35)),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: colors.isDark ? 0.4 : 0.1),
+                blurRadius: 16,
+                offset: const Offset(0, 6),
+              ),
+            ],
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 30,
+                height: 30,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(colors: [
+                    AppColors.accent,
+                    AppColors.accent.withValues(alpha: 0.7),
+                  ]),
+                  borderRadius: BorderRadius.circular(9),
+                ),
+                child: const Icon(LucideIcons.sparkles,
+                    size: 16, color: Colors.white),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'Ask AI about your expenses',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.plusJakartaSans(
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w600,
+                    color: colors.text2,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
