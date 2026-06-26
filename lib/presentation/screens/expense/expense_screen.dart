@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -562,9 +564,8 @@ class _ExpenseScreenState extends ConsumerState<ExpenseScreen>
                 ],
               ),
               Positioned(
-                left: 20,
-                right: 84,
-                bottom: 22,
+                right: 86,
+                bottom: 20,
                 child: AnimatedBuilder(
                   animation: _tabCtrl,
                   builder: (context, child) {
@@ -579,7 +580,7 @@ class _ExpenseScreenState extends ConsumerState<ExpenseScreen>
                       ),
                     );
                   },
-                  child: _AiSearchPill(onTap: _openAiSearch),
+                  child: _AiSearchFab(onTap: _openAiSearch),
                 ),
               ),
               Positioned(
@@ -610,77 +611,92 @@ class _ExpenseScreenState extends ConsumerState<ExpenseScreen>
   }
 }
 
-/// Bottom "Ask AI" search pill — opens the natural-language expense search.
-class _AiSearchPill extends StatefulWidget {
-  const _AiSearchPill({required this.onTap});
+/// Circular "Ask AI" action button — a sibling to the add-expense FAB. Solid
+/// AI gradient (cyan→purple) with a sparkles glyph, a tap-scale press like the
+/// FAB, and a gentle breathing glow so it reads as the "intelligent" action.
+class _AiSearchFab extends StatefulWidget {
+  const _AiSearchFab({required this.onTap});
 
   final VoidCallback onTap;
 
   @override
-  State<_AiSearchPill> createState() => _AiSearchPillState();
+  State<_AiSearchFab> createState() => _AiSearchFabState();
 }
 
-class _AiSearchPillState extends State<_AiSearchPill> {
-  bool _pressed = false;
+class _AiSearchFabState extends State<_AiSearchFab>
+    with TickerProviderStateMixin {
+  static const _gradB = Color(0xFFA855F7); // purple
+  static const _gradC = Color(0xFF22D3EE); // cyan
+
+  late final AnimationController _scaleCtrl;
+  late final Animation<double> _scaleAnim;
+  late final AnimationController _pulse;
+
+  @override
+  void initState() {
+    super.initState();
+    _scaleCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 80),
+      reverseDuration: const Duration(milliseconds: 120),
+    );
+    _scaleAnim = Tween<double>(begin: 1.0, end: 0.88).animate(
+      CurvedAnimation(parent: _scaleCtrl, curve: Curves.easeInOut),
+    );
+    _pulse = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2400),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _scaleCtrl.dispose();
+    _pulse.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    final colors = Theme.of(context).extension<AppColors>()!;
     return GestureDetector(
-      onTapDown: (_) => setState(() => _pressed = true),
-      onTapCancel: () => setState(() => _pressed = false),
-      onTapUp: (_) => setState(() => _pressed = false),
-      onTap: widget.onTap,
-      child: AnimatedScale(
-        scale: _pressed ? 0.97 : 1.0,
-        duration: const Duration(milliseconds: 90),
-        child: Container(
-          height: 50,
-          padding: const EdgeInsets.symmetric(horizontal: 14),
-          decoration: BoxDecoration(
-            color: colors.isDark
-                ? Colors.white.withValues(alpha: 0.06)
-                : Colors.white,
-            borderRadius: BorderRadius.circular(25),
-            border: Border.all(color: AppColors.accent.withValues(alpha: 0.35)),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: colors.isDark ? 0.4 : 0.1),
-                blurRadius: 16,
-                offset: const Offset(0, 6),
-              ),
-            ],
-          ),
-          child: Row(
-            children: [
-              Container(
-                width: 30,
-                height: 30,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(colors: [
-                    AppColors.accent,
-                    AppColors.accent.withValues(alpha: 0.7),
-                  ]),
-                  borderRadius: BorderRadius.circular(9),
+      onTapDown: (_) => _scaleCtrl.forward(),
+      onTapUp: (_) {
+        _scaleCtrl.reverse();
+        widget.onTap();
+      },
+      onTapCancel: () => _scaleCtrl.reverse(),
+      child: ScaleTransition(
+        scale: _scaleAnim,
+        child: AnimatedBuilder(
+          animation: _pulse,
+          builder: (context, child) {
+            final wave = (math.sin(_pulse.value * 2 * math.pi) + 1) / 2; // 0..1
+            return Container(
+              width: 56,
+              height: 56,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: const LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [_gradC, _gradB],
                 ),
-                child: const Icon(LucideIcons.sparkles,
-                    size: 16, color: Colors.white),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  'Ask AI about your expenses',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: GoogleFonts.plusJakartaSans(
-                    fontSize: 13.5,
-                    fontWeight: FontWeight.w600,
-                    color: colors.text2,
+                boxShadow: [
+                  BoxShadow(
+                    color: _gradB.withValues(alpha: 0.40 + wave * 0.25),
+                    blurRadius: 16 + wave * 10,
+                    spreadRadius: wave * 1.5,
+                    offset: const Offset(0, 4),
                   ),
-                ),
+                ],
               ),
-            ],
+              child: child,
+            );
+          },
+          child: const Icon(
+            LucideIcons.sparkles,
+            color: Colors.white,
+            size: 24,
           ),
         ),
       ),
