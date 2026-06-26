@@ -68,6 +68,11 @@ class SavedSearchStore with WidgetsBindingObserver {
   static const _kTombstoneWatermarkKey =
       'savedSearchStore.lastTombstonePullAt';
 
+  /// SharedPreferences flag set when a full-reset ("nuke") cloud clear failed
+  /// (offline). Checked at the start of every sync so the server wipe self-heals
+  /// before the index pull can re-hydrate the locally-wiped rows.
+  static const _kPendingClearKey = 'savedSearchStore.pendingFullClear';
+
   /// In-memory mirror of the watermark, populated lazily on first pull.
   /// Falls back to null (i.e. "give me all tombstones since the dawn of
   /// time, capped at server-side LIMIT 1000") when SharedPreferences
@@ -94,6 +99,13 @@ class SavedSearchStore with WidgetsBindingObserver {
   ApiClient? _api;
   bool _observerBound = false;
   bool _initialFetchDone = false;
+
+  /// In-memory mirror of the persisted [_kPendingClearKey] flag. Kept as a
+  /// plain bool so the hot sync path can skip the pending-clear retry with a
+  /// zero-cost check (no per-sync SharedPreferences read) in the overwhelmingly
+  /// common case where no nuke is pending.
+  bool _pendingFullClear = false;
+
   Timer? _gcTimer;
 
   /// Periodic foreground sync — fires every [_kForegroundSyncInterval] while
@@ -138,6 +150,7 @@ class SavedSearchStore with WidgetsBindingObserver {
     _api = null;
     _retryQueue.clear();
     _initialFetchDone = false;
+    _pendingFullClear = false;
     _tombstoneWatermark = null;
     _gcTimer?.cancel();
     _gcTimer = null;
@@ -211,6 +224,16 @@ class SavedSearchStore with WidgetsBindingObserver {
         unawaited(syncNow(reason: 'cold-start'));
       }
     }
+  }
+
+  /// Explicit cold-start hook (invoked from the Riverpod provider, NOT from
+  /// [init], so unit tests that call [init] directly are unaffected): hydrate
+  /// the persisted pending-clear flag and, if an offline nuke from a prior
+  /// session never finished, complete the server clear so the rows don't
+  /// re-hydrate on the next index pull.
+  Future<void> retryPendingFullClearOnStartup() async {
+    await _loadPendingClearFlag();
+    await _retryPendingFullClear();
   }
 
   @override
@@ -297,6 +320,12 @@ class SavedSearchStore with WidgetsBindingObserver {
   Future<void> _runParallelSync(String reason) async {
     final stopwatch = Stopwatch()..start();
     try {
+      // A pending full-reset clear MUST resolve BEFORE the index pull — else a
+      // resume/periodic sync would re-hydrate the locally-wiped rows straight
+      // back from a server we never finished clearing. Gated on a cheap
+      // in-memory bool so the common (no-nuke) path adds zero async work.
+      if (_pendingFullClear) await _retryPendingFullClear();
+
       // Both calls are individually try/catch'd inside the method bodies
       // so one failing won't poison the other. Future.wait completes
       // when BOTH are done.
@@ -1072,6 +1101,93 @@ class SavedSearchStore with WidgetsBindingObserver {
     } catch (e) {
       TLog.w(_tag, 'tombstone watermark write failed', error: e);
     }
+  }
+
+  // ── Full reset ("nuke") ────────────────────────────────────────────────────
+
+  /// Clears every saved search (+ its chats/summaries) on the **server** for a
+  /// full-app reset. The local rows are wiped separately by the nuke's atomic
+  /// DB wipe; this method exists so they don't re-hydrate from the cloud on the
+  /// next index pull. The backend bulk-DELETE writes tombstones for every id so
+  /// other devices sync the deletions too.
+  ///
+  /// Returns `true` when the server confirmed the clear. On failure a pending
+  /// flag is persisted and [_retryPendingFullClear] finishes the job before the
+  /// next sync's index pull.
+  Future<bool> clearAllRemote() async {
+    // Drop any queued create/append pushes — they'd re-create rows we're wiping.
+    _retryQueue.clear();
+    final ok = await _serverClearAllWithRetry();
+    if (ok) {
+      await _resetSyncWatermark();
+    } else {
+      await _setPendingClear(true);
+      TLog.w(_tag, 'Flagged pending full clear for saved searches');
+    }
+    return ok;
+  }
+
+  Future<void> _retryPendingFullClear() async {
+    if (!_pendingFullClear) return;
+    TLog.i(_tag, 'Retrying pending saved-searches full clear');
+    if (await _serverClearAllWithRetry()) {
+      await _setPendingClear(false);
+      await _resetSyncWatermark();
+      TLog.i(_tag, 'Pending saved-searches full clear resolved');
+    }
+  }
+
+  /// Hydrate [_pendingFullClear] from prefs once on cold start, so an offline
+  /// nuke from a previous session still self-heals on the next sync.
+  Future<void> _loadPendingClearFlag() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      _pendingFullClear = prefs.getBool(_kPendingClearKey) ?? false;
+    } catch (_) {/* prefs unavailable — leave as-is */}
+  }
+
+  Future<bool> _serverClearAllWithRetry({int maxAttempts = 3}) async {
+    final api = _api;
+    if (api == null) return false;
+    for (var attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        await api.delete<Object?>(ApiEndpoints.savedSearches);
+        TLog.i(_tag, 'Saved searches cleared on server (attempt $attempt)');
+        return true;
+      } catch (e) {
+        TLog.w(_tag,
+            'Saved-searches server clear attempt $attempt/$maxAttempts failed',
+            error: e);
+        if (attempt < maxAttempts) {
+          await Future<void>.delayed(Duration(milliseconds: 600 * attempt));
+        }
+      }
+    }
+    return false;
+  }
+
+  Future<void> _setPendingClear(bool value) async {
+    _pendingFullClear = value;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (value) {
+        await prefs.setBool(_kPendingClearKey, true);
+      } else {
+        await prefs.remove(_kPendingClearKey);
+      }
+    } catch (e) {
+      TLog.w(_tag, 'pending-clear flag write failed', error: e);
+    }
+  }
+
+  /// After a full wipe there are no tombstones worth re-reading, so forget the
+  /// watermark — the next pull starts clean.
+  Future<void> _resetSyncWatermark() async {
+    _tombstoneWatermark = null;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_kTombstoneWatermarkKey);
+    } catch (_) {/* non-fatal */}
   }
 
   // ── Retry queue execution ─────────────────────────────────────────────────

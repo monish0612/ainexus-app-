@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'core/constants/app_constants.dart';
+import 'core/di/injection.dart';
 import 'core/router/app_router.dart';
 import 'core/theme/app_theme.dart';
 import 'presentation/screens/settings/settings_controller.dart';
@@ -21,6 +24,10 @@ class _NexusAiAppState extends ConsumerState<NexusAiApp>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    // On cold launch, adopt any cross-device nuke that happened while this
+    // device was away — wipes local data to match the cloud before any screen
+    // renders stale rows (Drift streams refresh the UI automatically).
+    unawaited(ref.read(resetSyncServiceProvider).applyRemoteResetIfNeeded());
   }
 
   @override
@@ -33,6 +40,8 @@ class _NexusAiAppState extends ConsumerState<NexusAiApp>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       ref.read(settingsProvider.notifier).resyncFromServer();
+      // Catch a nuke performed on another device while we were backgrounded.
+      unawaited(ref.read(resetSyncServiceProvider).applyRemoteResetIfNeeded());
     }
   }
 

@@ -252,12 +252,17 @@ class _ExpenseTimeframeScreenState
   Future<void> _loadSummary() async {
     final repo = ref.read(expenseRepositoryProvider);
     final tf = widget.timeframe;
+    // Investments are not spending, so the spending drill-down excludes them —
+    // UNLESS the view is explicitly scoped to the Investment category (the
+    // dedicated portfolio view), in which case we want to show them.
+    final excludeInvestment = !isInvestmentCategory(_categoryFilter);
     final summary = await repo.rangeSummary(
       startIso: tf.startIso,
       endIso: tf.endIso,
       category: _categoryFilter,
       search: _search,
       searchTerms: tf.seedSearchTerms,
+      excludeInvestment: excludeInvestment,
     );
     // Category chips reflect the unfiltered-by-category scope so the user can
     // always switch categories; search still narrows them.
@@ -266,6 +271,7 @@ class _ExpenseTimeframeScreenState
       endIso: tf.endIso,
       search: _search,
       searchTerms: tf.seedSearchTerms,
+      excludeInvestment: excludeInvestment,
     );
     // Time-series buckets only when a daily/monthly chart was requested.
     final wantsTime =
@@ -278,6 +284,7 @@ class _ExpenseTimeframeScreenState
             category: _categoryFilter,
             search: _search,
             searchTerms: tf.seedSearchTerms,
+            excludeInvestment: excludeInvestment,
           )
         : const <ExpenseBucket>[];
     if (!mounted) return;
@@ -302,6 +309,7 @@ class _ExpenseTimeframeScreenState
         search: _search,
         searchTerms: tf.seedSearchTerms,
         sort: tf.sort,
+        excludeInvestment: !isInvestmentCategory(_categoryFilter),
         limit: _pageSize,
         offset: _offset,
       );

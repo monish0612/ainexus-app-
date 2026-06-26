@@ -1,6 +1,7 @@
 import '../../data/repositories/expense_repository.dart';
 import '../../data/repositories/salary_repository.dart';
 import 'nuke_report.dart';
+import 'reset_sync_service.dart';
 import 'telegram_logger.dart';
 
 /// The expense-scope "nuke" engine — a single, robust, fire-once reset that
@@ -22,10 +23,11 @@ import 'telegram_logger.dart';
 ///  • **Crash-proof** — every step is guarded; a throw in one domain can never
 ///    abort the others, and never crashes the app.
 class ExpenseNukeService {
-  ExpenseNukeService(this._expenseRepo, this._salaryRepo);
+  ExpenseNukeService(this._expenseRepo, this._salaryRepo, this._resetSync);
 
   final ExpenseRepository _expenseRepo;
   final SalaryRepository _salaryRepo;
+  final ResetSyncService _resetSync;
 
   static const _tag = 'Nuke';
 
@@ -51,12 +53,17 @@ class ExpenseNukeService {
       _guard('salary', _salaryRepo.clearSalaryHistory),
     ]);
 
+    // Propagate to other devices — bump the expense reset epoch AFTER the cloud
+    // financial data is cleared.
+    final resetOk = await _guard(
+        'reset-epoch', () => _resetSync.recordReset(NukeScope.expense));
+
     sw.stop();
 
     final report = NukeReport(
       scope: NukeScope.expense,
       elapsedMs: sw.elapsedMilliseconds,
-      fullySynced: results.every((r) => r),
+      fullySynced: results.every((r) => r) && resetOk,
       lines: [
         NukeLine(
           label: 'Expenses',

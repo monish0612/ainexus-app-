@@ -697,7 +697,7 @@ class _NewsScreenState extends ConsumerState<NewsScreen>
                       onTap: () => setState(() => _showNotif = false),
                       behavior: HitTestBehavior.opaque,
                       child: ColoredBox(
-                        color: Colors.black.withValues(alpha: 0.35),
+                        color: colors.scrim,
                       ),
                     ),
                   ),
@@ -982,8 +982,7 @@ class _FeaturedCard extends StatelessWidget {
             borderRadius: BorderRadius.circular(24),
             boxShadow: [
               BoxShadow(
-                color:
-                    Colors.black.withValues(alpha: colors.isDark ? 0.45 : 0.2),
+                color: colors.shadowColor,
                 blurRadius: 32,
                 offset: const Offset(0, 16),
               ),
@@ -2070,7 +2069,7 @@ class _ClearAllConfirmSheet extends StatelessWidget {
           border: Border.all(color: colors.border),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: 0.4),
+              color: colors.shadowColor,
               blurRadius: 32,
               offset: const Offset(0, 12),
             ),

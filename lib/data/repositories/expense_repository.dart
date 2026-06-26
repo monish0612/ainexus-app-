@@ -64,6 +64,7 @@ class ExpenseRepository {
 
   static const _pendingClearExpensesKey = 'pending_clear_expenses';
   static const _pendingClearBudgetKey = 'pending_clear_budget';
+  static const _pendingClearLearningsKey = 'pending_clear_learnings';
 
   Stream<List<domain.Expense>> watchExpenses() {
     return (_db.select(_db.expenses)
@@ -345,6 +346,39 @@ class ExpenseRepository {
     return serverOk;
   }
 
+  /// Count of stored category-learning rules — nuke telemetry.
+  Future<int> learningsCount() async {
+    final countExp = _db.categoryLearnings.keyword.count();
+    final q = _db.selectOnly(_db.categoryLearnings)..addColumns([countExp]);
+    final row = await q.getSingle();
+    return row.read(countExp) ?? 0;
+  }
+
+  /// Clear all learned keyword→category rules (local + server). Returns `true`
+  /// if the server cleared. Used by the full-app "nuke" so the learnings don't
+  /// silently re-hydrate from the cloud on the next categorize call.
+  Future<bool> clearLearnings() async {
+    try {
+      await _db.delete(_db.categoryLearnings).go();
+      TLog.i('ExpenseRepo', 'Category learnings cleared (local)');
+    } catch (e) {
+      TLog.e('ExpenseRepo', 'Failed to clear learnings locally', error: e);
+      rethrow;
+    }
+
+    final serverOk = await _serverDeleteWithRetry(
+      endpoint: ApiEndpoints.categoryLearnings,
+      label: 'category learnings',
+      verifyEndpoint: ApiEndpoints.categoryLearnings,
+    );
+
+    if (!serverOk) {
+      await _prefs.setBool(_pendingClearLearningsKey, true);
+      TLog.w('ExpenseRepo', 'Flagged pending clear for category learnings');
+    }
+    return serverOk;
+  }
+
   /// DELETE with 3 retries + exponential backoff, then verify via GET.
   Future<bool> _serverDeleteWithRetry({
     required String endpoint,
@@ -401,11 +435,13 @@ class ExpenseRepository {
   Future<void> retryPendingClears() async {
     final pendingExpenses = _prefs.getBool(_pendingClearExpensesKey) ?? false;
     final pendingBudget = _prefs.getBool(_pendingClearBudgetKey) ?? false;
+    final pendingLearnings = _prefs.getBool(_pendingClearLearningsKey) ?? false;
 
-    if (!pendingExpenses && !pendingBudget) return;
+    if (!pendingExpenses && !pendingBudget && !pendingLearnings) return;
 
     TLog.i('ExpenseRepo', 'Retrying pending clears '
-        '(expenses=$pendingExpenses, budget=$pendingBudget)');
+        '(expenses=$pendingExpenses, budget=$pendingBudget, '
+        'learnings=$pendingLearnings)');
 
     if (pendingExpenses) {
       final ok = await _serverDeleteWithRetry(
@@ -428,6 +464,18 @@ class ExpenseRepository {
       if (ok) {
         await _prefs.remove(_pendingClearBudgetKey);
         TLog.i('ExpenseRepo', 'Pending budget clear resolved');
+      }
+    }
+
+    if (pendingLearnings) {
+      final ok = await _serverDeleteWithRetry(
+        endpoint: ApiEndpoints.categoryLearnings,
+        label: 'category learnings (retry)',
+        verifyEndpoint: ApiEndpoints.categoryLearnings,
+      );
+      if (ok) {
+        await _prefs.remove(_pendingClearLearningsKey);
+        TLog.i('ExpenseRepo', 'Pending learnings clear resolved');
       }
     }
   }
@@ -633,6 +681,7 @@ class ExpenseRepository {
     String? search,
     List<String> searchTerms = const [],
     ExpenseSort sort = ExpenseSort.dateDesc,
+    bool excludeInvestment = false,
     required int limit,
     required int offset,
   }) async {
@@ -640,7 +689,8 @@ class ExpenseRepository {
       final q = _db.select(_db.expenses)
         ..orderBy(_orderingFor(sort))
         ..limit(limit, offset: offset);
-      _applyRangeFilters(q, startIso, endIso, category, search, searchTerms);
+      _applyRangeFilters(q, startIso, endIso, category, search, searchTerms,
+          excludeInvestment: excludeInvestment);
       final rows = await q.get();
       return rows.map(_rowToExpense).toList();
     } catch (e) {
@@ -658,12 +708,14 @@ class ExpenseRepository {
     String? category,
     String? search,
     List<String> searchTerms = const [],
+    bool excludeInvestment = false,
   }) async {
     try {
       final countExp = _db.expenses.id.count();
       final totalExp = _db.expenses.amount.sum();
       final q = _db.selectOnly(_db.expenses)..addColumns([countExp, totalExp]);
-      _applyRangeFiltersJoin(q, startIso, endIso, category, search, searchTerms);
+      _applyRangeFiltersJoin(q, startIso, endIso, category, search, searchTerms,
+          excludeInvestment: excludeInvestment);
       final row = await q.getSingle();
       return (
         count: row.read(countExp) ?? 0,
@@ -686,6 +738,9 @@ class ExpenseRepository {
     final q = _db.selectOnly(_db.expenses)..addColumns([totalExp]);
     q.where(_db.expenses.date.isBiggerOrEqualValue(start));
     q.where(_db.expenses.date.isSmallerThanValue(end));
+    // Investments are wealth, not consumption — they must never reduce the
+    // month's "spent" figure that drives the salary savings math.
+    q.where(_db.expenses.category.equals(domain.kInvestmentCategory).not());
     return q.watchSingle().map((row) => (row.read(totalExp) ?? 0).toDouble());
   }
 
@@ -700,6 +755,11 @@ class ExpenseRepository {
     final totalCol = _db.expenseMonthlyCategory.total.sum();
     final q = _db.selectOnly(_db.expenseMonthlyCategory)
       ..addColumns([monthCol, totalCol])
+      // Exclude the Investment rollup row — investments are savings, not spend,
+      // so they must not count against lifetime savings / runway stats.
+      ..where(_db.expenseMonthlyCategory.category
+          .equals(domain.kInvestmentCategory)
+          .not())
       ..groupBy([monthCol]);
     return q.watch().map((rows) {
       final out = <String, double>{};
@@ -760,6 +820,7 @@ class ExpenseRepository {
     String? endIso,
     String? search,
     List<String> searchTerms = const [],
+    bool excludeInvestment = false,
   }) async {
     try {
       final totalExp = _db.expenses.amount.sum();
@@ -768,7 +829,8 @@ class ExpenseRepository {
         ..addColumns([_db.expenses.category, totalExp, countExp])
         ..groupBy([_db.expenses.category])
         ..orderBy([OrderingTerm(expression: totalExp, mode: OrderingMode.desc)]);
-      _applyRangeFiltersJoin(q, startIso, endIso, null, search, searchTerms);
+      _applyRangeFiltersJoin(q, startIso, endIso, null, search, searchTerms,
+          excludeInvestment: excludeInvestment);
       final rows = await q.get();
       return rows
           .map((r) => (
@@ -823,6 +885,7 @@ class ExpenseRepository {
     String? category,
     String? search,
     List<String> searchTerms = const [],
+    bool excludeInvestment = false,
   }) async {
     try {
       // ISO dates are 'YYYY-MM-DDThh:mm:ss…' so substr(1,10)=day, (1,7)=month.
@@ -834,7 +897,8 @@ class ExpenseRepository {
         ..addColumns([bucketExp, totalExp, countExp])
         ..groupBy([bucketExp])
         ..orderBy([OrderingTerm(expression: bucketExp, mode: OrderingMode.asc)]);
-      _applyRangeFiltersJoin(q, startIso, endIso, category, search, searchTerms);
+      _applyRangeFiltersJoin(q, startIso, endIso, category, search, searchTerms,
+          excludeInvestment: excludeInvestment);
       final rows = await q.get();
       return rows
           .map((r) => (
@@ -856,8 +920,9 @@ class ExpenseRepository {
     String? endIso,
     String? category,
     String? search,
-    List<String> searchTerms,
-  ) {
+    List<String> searchTerms, {
+    bool excludeInvestment = false,
+  }) {
     if (startIso != null) {
       q.where((t) => t.date.isBiggerOrEqualValue(startIso));
     }
@@ -866,6 +931,9 @@ class ExpenseRepository {
     }
     if (category != null && category.isNotEmpty) {
       q.where((t) => t.category.equals(category));
+    }
+    if (excludeInvestment) {
+      q.where((t) => t.category.equals(domain.kInvestmentCategory).not());
     }
     // User's editable text (AND) — narrows within the result set.
     final searchExpr = _searchExpr(search);
@@ -881,13 +949,17 @@ class ExpenseRepository {
     String? endIso,
     String? category,
     String? search,
-    List<String> searchTerms,
-  ) {
+    List<String> searchTerms, {
+    bool excludeInvestment = false,
+  }) {
     final t = _db.expenses;
     if (startIso != null) q.where(t.date.isBiggerOrEqualValue(startIso));
     if (endIso != null) q.where(t.date.isSmallerThanValue(endIso));
     if (category != null && category.isNotEmpty) {
       q.where(t.category.equals(category));
+    }
+    if (excludeInvestment) {
+      q.where(t.category.equals(domain.kInvestmentCategory).not());
     }
     final searchExpr = _searchExpr(search);
     if (searchExpr != null) q.where(searchExpr);

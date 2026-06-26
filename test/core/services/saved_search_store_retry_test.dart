@@ -23,12 +23,21 @@ import 'package:dio/dio.dart';
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-/// Programmable ApiClient. Each call records its method+path and either
-/// returns 200, throws a DioException with the configured statusCode, or
-/// throws a transport-level connection error.
+/// Programmable ApiClient. Each WRITE call (POST/DELETE/PUT) records its
+/// method+path and consumes the next programmed behaviour — returning 200,
+/// throwing a DioException with the configured statusCode, or throwing a
+/// transport-level connection error.
+///
+/// GETs are special: they back the store's background sync (the index pull
+/// AND the tombstone pull that [SavedSearchStore.init] fires on cold start).
+/// These are NOT part of any test's intent, so they always succeed with an
+/// empty list and never consume the programmed [behaviours] sequence. This
+/// keeps each test's behaviour list a clean 1:1 mapping to the write
+/// operations it actually exercises, regardless of how many background GETs
+/// init happens to fire.
 class _FakeApiClient extends ApiClient {
-  /// Sequence of behaviours, applied in order. Once exhausted, all
-  /// subsequent calls succeed with HTTP 200.
+  /// Sequence of behaviours for WRITE calls, applied in order. Once
+  /// exhausted, all subsequent writes succeed with HTTP 200.
   final List<_FakeBehaviour> behaviours;
   final List<_FakeCall> calls = [];
 
@@ -50,7 +59,12 @@ class _FakeApiClient extends ApiClient {
   Future<Response<T>> get<T>(String path,
       {Map<String, dynamic>? queryParameters}) async {
     calls.add(_FakeCall('GET', path, null));
-    return _apply<T>(_next(), path);
+    // Background sync pulls always succeed with an empty index/tombstone list.
+    return Response<T>(
+      requestOptions: RequestOptions(path: path),
+      statusCode: 200,
+      data: const <dynamic>[] as T?,
+    );
   }
 
   @override
@@ -125,12 +139,11 @@ void main() {
     });
 
     test('transient failure on _pushSave enqueues for retry', () async {
-      // First behaviour is consumed by the eager index-pull that init()
-      // kicks off when an api is wired. We let it succeed (empty list) and
-      // then make the actual save POST fail.
+      // Background GET pulls (index + tombstones) always succeed and do not
+      // consume the behaviour sequence, so the single programmed behaviour
+      // maps directly to the save POST we want to fail.
       final api = _FakeApiClient(behaviours: [
-        _FakeBehaviour.ok(), // GET /saved-searches (index pull)
-        _FakeBehaviour.transport(), // POST /saved-searches (the save)
+        _FakeBehaviour.transport(), // POST /saved-searches (the save) fails
       ]);
       store.init(db, api);
       // Drain the unawaited index-pull before issuing the save.
@@ -157,7 +170,6 @@ void main() {
 
     test('404 on _pushSave is silently dropped (no retry)', () async {
       final api = _FakeApiClient(behaviours: [
-        _FakeBehaviour.ok(), // GET index pull
         _FakeBehaviour.status(404), // POST → 404
       ]);
       store.init(db, api);
@@ -181,7 +193,6 @@ void main() {
       // Pre-seed an entry with a chat message AND a summary row so we can
       // verify all three tables are emptied for that id.
       final api = _FakeApiClient(behaviours: [
-        _FakeBehaviour.ok(), // GET /saved-searches (index pull)
         _FakeBehaviour.ok(), // POST /saved-searches (initial save)
         _FakeBehaviour.status(404), // DELETE returns 404 → cleanup path
       ]);
@@ -234,7 +245,6 @@ void main() {
     test('successful 200 DELETE purges saved-search + chat + summary rows',
         () async {
       final api = _FakeApiClient(behaviours: [
-        _FakeBehaviour.ok(), // GET index pull
         _FakeBehaviour.ok(), // POST  (initial save)
         _FakeBehaviour.ok(), // DELETE (successful remote)
       ]);
@@ -281,9 +291,8 @@ void main() {
     });
 
     test('appendMessage transient failure enqueues for retry', () async {
-      // 1 OK for index pull; 1 OK for save; 1 transport failure for append.
+      // 1 OK for the save POST; 1 transport failure for the chat append POST.
       final api = _FakeApiClient(behaviours: [
-        _FakeBehaviour.ok(), // GET index pull
         _FakeBehaviour.ok(), // POST save
         _FakeBehaviour.transport(), // POST chat (fails)
       ]);

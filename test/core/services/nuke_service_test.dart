@@ -12,9 +12,11 @@ import 'package:ai_nexus/core/network/api_client.dart';
 import 'package:ai_nexus/core/services/app_nuke_service.dart';
 import 'package:ai_nexus/core/services/expense_nuke_service.dart';
 import 'package:ai_nexus/core/services/nuke_report.dart';
+import 'package:ai_nexus/core/services/reset_sync_service.dart';
 import 'package:ai_nexus/data/local/database/app_database.dart' as db;
 import 'package:ai_nexus/data/repositories/expense_repository.dart';
 import 'package:ai_nexus/data/repositories/salary_repository.dart';
+import 'package:ai_nexus/data/repositories/saved_words_repository.dart';
 import 'package:dio/dio.dart';
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -75,6 +77,25 @@ void main() {
   late _FakeApi api;
   late ExpenseRepository expenseRepo;
   late SalaryRepository salaryRepo;
+  late SavedWordsRepository savedWordsRepo;
+  late ResetSyncService resetSync;
+
+  // Records calls to the injected saved-searches clear so the nuke wiring can
+  // be asserted; honours the offline flag to mirror a real server outage.
+  var savedSearchCleared = 0;
+  late Future<bool> Function() clearSavedSearches;
+
+  AppNukeService buildAppNuke() => AppNukeService(
+        database,
+        expenseRepo,
+        salaryRepo,
+        savedWordsRepo,
+        resetSync,
+        clearSavedSearches: clearSavedSearches,
+      );
+
+  ExpenseNukeService buildExpenseNuke() =>
+      ExpenseNukeService(expenseRepo, salaryRepo, resetSync);
 
   setUp(() async {
     SharedPreferences.setMockInitialValues(<String, Object>{});
@@ -83,6 +104,13 @@ void main() {
     api = _FakeApi();
     expenseRepo = ExpenseRepository(database, api, prefs);
     salaryRepo = SalaryRepository(database, api, prefs);
+    savedWordsRepo = SavedWordsRepository(database, api, prefs);
+    resetSync = ResetSyncService(database, api, prefs);
+    savedSearchCleared = 0;
+    clearSavedSearches = () async {
+      savedSearchCleared++;
+      return !api.failMethods.contains('DELETE');
+    };
     // Verify reads always see an empty server by default.
     api.onGet = (_) => const <dynamic>[];
   });
@@ -165,7 +193,7 @@ void main() {
       await addBudget('b2', 6000);
       await addSalary('2026-06', 80000);
 
-      final report = await ExpenseNukeService(expenseRepo, salaryRepo).nuke();
+      final report = await buildExpenseNuke().nuke();
 
       expect(report.scope, NukeScope.expense);
       expect(report.lines, hasLength(3));
@@ -194,7 +222,7 @@ void main() {
       await addSalary('2026-06', 80000);
       api.failMethods.add('DELETE');
 
-      final report = await ExpenseNukeService(expenseRepo, salaryRepo).nuke();
+      final report = await buildExpenseNuke().nuke();
 
       // Counts are still captured (snapshot happens before the wipe).
       expect(report.totalCleared, 3);
@@ -214,7 +242,7 @@ void main() {
     });
 
     test('empty domain nuke is safe and reports nothing to clear', () async {
-      final report = await ExpenseNukeService(expenseRepo, salaryRepo).nuke();
+      final report = await buildExpenseNuke().nuke();
       expect(report.totalCleared, 0);
       expect(report.nonEmptyLines, isEmpty);
       // Deleting an empty server still "succeeds", so it reads as synced.
@@ -226,7 +254,7 @@ void main() {
       await database.close(); // every DB op now throws
 
       // Must NOT throw — the service guards every step.
-      final report = await ExpenseNukeService(expenseRepo, salaryRepo).nuke();
+      final report = await buildExpenseNuke().nuke();
       expect(report.scope, NukeScope.expense);
       // Local deletes failed → guarded → not synced, but no crash.
       expect(report.fullySynced, isFalse);
@@ -238,7 +266,8 @@ void main() {
   // ═══════════════════════════════════════════════════════════════════════════
 
   group('AppNukeService', () {
-    test('wipes EVERY local table + syncs financial cloud', () async {
+    test('wipes EVERY local table + clears ALL re-hydrating cloud domains',
+        () async {
       await addExpense('e1', 100);
       await addExpense('e2', 200);
       await addBudget('b1', 5000);
@@ -247,8 +276,7 @@ void main() {
       await addSavedWord('w2');
       await addLearning('swiggy');
 
-      final report =
-          await AppNukeService(database, expenseRepo, salaryRepo).nuke();
+      final report = await buildAppNuke().nuke();
 
       expect(report.scope, NukeScope.full);
 
@@ -258,13 +286,27 @@ void main() {
       expect(lineFor(report, 'Budget history').count, 1);
       expect(lineFor(report, 'Salary').count, 1);
 
-      // Local-only domains: real counts + no cloud badge (null).
+      // Saved words + learnings are NOW cloud-backed (the reappear-bug fix):
+      // they must report a confirmed server clear, not a local-only null.
       expect(lineFor(report, 'Saved words').count, 2);
-      expect(lineFor(report, 'Saved words').cloudSynced, isNull);
+      expect(lineFor(report, 'Saved words').cloudSynced, isTrue);
       expect(lineFor(report, 'Learnings').count, 1);
-      expect(lineFor(report, 'Learnings').cloudSynced, isNull);
+      expect(lineFor(report, 'Learnings').cloudSynced, isTrue);
+
+      // Saved searches cloud clear was invoked + reported synced.
+      expect(savedSearchCleared, 1);
+      expect(lineFor(report, 'Saved searches').cloudSynced, isTrue);
+
+      // News + cloud files stay genuinely local-only (no cloud badge).
+      expect(lineFor(report, 'News').cloudSynced, isNull);
+      expect(lineFor(report, 'Cloud files').cloudSynced, isNull);
 
       expect(report.fullySynced, isTrue);
+
+      // Saved words actually hit the server DELETE (so they can't re-hydrate).
+      expect(api.deletes.where((p) => p.contains('saved-words')), isNotEmpty);
+      expect(
+          api.deletes.where((p) => p.contains('category-learnings')), isNotEmpty);
 
       // EVERY data table is now empty — schema preserved.
       final after = await database.dataRowCounts();
@@ -276,37 +318,45 @@ void main() {
       expect((await database.select(database.expenses).get()).length, 1);
     });
 
-    test('offline: local fully wiped, financial cloud QUEUED + pending flags',
+    test('offline: local fully wiped, EVERY cloud domain QUEUED + pending flags',
         () async {
       await addExpense('e1', 100);
       await addBudget('b1', 5000);
       await addSalary('2026-06', 80000);
       await addSavedWord('w1');
+      await addLearning('swiggy');
       api.failMethods.add('DELETE');
 
-      final report =
-          await AppNukeService(database, expenseRepo, salaryRepo).nuke();
+      final report = await buildAppNuke().nuke();
 
       // Local wipe is independent of the cloud and always lands.
       final after = await database.dataRowCounts();
       expect(after.values.every((c) => c == 0), isTrue);
 
-      // Financial lines queued; local-only lines unaffected (null).
+      // Every cloud-backed line queued.
       expect(lineFor(report, 'Expenses').cloudSynced, isFalse);
       expect(lineFor(report, 'Budget history').cloudSynced, isFalse);
       expect(lineFor(report, 'Salary').cloudSynced, isFalse);
-      expect(lineFor(report, 'Saved words').cloudSynced, isNull);
+      expect(lineFor(report, 'Saved words').cloudSynced, isFalse);
+      expect(lineFor(report, 'Learnings').cloudSynced, isFalse);
+      expect(lineFor(report, 'Saved searches').cloudSynced, isFalse);
       expect(report.fullySynced, isFalse);
 
       final prefs = await SharedPreferences.getInstance();
       expect(prefs.getBool('pending_clear_expenses'), isTrue);
       expect(prefs.getBool('pending_clear_budget'), isTrue);
       expect(prefs.getBool('pending_clear_salary'), isTrue);
+      expect(prefs.getBool('pending_clear_saved_words'), isTrue);
+      expect(prefs.getBool('pending_clear_learnings'), isTrue);
+
+      // …and the pending saved-words clear self-heals once back online.
+      api.failMethods.remove('DELETE');
+      await savedWordsRepo.retryPendingClear();
+      expect(prefs.getBool('pending_clear_saved_words'), isNot(true));
     });
 
     test('full nuke on a pristine DB reports nothing + stays synced', () async {
-      final report =
-          await AppNukeService(database, expenseRepo, salaryRepo).nuke();
+      final report = await buildAppNuke().nuke();
       expect(report.totalCleared, 0);
       expect(report.nonEmptyLines, isEmpty);
       expect(report.fullySynced, isTrue);
@@ -315,9 +365,8 @@ void main() {
     test('idempotent — a second full nuke immediately after is a clean no-op',
         () async {
       await addExpense('e1', 100);
-      await AppNukeService(database, expenseRepo, salaryRepo).nuke();
-      final second =
-          await AppNukeService(database, expenseRepo, salaryRepo).nuke();
+      await buildAppNuke().nuke();
+      final second = await buildAppNuke().nuke();
       expect(second.totalCleared, 0);
       expect(second.fullySynced, isTrue);
       final after = await database.dataRowCounts();
@@ -343,12 +392,128 @@ void main() {
         }
       });
 
-      final report =
-          await AppNukeService(database, expenseRepo, salaryRepo).nuke();
+      final report = await buildAppNuke().nuke();
 
       expect(lineFor(report, 'Expenses').count, 2000);
       final after = await database.dataRowCounts();
       expect(after['Expenses'], 0, reason: 'all 2000 rows removed');
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  SavedWordsRepository — cloud clear (the "saved words came back" fix)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  group('SavedWordsRepository.clearAll', () {
+    test('clears local + server, no pending flag on success', () async {
+      await addSavedWord('w1');
+      await addSavedWord('w2');
+
+      final ok = await savedWordsRepo.clearAll();
+      expect(ok, isTrue);
+      expect(await savedWordsRepo.count(), 0);
+      expect(api.deletes.where((p) => p.contains('saved-words')), isNotEmpty);
+
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getBool('pending_clear_saved_words'), isNot(true));
+    });
+
+    test('offline: local cleared, pending flag set, retry resolves', () async {
+      await addSavedWord('w1');
+      api.failMethods.add('DELETE');
+
+      final ok = await savedWordsRepo.clearAll();
+      expect(ok, isFalse);
+      expect(await savedWordsRepo.count(), 0, reason: 'local is cleared anyway');
+
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getBool('pending_clear_saved_words'), isTrue);
+
+      api.failMethods.remove('DELETE');
+      await savedWordsRepo.retryPendingClear();
+      expect(prefs.getBool('pending_clear_saved_words'), isNot(true));
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  ExpenseRepository.clearLearnings
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  group('ExpenseRepository.clearLearnings', () {
+    test('clears local + server', () async {
+      await addLearning('swiggy');
+      await addLearning('uber');
+      expect(await expenseRepo.learningsCount(), 2);
+
+      final ok = await expenseRepo.clearLearnings();
+      expect(ok, isTrue);
+      expect(await expenseRepo.learningsCount(), 0);
+      expect((await expenseRepo.getLearnings()), isEmpty);
+    });
+
+    test('offline: pending flag set + cleared by retryPendingClears', () async {
+      await addLearning('swiggy');
+      api.failMethods.add('DELETE');
+      final ok = await expenseRepo.clearLearnings();
+      expect(ok, isFalse);
+
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getBool('pending_clear_learnings'), isTrue);
+
+      api.failMethods.remove('DELETE');
+      await expenseRepo.retryPendingClears();
+      expect(prefs.getBool('pending_clear_learnings'), isNot(true));
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  Salary durable SyncQueue (offline-first write durability)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  group('Salary SyncQueue', () {
+    test('online write does NOT queue (inline push wins)', () async {
+      final ok = await salaryRepo.setSalaryForMonth('2026-06', 80000);
+      expect(ok, isTrue);
+      expect(await database.pendingSyncItems('salary'), isEmpty);
+    });
+
+    test('offline write is queued durably, then drains on reconnect', () async {
+      api.failMethods.add('POST');
+      final ok = await salaryRepo.setSalaryForMonth('2026-06', 80000);
+      expect(ok, isFalse, reason: 'inline push failed → queued');
+
+      // Persisted to the durable outbox (survives an app kill).
+      final queued = await database.pendingSyncItems('salary');
+      expect(queued, hasLength(1));
+      expect(queued.single.entityId, '2026-06');
+
+      // Reconnect → drain pushes it and clears the queue.
+      api.failMethods.remove('POST');
+      final drained = await salaryRepo.drainSyncQueue();
+      expect(drained, 1);
+      expect(await database.pendingSyncItems('salary'), isEmpty);
+      expect(api.posts.where((p) => p.path.contains('salary')), isNotEmpty);
+    });
+
+    test('re-saving the same month offline collapses to ONE queued entry',
+        () async {
+      api.failMethods.add('POST');
+      await salaryRepo.setSalaryForMonth('2026-06', 50000);
+      await salaryRepo.setSalaryForMonth('2026-06', 90000);
+
+      final queued = await database.pendingSyncItems('salary');
+      expect(queued, hasLength(1), reason: 'latest write replaces the prior');
+    });
+
+    test('clearing salary purges queued writes (no resurrection)', () async {
+      api.failMethods.add('POST');
+      await salaryRepo.setSalaryForMonth('2026-06', 50000);
+      expect(await database.pendingSyncItems('salary'), hasLength(1));
+
+      api.failMethods.remove('POST');
+      await salaryRepo.clearSalaryHistory();
+      expect(await database.pendingSyncItems('salary'), isEmpty,
+          reason: 'a stale queued upsert must not resurrect a cleared salary');
     });
   });
 

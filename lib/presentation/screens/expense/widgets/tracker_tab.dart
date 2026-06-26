@@ -78,9 +78,15 @@ class _TrackerTabState extends State<TrackerTab> {
 
   DateTime _parseDate(String raw) => safeParseDate(raw);
 
+  /// Spending only — investments are wealth-building, not expenses, so every
+  /// total / chart / list on this tab is computed from this filtered view.
+  List<ExpenseData> get _spend => widget.expenses
+      .where((e) => !isInvestmentCategory(e.category))
+      .toList(growable: false);
+
   List<ExpenseData> _expensesInCurrentMonth(DateTime now) {
     final start = DateTime(now.year, now.month, 1);
-    return widget.expenses.where((e) {
+    return _spend.where((e) {
       final d = _parseDate(e.date);
       return !d.isBefore(start) &&
           d.year == now.year &&
@@ -95,27 +101,27 @@ class _TrackerTabState extends State<TrackerTab> {
     switch (index) {
       case 0:
         final start = DateTime(now.year, now.month, now.day);
-        return widget.expenses
+        return _spend
             .where((e) => !_parseDate(e.date).isBefore(start))
             .toList();
       case 1:
         final start = DateTime(now.year, now.month, now.day)
             .subtract(const Duration(days: 6));
-        return widget.expenses
+        return _spend
             .where((e) => !_parseDate(e.date).isBefore(start))
             .toList();
       case 2:
         final start = DateTime(now.year, now.month, 1);
-        return widget.expenses
+        return _spend
             .where((e) => !_parseDate(e.date).isBefore(start))
             .toList();
       case 3:
         final start = DateTime(now.year, now.month - 6, 1);
-        return widget.expenses
+        return _spend
             .where((e) => !_parseDate(e.date).isBefore(start))
             .toList();
       default:
-        return List<ExpenseData>.from(widget.expenses);
+        return List<ExpenseData>.from(_spend);
     }
   }
 
@@ -245,7 +251,7 @@ class _TrackerTabState extends State<TrackerTab> {
     if (fromLearnings != null && fromLearnings.trim().isNotEmpty) {
       return fromLearnings.trim();
     }
-    if (widget.expenses.isEmpty) return null;
+    if (_spend.isEmpty) return null;
     final top = allTimeTop.isNotEmpty ? allTimeTop.first : null;
     if (top == null) return null;
     final hasBudget = budget > 0;
@@ -286,7 +292,7 @@ class _TrackerTabState extends State<TrackerTab> {
 
   List<ExpenseData> _last24Hours(DateTime now) {
     final cutoff = now.subtract(const Duration(hours: 24));
-    final recent = widget.expenses
+    final recent = _spend
         .where((e) => !_parseDate(e.date).isBefore(cutoff))
         .toList()
       ..sort((a, b) => _parseDate(b.date).compareTo(_parseDate(a.date)));
@@ -344,14 +350,14 @@ class _TrackerTabState extends State<TrackerTab> {
       highestMonth = math.max(highestMonth, e.amount.toDouble());
     }
     final todayStart = DateTime(now.year, now.month, now.day);
-    final todayExpenses = widget.expenses
+    final todayExpenses = _spend
         .where((e) => !_parseDate(e.date).isBefore(todayStart) &&
             _parseDate(e.date).isBefore(todayStart.add(const Duration(days: 1))))
         .toList();
     final txToday = todayExpenses.length;
     final todaySpent = _sumAmounts(todayExpenses);
 
-    final allTimeSlices = _categorySlices(widget.expenses);
+    final allTimeSlices = _categorySlices(_spend);
     final tip = _smartTip(
       monthSpent: monthSpent,
       budget: widget.budget,
@@ -456,7 +462,7 @@ class _TrackerTabState extends State<TrackerTab> {
             child: _RecentTransactionsSection(
               colors: colors,
               recentExpenses: recent24h,
-              allExpensesEmpty: widget.expenses.isEmpty,
+              allExpensesEmpty: _spend.isEmpty,
               onAddExpense: widget.onAddExpense,
               onEdit: widget.onEditExpense,
               onDelete: widget.onDeleteExpense,
@@ -535,6 +541,14 @@ class _TotalBalanceCard extends StatelessWidget {
     final left = hasBudget ? (budget - monthSpent) : -monthSpent;
     final over = hasBudget && monthSpent > budget;
     final barPct = hasBudget ? (monthSpent / budget).clamp(0.0, 1.0) : 0.0;
+    // The balance card uses a light tinted gradient in white theme, where the
+    // pastel green/salmon figures wash out — use deeper shades there so the
+    // amounts stay legible. Dark theme keeps the original light tints.
+    final isDark = Theme.of(context).extension<AppColors>()!.isDark;
+    final positiveColor =
+        isDark ? const Color(0xFF6EE7B7) : const Color(0xFF059669);
+    final negativeColor =
+        isDark ? const Color(0xFFFCA5A5) : const Color(0xFFDC2626);
 
     return Container(
       decoration: BoxDecoration(
@@ -646,7 +660,7 @@ class _TotalBalanceCard extends StatelessWidget {
                         style: GoogleFonts.plusJakartaSans(
                           fontSize: 14,
                           fontWeight: FontWeight.w700,
-                          color: const Color(0xFF6EE7B7),
+                          color: positiveColor,
                         ),
                       ),
                     ],
@@ -677,7 +691,7 @@ class _TotalBalanceCard extends StatelessWidget {
                         style: GoogleFonts.plusJakartaSans(
                           fontSize: 14,
                           fontWeight: FontWeight.w700,
-                          color: const Color(0xFFFCA5A5),
+                          color: negativeColor,
                         ),
                       ),
                     ],
@@ -706,9 +720,7 @@ class _TotalBalanceCard extends StatelessWidget {
                           style: GoogleFonts.plusJakartaSans(
                             fontSize: 14,
                             fontWeight: FontWeight.w700,
-                            color: over
-                                ? const Color(0xFFFCA5A5)
-                                : const Color(0xFF6EE7B7),
+                            color: over ? negativeColor : positiveColor,
                           ),
                         ),
                       ],

@@ -7,8 +7,34 @@ import 'package:intl/intl.dart';
 
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/utils/currency_formatter.dart';
+import '../../../../domain/entities/expense_entities.dart';
 import './expense_item.dart';
 import './salary_insights_card.dart';
+
+/// Cumulative invested-by-month running totals (oldest → newest) for the
+/// portfolio sparkline. Pure, null-safe and order-independent so it can be
+/// unit-tested in isolation:
+///   • Buckets by the 'YYYY-MM' prefix of each ISO date (malformed/short dates
+///     fall back to the raw string — they still bucket deterministically and
+///     never throw).
+///   • Sorts month keys ascending, then emits the running cumulative sum.
+///   • Returns an empty list for empty input (sparkline is then skipped).
+List<double> investmentCumulativeMonthlySeries(
+  Iterable<ExpenseData> investments,
+) {
+  final byMonth = <String, double>{};
+  for (final e in investments) {
+    final d = e.date;
+    final key = d.length >= 7 ? d.substring(0, 7) : d;
+    byMonth[key] = (byMonth[key] ?? 0) + e.amount;
+  }
+  if (byMonth.isEmpty) return const [];
+  final keys = byMonth.keys.toList()..sort();
+  var running = 0.0;
+  return [
+    for (final k in keys) running += byMonth[k]!,
+  ];
+}
 
 class InsightsTab extends StatefulWidget {
   const InsightsTab({
@@ -16,11 +42,16 @@ class InsightsTab extends StatefulWidget {
     required this.expenses,
     required this.budget,
     this.onEasterEgg,
+    this.onOpenInvestments,
   });
 
   final List<ExpenseData> expenses;
   final double budget;
   final Future<void> Function(String command)? onEasterEgg;
+
+  /// Opens the dedicated Investments portfolio drill-down (tap on the
+  /// investment KPI card). Wired by the parent to the timeframe screen.
+  final VoidCallback? onOpenInvestments;
 
   @override
   State<InsightsTab> createState() => _InsightsTabState();
@@ -221,21 +252,62 @@ class _InsightsTabState extends State<InsightsTab> {
     }
   }
 
+  /// All consumption expenses (investments removed) — the basis for every spend
+  /// total, chart and breakdown on this tab. Investments are surfaced through
+  /// the dedicated portfolio card instead.
+  Iterable<ExpenseData> get _spendAll =>
+      widget.expenses.where((e) => !isInvestmentCategory(e.category));
+
+  /// All investment transactions, newest-first — powers the portfolio card.
+  List<ExpenseData> get _investmentsAll {
+    final list = widget.expenses
+        .where((e) => isInvestmentCategory(e.category))
+        .toList()
+      ..sort((a, b) => safeParseDate(b.date).compareTo(safeParseDate(a.date)));
+    return list;
+  }
+
   List<ExpenseData> _periodExpenses() {
     if (_period == _Period.nt) {
       final n = DateTime.now();
       final ntStart = DateTime(n.year, n.month + 1, 1);
       final ntEnd = DateTime(n.year, n.month + 2, 0, 23, 59, 59, 999);
-      return widget.expenses.where((e) {
+      return _spendAll.where((e) {
         final d = safeParseDate(e.date).toLocal();
         return !d.isBefore(ntStart) && !d.isAfter(ntEnd);
       }).toList();
     }
     final cut = _cutoff(_period);
-    return widget.expenses
+    return _spendAll
         .where((e) => !safeParseDate(e.date).toLocal().isBefore(cut))
         .toList();
   }
+
+  /// Investments that fall inside the currently-selected period — the "this
+  /// period invested" figure on the portfolio card. Takes the already-computed
+  /// investment list to avoid re-filtering/sorting the full expense history.
+  double _investedInPeriod(List<ExpenseData> invs) {
+    if (invs.isEmpty) return 0;
+    if (_period == _Period.nt) {
+      final n = DateTime.now();
+      final ntStart = DateTime(n.year, n.month + 1, 1);
+      final ntEnd = DateTime(n.year, n.month + 2, 0, 23, 59, 59, 999);
+      return invs.where((e) {
+        final d = safeParseDate(e.date).toLocal();
+        return !d.isBefore(ntStart) && !d.isAfter(ntEnd);
+      }).fold<double>(0, (s, e) => s + e.amount.toDouble());
+    }
+    final cut = _cutoff(_period);
+    return invs
+        .where((e) => !safeParseDate(e.date).toLocal().isBefore(cut))
+        .fold<double>(0, (s, e) => s + e.amount.toDouble());
+  }
+
+  /// Cumulative invested-by-month series (oldest→newest) for the card sparkline.
+  /// Delegates to the pure [investmentCumulativeMonthlySeries] so the logic is
+  /// unit-testable in isolation.
+  List<double> _investmentCumulativeSeries(List<ExpenseData> invs) =>
+      investmentCumulativeMonthlySeries(invs);
 
   List<_TrendPoint> _buildTrendSeries(
     List<ExpenseData> expenses,
@@ -608,6 +680,15 @@ class _InsightsTabState extends State<InsightsTab> {
     );
     final hasDowData = dowSummary.totalSpend > 0;
 
+    // ── Investment portfolio (kept entirely separate from spend) ──
+    // Computed once per build and threaded into the helpers so we never
+    // re-filter + re-sort the expense list three times for one card.
+    final investments = _investmentsAll;
+    final investedTotal =
+        investments.fold<double>(0, (s, e) => s + e.amount.toDouble());
+    final investedPeriod = _investedInPeriod(investments);
+    final investSeries = _investmentCumulativeSeries(investments);
+
     return ColoredBox(
       color: c.bg,
       child: ListView(
@@ -770,6 +851,20 @@ class _InsightsTabState extends State<InsightsTab> {
               periods: _periods,
               selected: _period,
               onSelect: _setPeriod,
+            ),
+
+            // ── Investment portfolio (separate from spending) ──
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
+              child: _InvestmentPortfolioCard(
+                colors: c,
+                totalInvested: investedTotal,
+                periodInvested: investedPeriod,
+                periodLabel: _periodSubtitles[_period] ?? '',
+                count: investments.length,
+                cumulativeSeries: investSeries,
+                onTap: widget.onOpenInvestments,
+              ),
             ),
 
             // ── KPI Carousel ──
@@ -2125,6 +2220,382 @@ class _KpiDetailSheet extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Compact INR formatter (₹1.2K / ₹3.4L / ₹2.1Cr) used by the portfolio card's
+/// secondary stats so large figures never overflow the pills. Public + pure so
+/// it can be unit-tested directly.
+String compactInr(num amount) {
+  final abs = amount.abs();
+  String c(double v, String s) =>
+      '₹${v.toStringAsFixed(v >= 100 ? 0 : 1)}$s';
+  if (abs >= 10000000) return amount < 0 ? '-${c(abs / 10000000, 'Cr')}' : c(abs / 10000000, 'Cr');
+  if (abs >= 100000) return amount < 0 ? '-${c(abs / 100000, 'L')}' : c(abs / 100000, 'L');
+  if (abs >= 1000) return amount < 0 ? '-${c(abs / 1000, 'K')}' : c(abs / 1000, 'K');
+  return formatCurrency(amount);
+}
+
+/// Premium, standout portfolio card: total invested (cost basis) as the hero,
+/// a cumulative-growth sparkline, and period / average sub-stats. Investments
+/// are deliberately tracked here, never mixed into spending. Tapping opens the
+/// full Investments drill-down. Fully theme-aware and overflow-safe.
+class _InvestmentPortfolioCard extends StatelessWidget {
+  const _InvestmentPortfolioCard({
+    required this.colors,
+    required this.totalInvested,
+    required this.periodInvested,
+    required this.periodLabel,
+    required this.count,
+    required this.cumulativeSeries,
+    this.onTap,
+  });
+
+  final AppColors colors;
+  final double totalInvested;
+  final double periodInvested;
+  final String periodLabel;
+  final int count;
+  final List<double> cumulativeSeries;
+  final VoidCallback? onTap;
+
+  static const _accent = AppColors.categoryInvestment; // 0xFF20C997
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = colors.isDark;
+    final useLightFg = isDark;
+    final heroColor = useLightFg ? Colors.white : const Color(0xFF0F766E);
+    final labelColor =
+        useLightFg ? Colors.white.withValues(alpha: 0.55) : colors.text3;
+    final subColor =
+        useLightFg ? Colors.white.withValues(alpha: 0.40) : colors.text4;
+    final isEmpty = count == 0;
+    final avg = count > 0 ? totalInvested / count : 0.0;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: isEmpty ? null : onTap,
+        borderRadius: BorderRadius.circular(22),
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: isDark
+                  ? const [Color(0xFF04302C), Color(0xFF073D34), Color(0xFF052E2B)]
+                  : const [Color(0xFFECFDF5), Color(0xFFD1FAE5)],
+            ),
+            borderRadius: BorderRadius.circular(22),
+            border: Border.all(
+              color: _accent.withValues(alpha: isDark ? 0.32 : 0.40),
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: _accent.withValues(alpha: isDark ? 0.22 : 0.16),
+                blurRadius: 22,
+                offset: const Offset(0, 8),
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 34,
+                    height: 34,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: _accent.withValues(alpha: 0.18),
+                      borderRadius: BorderRadius.circular(11),
+                      border: Border.all(
+                        color: _accent.withValues(alpha: 0.45),
+                      ),
+                    ),
+                    child: const Text('📈', style: TextStyle(fontSize: 17)),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'INVESTMENT PORTFOLIO',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.plusJakartaSans(
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 1.4,
+                        color: labelColor,
+                      ),
+                    ),
+                  ),
+                  if (!isEmpty && onTap != null)
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          'Manage',
+                          style: GoogleFonts.plusJakartaSans(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            color: _accent,
+                          ),
+                        ),
+                        const Icon(Icons.chevron_right_rounded,
+                            size: 17, color: _accent),
+                      ],
+                    ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              if (isEmpty)
+                _buildEmpty(subColor)
+              else
+                _buildBody(heroColor, labelColor, subColor, avg),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEmpty(Color subColor) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Start your portfolio',
+                  style: GoogleFonts.plusJakartaSans(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w800,
+                    color: colors.isDark ? Colors.white : const Color(0xFF0F766E),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Log an expense under the Investment category and it is tracked here as wealth — never counted against your spending.',
+                  style: GoogleFonts.plusJakartaSans(
+                    fontSize: 11.5,
+                    height: 1.45,
+                    color: subColor,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBody(
+    Color heroColor,
+    Color labelColor,
+    Color subColor,
+    double avg,
+  ) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'TOTAL INVESTED',
+                    style: GoogleFonts.plusJakartaSans(
+                      fontSize: 9.5,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 1.2,
+                      color: labelColor,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  TweenAnimationBuilder<double>(
+                    tween: Tween<double>(begin: 0, end: totalInvested),
+                    duration: const Duration(milliseconds: 750),
+                    curve: Curves.easeOutCubic,
+                    builder: (context, value, _) => FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        formatCurrency(value),
+                        maxLines: 1,
+                        style: GoogleFonts.plusJakartaSans(
+                          fontSize: 30,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: -1,
+                          height: 1,
+                          color: heroColor,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '$count investment${count == 1 ? '' : 's'} · cost basis',
+                    style: GoogleFonts.plusJakartaSans(
+                      fontSize: 11,
+                      color: subColor,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (cumulativeSeries.length >= 2)
+              SizedBox(
+                width: 92,
+                height: 46,
+                child: CustomPaint(
+                  painter: _SparklinePainter(
+                    values: cumulativeSeries,
+                    color: _accent,
+                  ),
+                ),
+              ),
+          ],
+        ),
+        const SizedBox(height: 14),
+        Row(
+          children: [
+            Expanded(
+              child: _miniStat(
+                label: 'THIS ${periodLabel.toUpperCase()}',
+                value: compactInr(periodInvested),
+                labelColor: labelColor,
+                valueColor: heroColor,
+              ),
+            ),
+            Container(
+              width: 1,
+              height: 26,
+              color: heroColor.withValues(alpha: 0.12),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: _miniStat(
+                label: 'AVG / INVESTMENT',
+                value: compactInr(avg),
+                labelColor: labelColor,
+                valueColor: heroColor,
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _miniStat({
+    required String label,
+    required String value,
+    required Color labelColor,
+    required Color valueColor,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: GoogleFonts.plusJakartaSans(
+            fontSize: 8.5,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 0.8,
+            color: labelColor,
+          ),
+        ),
+        const SizedBox(height: 3),
+        Text(
+          value,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: GoogleFonts.plusJakartaSans(
+            fontSize: 14,
+            fontWeight: FontWeight.w800,
+            color: valueColor,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Lightweight cumulative-growth sparkline (area + line). Pure paint, no
+/// gestures — cheap and overflow-proof. Renders nothing for <2 points.
+class _SparklinePainter extends CustomPainter {
+  _SparklinePainter({required this.values, required this.color});
+
+  final List<double> values;
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (values.length < 2) return;
+    final maxV = values.reduce(math.max);
+    final minV = values.reduce(math.min);
+    final range = (maxV - minV).abs() < 1e-9 ? 1.0 : (maxV - minV);
+    final dx = size.width / (values.length - 1);
+
+    Offset pointAt(int i) {
+      final x = dx * i;
+      final norm = (values[i] - minV) / range;
+      final y = size.height - (norm * (size.height - 4)) - 2;
+      return Offset(x, y);
+    }
+
+    final linePath = Path();
+    final fillPath = Path()..moveTo(0, size.height);
+    for (var i = 0; i < values.length; i++) {
+      final p = pointAt(i);
+      if (i == 0) {
+        linePath.moveTo(p.dx, p.dy);
+      } else {
+        linePath.lineTo(p.dx, p.dy);
+      }
+      fillPath.lineTo(p.dx, p.dy);
+    }
+    fillPath
+      ..lineTo(size.width, size.height)
+      ..close();
+
+    final fillPaint = Paint()
+      ..shader = LinearGradient(
+        begin: Alignment.topCenter,
+        end: Alignment.bottomCenter,
+        colors: [
+          color.withValues(alpha: 0.42),
+          color.withValues(alpha: 0.02),
+        ],
+      ).createShader(Offset.zero & size);
+    canvas.drawPath(fillPath, fillPaint);
+
+    final linePaint = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round;
+    canvas.drawPath(linePath, linePaint);
+
+    final last = pointAt(values.length - 1);
+    canvas.drawCircle(last, 2.6, Paint()..color = color);
+  }
+
+  @override
+  bool shouldRepaint(_SparklinePainter old) =>
+      old.values != values || old.color != color;
 }
 
 class _BudgetStrip extends StatelessWidget {

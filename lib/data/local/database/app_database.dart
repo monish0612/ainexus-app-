@@ -300,6 +300,56 @@ class AppDatabase extends _$AppDatabase {
     };
   }
 
+  // ── Durable sync queue ──────────────────────────────────────────────────
+  // A persisted outbox so offline writes survive an app kill and auto-push on
+  // reconnect (true offline-first), unlike pure inline retry which is lost once
+  // the in-memory retries are exhausted.
+
+  /// Enqueue (or replace) a pending server write. Keyed on
+  /// (entityType, entityId, action) so re-saving the same entity while offline
+  /// collapses to a single latest payload instead of stacking duplicates.
+  Future<void> enqueueSync({
+    required String entityType,
+    required String entityId,
+    required String action,
+    required String payload,
+  }) async {
+    await transaction(() async {
+      await (delete(syncQueue)
+            ..where((t) =>
+                t.entityType.equals(entityType) &
+                t.entityId.equals(entityId) &
+                t.action.equals(action)))
+          .go();
+      await into(syncQueue).insert(
+        SyncQueueCompanion.insert(
+          entityType: entityType,
+          entityId: entityId,
+          action: action,
+          payload: payload,
+          createdAt: DateTime.now().toUtc().toIso8601String(),
+        ),
+      );
+    });
+  }
+
+  /// All un-synced queued writes for a given entity type, oldest first.
+  Future<List<SyncQueueData>> pendingSyncItems(String entityType) {
+    return (select(syncQueue)
+          ..where((t) => t.entityType.equals(entityType) & t.synced.equals(false))
+          ..orderBy([(t) => OrderingTerm(expression: t.createdAt)]))
+        .get();
+  }
+
+  /// Remove a queued write once it has been pushed successfully.
+  Future<void> deleteSyncItem(int id) =>
+      (delete(syncQueue)..where((t) => t.id.equals(id))).go();
+
+  /// Drop every queued write for an entity type — used when that domain is
+  /// cleared/nuked so a stale queued upsert can't resurrect the data.
+  Future<void> purgeSyncByType(String entityType) =>
+      (delete(syncQueue)..where((t) => t.entityType.equals(entityType))).go();
+
   @override
   MigrationStrategy get migration => MigrationStrategy(
     onUpgrade: (migrator, from, to) async {

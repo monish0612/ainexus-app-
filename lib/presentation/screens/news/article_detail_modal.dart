@@ -1371,12 +1371,8 @@ class _ShimmerLines extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final base = colors.isDark
-        ? Colors.white.withValues(alpha: 0.07)
-        : Colors.black.withValues(alpha: 0.06);
-    final highlight = colors.isDark
-        ? Colors.white.withValues(alpha: 0.18)
-        : Colors.black.withValues(alpha: 0.13);
+    final base = colors.shimmerBase;
+    final highlight = colors.shimmerHighlight;
 
     Widget bar(double widthFactor) => FractionallySizedBox(
           alignment: Alignment.centerLeft,

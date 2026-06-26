@@ -188,9 +188,10 @@ class _LoginScreenState extends State<LoginScreen>
   @override
   Widget build(BuildContext context) {
     final bottomPad = MediaQuery.paddingOf(context).bottom;
+    final colors = Theme.of(context).extension<AppColors>()!;
 
     return Scaffold(
-      backgroundColor: const Color(0xFF000000),
+      backgroundColor: colors.bg,
       body: GestureDetector(
         onTap: () => FocusScope.of(context).unfocus(),
         child: Stack(
@@ -252,7 +253,7 @@ class _LoginScreenState extends State<LoginScreen>
                                   style: GoogleFonts.plusJakartaSans(
                                     fontSize: 36,
                                     fontWeight: FontWeight.w700,
-                                    color: AppColors.dark.text,
+                                    color: colors.text,
                                     letterSpacing: -0.5,
                                   ),
                                 ),
@@ -268,7 +269,7 @@ class _LoginScreenState extends State<LoginScreen>
                               style: GoogleFonts.plusJakartaSans(
                                 fontSize: 14,
                                 fontWeight: FontWeight.w500,
-                                color: AppColors.dark.text2,
+                                color: colors.text2,
                               ),
                             ),
                           ),
@@ -320,7 +321,7 @@ class _LoginScreenState extends State<LoginScreen>
                                               ? LucideIcons.eyeOff
                                               : LucideIcons.eye,
                                           size: 19,
-                                          color: AppColors.dark.text4,
+                                          color: colors.text4,
                                         ),
                                         onPressed: () =>
                                             setState(() => _obscure = !_obscure),
@@ -391,7 +392,7 @@ class _LoginScreenState extends State<LoginScreen>
                                   Icon(
                                     LucideIcons.shieldCheck,
                                     size: 13,
-                                    color: AppColors.dark.text5,
+                                    color: colors.text5,
                                   ),
                                   const SizedBox(width: 6),
                                   Text(
@@ -399,7 +400,7 @@ class _LoginScreenState extends State<LoginScreen>
                                     style: GoogleFonts.plusJakartaSans(
                                       fontSize: 11,
                                       fontWeight: FontWeight.w500,
-                                      color: AppColors.dark.text5,
+                                      color: colors.text5,
                                     ),
                                   ),
                                 ],
@@ -475,10 +476,10 @@ class _LoginFieldState extends State<_LoginField> {
 
   void _onFocus() => setState(() => _focused = widget.focusNode.hasFocus);
 
-  Color get _borderColor {
+  Color _borderColor(AppColors c) {
     if (widget.hasError) return const Color(0xFFEF4444);
     if (_focused) return AppColors.accent;
-    return AppColors.dark.border;
+    return c.border;
   }
 
   Color get _glowColor {
@@ -489,13 +490,14 @@ class _LoginFieldState extends State<_LoginField> {
 
   @override
   Widget build(BuildContext context) {
+    final c = Theme.of(context).extension<AppColors>()!;
     return AnimatedContainer(
       duration: const Duration(milliseconds: 200),
       curve: Curves.easeOutCubic,
       decoration: BoxDecoration(
-        color: AppColors.dark.bg1,
+        color: c.bg1,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: _borderColor),
+        border: Border.all(color: _borderColor(c)),
         boxShadow: [BoxShadow(color: _glowColor, blurRadius: 14)],
       ),
       child: TextField(
@@ -510,7 +512,7 @@ class _LoginFieldState extends State<_LoginField> {
         style: GoogleFonts.plusJakartaSans(
           fontSize: 15,
           fontWeight: FontWeight.w500,
-          color: AppColors.dark.text,
+          color: c.text,
         ),
         cursorColor: AppColors.accent,
         decoration: InputDecoration(
@@ -518,7 +520,7 @@ class _LoginFieldState extends State<_LoginField> {
           hintStyle: GoogleFonts.plusJakartaSans(
             fontSize: 15,
             fontWeight: FontWeight.w500,
-            color: AppColors.dark.text4,
+            color: c.text4,
           ),
           prefixIcon: AnimatedSwitcher(
             duration: const Duration(milliseconds: 200),
@@ -526,7 +528,7 @@ class _LoginFieldState extends State<_LoginField> {
               widget.icon,
               key: ValueKey(_focused),
               size: 19,
-              color: _focused ? AppColors.accent : AppColors.dark.text4,
+              color: _focused ? AppColors.accent : c.text4,
             ),
           ),
           suffixIcon: widget.suffixIcon,

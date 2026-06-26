@@ -1507,6 +1507,7 @@ Color _dominantCategoryColor(String monthKey, List<Expense> expenses) {
   final end = DateTime(y, mo + 1, 0, 23, 59, 59, 999);
   final byCat = <String, double>{};
   for (final e in expenses) {
+    if (isInvestmentCategory(e.category)) continue;
     final d = safeParseDate(e.date);
     if (!d.isBefore(start) && !d.isAfter(end)) {
       byCat[e.category] = (byCat[e.category] ?? 0) + e.amount;
@@ -1568,7 +1569,9 @@ _BudgetHistoryData _computeBudgetHistoryData({
     return expenses
         .where((e) {
           final d = safeParseDate(e.date);
-          return !d.isBefore(start) && !d.isAfter(end);
+          return !isInvestmentCategory(e.category) &&
+              !d.isBefore(start) &&
+              !d.isAfter(end);
         })
         .fold<double>(0, (s, e) => s + e.amount);
   }

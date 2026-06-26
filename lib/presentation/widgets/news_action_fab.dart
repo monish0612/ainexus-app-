@@ -163,8 +163,8 @@ class _NewsActionFabState extends State<NewsActionFab>
                       sigmaY: 12 * _expand.value,
                     ),
                     child: ColoredBox(
-                      color: Colors.black
-                          .withValues(alpha: 0.45 * _expand.value),
+                      color: widget.colors.scrim
+                          .withValues(alpha: widget.colors.scrim.a * _expand.value),
                     ),
                   ),
                 );
@@ -406,7 +406,7 @@ class _SheetContent extends StatelessWidget {
             ),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withValues(alpha: 0.35),
+                color: colors.shadowColor,
                 blurRadius: 32,
                 offset: const Offset(0, 12),
               ),
@@ -545,7 +545,7 @@ class _ScopeToggle extends StatelessWidget {
             boxShadow: selected
                 ? [
                     BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.15),
+                      color: colors.shadowColor,
                       blurRadius: 8,
                       offset: const Offset(0, 2),
                     ),

@@ -554,7 +554,15 @@ class _DoneButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = Theme.of(context).extension<AppColors>()!;
     final disabled = count <= 0 || loading;
+    // Disabled gradient adapts to the theme: dark slate on AMOLED, soft grey
+    // surface on white (so it never looks like a heavy dark blob in a light UI).
+    final disabledGradient = colors.isDark
+        ? const [Color(0xFF374151), Color(0xFF1F2937)]
+        : [colors.bg3, colors.bg4];
+    final disabledFg = colors.isDark ? Colors.white : colors.text3;
+    final fg = disabled ? disabledFg : Colors.white;
     return Material(
       color: Colors.transparent,
       borderRadius: BorderRadius.circular(999),
@@ -567,7 +575,7 @@ class _DoneButton extends StatelessWidget {
             borderRadius: BorderRadius.circular(999),
             gradient: LinearGradient(
               colors: disabled
-                  ? const [Color(0xFF374151), Color(0xFF1F2937)]
+                  ? disabledGradient
                   : const [Color(0xFF10B981), Color(0xFF059669)],
             ),
             boxShadow: disabled
@@ -582,21 +590,21 @@ class _DoneButton extends StatelessWidget {
           ),
           child: Center(
             child: loading
-                ? const SizedBox(
+                ? SizedBox(
                     width: 18,
                     height: 18,
                     child: CircularProgressIndicator(
                       strokeWidth: 2,
-                      color: Colors.white,
+                      color: fg,
                     ),
                   )
                 : Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Icon(
+                      Icon(
                         LucideIcons.check,
                         size: 18,
-                        color: Colors.white,
+                        color: fg,
                       ),
                       const SizedBox(width: 8),
                       Text(
@@ -606,7 +614,7 @@ class _DoneButton extends StatelessWidget {
                         style: GoogleFonts.plusJakartaSans(
                           fontSize: 14,
                           fontWeight: FontWeight.w800,
-                          color: Colors.white,
+                          color: fg,
                           letterSpacing: 0.1,
                         ),
                       ),

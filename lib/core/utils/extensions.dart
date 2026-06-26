@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../theme/app_colors.dart';
+
 extension ContextExtensions on BuildContext {
   ThemeData get theme => Theme.of(this);
   TextTheme get textTheme => theme.textTheme;
@@ -10,6 +12,10 @@ extension ContextExtensions on BuildContext {
   double get screenHeight => mediaQuery.size.height;
   EdgeInsets get padding => mediaQuery.padding;
   bool get isDark => theme.brightness == Brightness.dark;
+
+  /// Theme-aware palette (AMOLED dark / white). Always present because both
+  /// [AppTheme.darkTheme] and [AppTheme.whiteTheme] register it.
+  AppColors get colors => theme.extension<AppColors>()!;
 }
 
 final NumberFormat _inrCurrency = NumberFormat.currency(

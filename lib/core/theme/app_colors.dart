@@ -17,6 +17,13 @@ class AppColors extends ThemeExtension<AppColors> {
     required this.border2,
     required this.headerBg,
     required this.navBg,
+    required this.shadowColor,
+    required this.glassFill,
+    required this.scrim,
+    required this.cardGradientTop,
+    required this.cardGradientBottom,
+    required this.shimmerBase,
+    required this.shimmerHighlight,
     required this.isDark,
   });
 
@@ -34,6 +41,25 @@ class AppColors extends ThemeExtension<AppColors> {
   final Color border2;
   final Color headerBg;
   final Color navBg;
+
+  /// Drop-shadow color for elevated cards/sheets. Soft cool slate on white so
+  /// surfaces lift without the harsh pure-black look.
+  final Color shadowColor;
+
+  /// Frosted/glass overlay fill used for blurred surfaces and pills.
+  final Color glassFill;
+
+  /// Barrier/scrim color painted behind modal sheets and dialogs.
+  final Color scrim;
+
+  /// Subtle elevated-surface gradient (top → bottom).
+  final Color cardGradientTop;
+  final Color cardGradientBottom;
+
+  /// Loading skeleton shimmer base + highlight.
+  final Color shimmerBase;
+  final Color shimmerHighlight;
+
   final bool isDark;
 
   static const dark = AppColors(
@@ -51,6 +77,13 @@ class AppColors extends ThemeExtension<AppColors> {
     border2: Color(0x0DFFFFFF), // rgba(255,255,255,0.05)
     headerBg: Color(0xFF000000),
     navBg: Color(0xF8000000), // rgba(0,0,0,0.97)
+    shadowColor: Color(0x66000000), // rgba(0,0,0,0.4)
+    glassFill: Color(0x0DFFFFFF), // rgba(255,255,255,0.05)
+    scrim: Color(0x99000000), // rgba(0,0,0,0.6)
+    cardGradientTop: Color(0xFF0B0B0F),
+    cardGradientBottom: Color(0xFF060608),
+    shimmerBase: Color(0x14FFFFFF), // rgba(255,255,255,0.08)
+    shimmerHighlight: Color(0x2EFFFFFF), // rgba(255,255,255,0.18)
     isDark: true,
   );
 
@@ -69,6 +102,14 @@ class AppColors extends ThemeExtension<AppColors> {
     border2: Color(0x0F000000), // rgba(0,0,0,0.06)
     headerBg: Color(0xFFFFFFFF),
     navBg: Color(0xF8FFFFFF), // rgba(255,255,255,0.97)
+    // Soft cool-slate shadow so cards lift on white without a heavy black halo.
+    shadowColor: Color(0x14101828), // rgba(16,24,40,0.08)
+    glassFill: Color(0xCCFFFFFF), // rgba(255,255,255,0.8) frosted
+    scrim: Color(0x52101828), // rgba(16,24,40,0.32)
+    cardGradientTop: Color(0xFFFFFFFF),
+    cardGradientBottom: Color(0xFFF8FAFC),
+    shimmerBase: Color(0x0F000000), // rgba(0,0,0,0.06)
+    shimmerHighlight: Color(0x05000000), // rgba(0,0,0,0.02)
     isDark: false,
   );
 
@@ -207,6 +248,13 @@ class AppColors extends ThemeExtension<AppColors> {
     Color? border2,
     Color? headerBg,
     Color? navBg,
+    Color? shadowColor,
+    Color? glassFill,
+    Color? scrim,
+    Color? cardGradientTop,
+    Color? cardGradientBottom,
+    Color? shimmerBase,
+    Color? shimmerHighlight,
     bool? isDark,
   }) {
     return AppColors(
@@ -224,6 +272,13 @@ class AppColors extends ThemeExtension<AppColors> {
       border2: border2 ?? this.border2,
       headerBg: headerBg ?? this.headerBg,
       navBg: navBg ?? this.navBg,
+      shadowColor: shadowColor ?? this.shadowColor,
+      glassFill: glassFill ?? this.glassFill,
+      scrim: scrim ?? this.scrim,
+      cardGradientTop: cardGradientTop ?? this.cardGradientTop,
+      cardGradientBottom: cardGradientBottom ?? this.cardGradientBottom,
+      shimmerBase: shimmerBase ?? this.shimmerBase,
+      shimmerHighlight: shimmerHighlight ?? this.shimmerHighlight,
       isDark: isDark ?? this.isDark,
     );
   }
@@ -246,6 +301,14 @@ class AppColors extends ThemeExtension<AppColors> {
       border2: Color.lerp(border2, other.border2, t)!,
       headerBg: Color.lerp(headerBg, other.headerBg, t)!,
       navBg: Color.lerp(navBg, other.navBg, t)!,
+      shadowColor: Color.lerp(shadowColor, other.shadowColor, t)!,
+      glassFill: Color.lerp(glassFill, other.glassFill, t)!,
+      scrim: Color.lerp(scrim, other.scrim, t)!,
+      cardGradientTop: Color.lerp(cardGradientTop, other.cardGradientTop, t)!,
+      cardGradientBottom:
+          Color.lerp(cardGradientBottom, other.cardGradientBottom, t)!,
+      shimmerBase: Color.lerp(shimmerBase, other.shimmerBase, t)!,
+      shimmerHighlight: Color.lerp(shimmerHighlight, other.shimmerHighlight, t)!,
       isDark: t < 0.5 ? isDark : other.isDark,
     );
   }

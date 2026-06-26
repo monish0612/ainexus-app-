@@ -131,8 +131,11 @@ List<Expense> _filter(
   DateTime start,
   DateTime end,
 ) {
+  // Investments are not spending — exclude them from every trend figure.
   return expenses
-      .where((e) => _inclusiveInRange(safeParseDate(e.date), start, end))
+      .where((e) =>
+          !isInvestmentCategory(e.category) &&
+          _inclusiveInRange(safeParseDate(e.date), start, end))
       .toList();
 }
 
@@ -309,18 +312,25 @@ class _ExpenseTrendModalState extends State<ExpenseTrendModal> {
                   children: [
                     Container(
                       decoration: BoxDecoration(
-                        gradient: const LinearGradient(
-                          colors: [
-                            Color(0xFF110826),
-                            Color(0xFF1A0D36),
-                            Color(0xFF0D1A3A),
-                          ],
+                        gradient: LinearGradient(
+                          colors: colors.isDark
+                              ? const [
+                                  Color(0xFF110826),
+                                  Color(0xFF1A0D36),
+                                  Color(0xFF0D1A3A),
+                                ]
+                              : const [
+                                  Color(0xFFF5F3FF),
+                                  Color(0xFFEDE9FE),
+                                  Color(0xFFEEF2FF),
+                                ],
                           begin: Alignment.topLeft,
                           end: Alignment.bottomRight,
                         ),
                         borderRadius: BorderRadius.circular(24),
                         border: Border.all(
-                          color: const Color(0x4D7C3AED),
+                          color: const Color(0xFF7C3AED)
+                              .withValues(alpha: colors.isDark ? 0.30 : 0.22),
                         ),
                       ),
                       child: Column(
@@ -348,7 +358,7 @@ class _ExpenseTrendModalState extends State<ExpenseTrendModal> {
                                       Text(
                                         formatCurrency(currTotal),
                                         style: textTheme.displaySmall?.copyWith(
-                                          color: Colors.white,
+                                          color: colors.text,
                                           fontWeight: FontWeight.w900,
                                           fontSize: 36,
                                           letterSpacing: -1.2,
@@ -990,7 +1000,7 @@ class _QuickStatIcon extends StatelessWidget {
             style: GoogleFonts.plusJakartaSans(
               fontSize: 13,
               fontWeight: FontWeight.w800,
-              color: Colors.white,
+              color: colors.text,
             ),
           ),
           const SizedBox(height: 2),

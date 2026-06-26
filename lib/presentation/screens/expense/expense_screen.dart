@@ -10,6 +10,7 @@ import '../../../core/services/expense_widget_service.dart';
 import '../../../core/services/process_text_service.dart';
 import '../../../core/services/telegram_logger.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../../data/repositories/expense_repository.dart';
 import '../../../domain/entities/expense_entities.dart';
 import '../../widgets/compact_header.dart';
 import '../settings/settings_controller.dart';
@@ -108,14 +109,22 @@ class _ExpenseScreenState extends ConsumerState<ExpenseScreen>
   void initState() {
     super.initState();
     _tabCtrl = TabController(length: 2, vsync: this);
-    Future.microtask(() {
+    Future.microtask(() async {
+      // Honour a cross-device nuke FIRST: if another device reset the data, wipe
+      // ours before we push anything — otherwise draining a stale offline queue
+      // would re-populate the cloud we were supposed to have cleared.
+      await ref.read(resetSyncServiceProvider).applyRemoteResetIfNeeded();
+
       final repo = ref.read(expenseRepositoryProvider);
       repo.syncFromServer();
       repo.syncBudgetFromServer();
       repo.retryPendingClears();
       final salaryRepo = ref.read(salaryRepositoryProvider);
-      salaryRepo.syncSalaryFromServer();
+      // Drain queued offline salary writes BEFORE pulling, so a salary entered
+      // offline reaches the cloud and isn't shadowed by a server pull.
+      salaryRepo.drainSyncQueue().then((_) => salaryRepo.syncSalaryFromServer());
       salaryRepo.retryPendingClear();
+      ref.read(savedWordsRepositoryProvider).retryPendingClear();
     });
   }
 
@@ -382,6 +391,21 @@ class _ExpenseScreenState extends ConsumerState<ExpenseScreen>
     showExpenseAiAskSheet(context);
   }
 
+  /// Opens the full Investments portfolio drill-down (all-time), reusing the
+  /// robust timeframe screen scoped to the Investment category.
+  void _openInvestments() {
+    showExpenseTimeframeScreen(
+      context,
+      const ExpenseTimeframe(
+        label: 'Investments',
+        startIso: null,
+        subtitle: 'Your portfolio · cost basis',
+        seedCategory: kInvestmentCategory,
+        chart: ExpenseChart.monthly,
+      ),
+    );
+  }
+
   void _openTrendModal() {
     final expenses = ref.read(expensesStreamProvider).valueOrNull ?? [];
     final budget = ref.read(currentBudgetProvider);
@@ -586,6 +610,7 @@ class _ExpenseScreenState extends ConsumerState<ExpenseScreen>
                     expenses: expenseData,
                     budget: budget,
                     onEasterEgg: _handleEasterEgg,
+                    onOpenInvestments: _openInvestments,
                   ),
                 ],
               ),

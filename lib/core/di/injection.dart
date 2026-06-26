@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -5,6 +7,7 @@ import '../../data/local/database/app_database.dart';
 import '../../data/repositories/expense_repository.dart';
 import '../../data/repositories/news_repository.dart';
 import '../../data/repositories/salary_repository.dart';
+import '../../data/repositories/saved_words_repository.dart';
 import '../../data/services/ai_categorize_service.dart';
 import '../../data/services/expense_ai_search_service.dart';
 import '../../data/services/expense_insight_service.dart';
@@ -16,6 +19,7 @@ import '../auth/auth_service.dart';
 import '../network/api_client.dart';
 import '../services/app_nuke_service.dart';
 import '../services/expense_nuke_service.dart';
+import '../services/reset_sync_service.dart';
 import '../services/image_search_store.dart';
 import '../services/saved_search_store.dart';
 
@@ -51,21 +55,45 @@ final salaryRepositoryProvider = Provider<SalaryRepository>((ref) {
 /// budget history and salary history across local + cloud. Stateless, so it can
 /// be read freshly wherever the command is triggered (Tracker search, Insights
 /// search, …).
+/// Cross-device reset epoch: bumps a server generation on nuke and wipes the
+/// local copy on devices that fall behind, so a nuke on one device propagates
+/// to all of them.
+final resetSyncServiceProvider = Provider<ResetSyncService>((ref) {
+  return ResetSyncService(
+    ref.watch(appDatabaseProvider),
+    ref.watch(apiClientProvider),
+    ref.watch(sharedPreferencesProvider),
+  );
+});
+
 final expenseNukeServiceProvider = Provider<ExpenseNukeService>((ref) {
   return ExpenseNukeService(
     ref.watch(expenseRepositoryProvider),
     ref.watch(salaryRepositoryProvider),
+    ref.watch(resetSyncServiceProvider),
+  );
+});
+
+final savedWordsRepositoryProvider = Provider<SavedWordsRepository>((ref) {
+  return SavedWordsRepository(
+    ref.watch(appDatabaseProvider),
+    ref.watch(apiClientProvider),
+    ref.watch(sharedPreferencesProvider),
   );
 });
 
 /// Orchestrates the FULL "nuke" — wipes every local table (rows only, schema
-/// preserved) plus the financial cloud data. Triggered from the InsightAI
-/// search box for a complete from-scratch reset of the whole app.
+/// preserved) plus the cloud copy of every domain that would otherwise
+/// re-hydrate (financial data, saved words, learnings, saved searches).
+/// Triggered from the InsightAI search box for a complete from-scratch reset.
 final appNukeServiceProvider = Provider<AppNukeService>((ref) {
   return AppNukeService(
     ref.watch(appDatabaseProvider),
     ref.watch(expenseRepositoryProvider),
     ref.watch(salaryRepositoryProvider),
+    ref.watch(savedWordsRepositoryProvider),
+    ref.watch(resetSyncServiceProvider),
+    clearSavedSearches: () => SavedSearchStore.instance.clearAllRemote(),
   );
 });
 
@@ -118,6 +146,9 @@ final savedSearchStoreProvider = Provider<SavedSearchStore>((ref) {
     ref.watch(appDatabaseProvider),
     ref.watch(apiClientProvider),
   );
+  // Finish any offline full-reset ("nuke") cloud clear left pending by a prior
+  // session before its rows can re-hydrate from the server.
+  unawaited(store.retryPendingFullClearOnStartup());
   return store;
 });
 

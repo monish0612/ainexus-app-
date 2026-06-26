@@ -662,6 +662,10 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
 
   Future<void> _syncSavedWordsFromServer() async {
     try {
+      // If a full-app nuke cleared saved words while offline, finish the cloud
+      // wipe FIRST — otherwise the fetch below would re-hydrate them right back.
+      await ref.read(savedWordsRepositoryProvider).retryPendingClear();
+
       final service = ref.read(tutorAiServiceProvider);
       final remote = await service.fetchSavedWords();
       if (remote.isEmpty || !mounted) return;

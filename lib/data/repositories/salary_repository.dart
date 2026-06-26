@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:drift/drift.dart';
@@ -23,6 +24,10 @@ class SalaryRepository {
 
   static const _uuid = Uuid();
   static const _pendingClearKey = 'pending_clear_salary';
+
+  /// Durable sync-queue discriminator for salary upserts.
+  static const _syncEntityType = 'salary';
+  static const _syncActionUpsert = 'upsert';
 
   // ── Reads ────────────────────────────────────────────────────────────────
 
@@ -89,22 +94,75 @@ class SalaryRepository {
       rethrow;
     }
 
+    final payload = <String, dynamic>{
+      'id': id,
+      'month': month,
+      'amount': amount,
+      'setAt': setAt,
+    };
+
     try {
-      await _syncPostWithRetry(
-        ApiEndpoints.salary,
-        data: <String, dynamic>{
-          'id': id,
-          'month': month,
-          'amount': amount,
-          'setAt': setAt,
-        },
-      );
+      await _syncPostWithRetry(ApiEndpoints.salary, data: payload);
       TLog.i('SalaryRepo', '☁️ Synced salary $month');
+      // Inline push won — drop any stale queued copy for this month.
+      await _dequeueUpsert(month);
       return true;
     } catch (e) {
-      TLog.w('SalaryRepo', 'Salary sync failed after retries', error: e);
+      // Inline retries exhausted (likely offline). Persist the write to the
+      // durable sync queue so it auto-pushes on the next launch/reconnect —
+      // the entry is no longer lost once the in-memory retries give up.
+      TLog.w('SalaryRepo',
+          'Salary sync failed after retries — queued for offline retry',
+          error: e);
+      try {
+        await _db.enqueueSync(
+          entityType: _syncEntityType,
+          entityId: month,
+          action: _syncActionUpsert,
+          payload: jsonEncode(payload),
+        );
+      } catch (qe) {
+        TLog.e('SalaryRepo', 'Failed to enqueue salary for offline retry',
+            error: qe);
+      }
       return false;
     }
+  }
+
+  /// Push every queued (offline) salary upsert. Call on app start/resume so a
+  /// salary entered while offline reaches the cloud once connectivity returns.
+  /// Returns the number of entries successfully drained.
+  Future<int> drainSyncQueue() async {
+    final items = await _db.pendingSyncItems(_syncEntityType);
+    if (items.isEmpty) return 0;
+    TLog.i('SalaryRepo', 'Draining ${items.length} queued salary write(s)');
+
+    var drained = 0;
+    for (final item in items) {
+      try {
+        final data = jsonDecode(item.payload) as Map<String, dynamic>;
+        await _api.post<Object?>(ApiEndpoints.salary, data: data);
+        await _db.deleteSyncItem(item.id);
+        drained++;
+        TLog.i('SalaryRepo', '☁️ Drained queued salary ${item.entityId}');
+      } catch (e) {
+        TLog.w('SalaryRepo',
+            'Queued salary ${item.entityId} still failing — kept for next drain',
+            error: e);
+      }
+    }
+    return drained;
+  }
+
+  Future<void> _dequeueUpsert(String month) async {
+    try {
+      final queued = await _db.pendingSyncItems(_syncEntityType);
+      for (final q in queued) {
+        if (q.entityId == month && q.action == _syncActionUpsert) {
+          await _db.deleteSyncItem(q.id);
+        }
+      }
+    } catch (_) {/* best-effort cleanup */}
   }
 
   /// Pull salary entries from the server and merge into local DB. Server is the
@@ -180,6 +238,9 @@ class SalaryRepository {
   Future<bool> clearSalaryHistory() async {
     try {
       await _db.delete(_db.salaryEntries).go();
+      // Drop any queued offline upserts too, else a pending write would
+      // resurrect a salary row right after the clear.
+      await _db.purgeSyncByType(_syncEntityType);
       TLog.i('SalaryRepo', 'Salary history cleared (local)');
     } catch (e) {
       TLog.e('SalaryRepo', 'Failed to clear salary history locally', error: e);

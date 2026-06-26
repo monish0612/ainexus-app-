@@ -113,6 +113,9 @@ class ExpenseWidgetService {
       double monthSpent = 0;
 
       for (final e in expenses) {
+        // Investments are wealth-building, not spending — keep them out of the
+        // widget's today/month totals (mirrors the in-app expense totals).
+        if (isInvestmentCategory(e.category)) continue;
         final d = DateTime.tryParse(e.date);
         if (d == null) continue;
 

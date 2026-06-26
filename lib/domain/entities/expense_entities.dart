@@ -47,6 +47,36 @@ const List<String> expenseCategories = [
   'Others',
 ];
 
+/// The single category that represents wealth-building rather than consumption.
+///
+/// Money logged under this category is **not** an expense: it is excluded from
+/// every spend aggregation (month/today totals, budgets, charts, category /
+/// bank / card breakdowns, trends, the home-screen widget) and is surfaced
+/// separately as a portfolio in the Insights tab. This is the one source of
+/// truth — all spend code routes its "is this consumption?" check through
+/// [isInvestmentCategory].
+const String kInvestmentCategory = 'Investment';
+
+/// Whether [category] is the investment category. Whitespace/casing tolerant so
+/// it stays correct even if a synced/legacy row arrives slightly differently
+/// shaped (the category picker only ever emits the canonical 'Investment').
+bool isInvestmentCategory(String? category) {
+  final c = category?.trim();
+  if (c == null || c.isEmpty) return false;
+  return c.toLowerCase() == kInvestmentCategory.toLowerCase();
+}
+
+/// Convenience spend/investment partitioning for any [Expense] list.
+extension ExpenseInvestmentFilter on Iterable<Expense> {
+  /// Consumption only — drops investments. Use for every spend total/chart.
+  Iterable<Expense> get spendOnly =>
+      where((e) => !isInvestmentCategory(e.category));
+
+  /// Investments only — the portfolio contributions.
+  Iterable<Expense> get investmentsOnly =>
+      where((e) => isInvestmentCategory(e.category));
+}
+
 /// Mirrors `CategoryLearning` in `expense.ts` (`Record<string, string>`).
 typedef CategoryLearning = Map<String, String>;
 

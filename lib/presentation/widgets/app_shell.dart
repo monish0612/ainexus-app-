@@ -436,7 +436,7 @@ class _ProcessTextChooserState extends State<_ProcessTextChooser>
           border: Border.all(color: colors.border, width: 1),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: 0.2),
+              color: colors.shadowColor,
               blurRadius: 24,
               offset: const Offset(0, 6),
             ),
@@ -664,7 +664,7 @@ class _ShareChooserState extends State<_ShareChooser>
           border: Border.all(color: c.border),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: 0.25),
+              color: c.shadowColor,
               blurRadius: 30,
               offset: const Offset(0, 8),
             ),

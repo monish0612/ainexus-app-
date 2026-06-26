@@ -113,4 +113,8 @@ abstract final class ApiEndpoints {
 
   // Sync
   static String get sync => '$_base/api/v1/sync';
+
+  // Cross-device reset epoch — a nuke bumps the generation here; every device
+  // compares it on launch/resume and wipes its local copy when it falls behind.
+  static String get dataReset => '$_base/api/v1/data-reset';
 }

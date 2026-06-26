@@ -28,6 +28,13 @@ const _rec = GroundedRecommendation(
 ThemeData _theme() => ThemeData(
       extensions: const <ThemeExtension<dynamic>>[
         AppColors(
+          shadowColor: Color(0x66000000),
+          glassFill: Color(0x0DFFFFFF),
+          scrim: Color(0x99000000),
+          cardGradientTop: Color(0xFF0B0B0F),
+          cardGradientBottom: Color(0xFF060608),
+          shimmerBase: Color(0x14FFFFFF),
+          shimmerHighlight: Color(0x2EFFFFFF),
           bg: Color(0xFF000000),
           bg1: Color(0xFF060608),
           bg2: Color(0xFF131316),

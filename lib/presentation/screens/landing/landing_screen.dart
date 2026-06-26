@@ -7,7 +7,7 @@ import 'package:lucide_icons/lucide_icons.dart';
 
 import '../../../core/theme/app_colors.dart';
 
-/// Onboarding / welcome screen — AMOLED-style layout regardless of system theme.
+/// Onboarding / welcome screen — follows the selected app theme.
 class LandingScreen extends StatefulWidget {
   const LandingScreen({super.key});
 
@@ -89,12 +89,12 @@ class _LandingScreenState extends State<LandingScreen>
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).extension<AppColors>()!;
-    final textOnBlack = colors.isDark ? colors.text : AppColors.dark.text;
-    final taglineColor = colors.isDark ? colors.text2 : AppColors.dark.text2;
+    final textOnBlack = colors.text;
+    final taglineColor = colors.text2;
     final bottomInset = MediaQuery.paddingOf(context).bottom;
 
     return Scaffold(
-      backgroundColor: const Color(0xFF000000),
+      backgroundColor: colors.bg,
       body: Stack(
         fit: StackFit.expand,
         children: [
