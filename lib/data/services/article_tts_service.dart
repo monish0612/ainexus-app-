@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 
+import '../../core/services/telegram_logger.dart';
 import '../../domain/entities/news_entities.dart';
 import 'native_tts_engine.dart';
 
@@ -36,13 +37,30 @@ class ArticleTtsService {
   int _lastGlobalEnd = 0;
   bool _stopped = false;
   bool _disposed = false;
+  bool _ttsAvailable = true;
+
+  /// Whether the underlying TTS engine initialised successfully. False on
+  /// devices with no TTS engine installed; callers can hide the player or
+  /// surface a message instead of attempting playback.
+  bool get isAvailable => _ttsAvailable;
 
   Future<void> _init() async {
-    await _engine.init();
-    await _engine.setLanguage('en-US');
-    await _engine.setSpeechRate(0.45);
-    await _engine.setVolume(1.0);
-    await _engine.setPitch(1.0);
+    try {
+      final ok = await _engine.init();
+      if (!ok) {
+        _ttsAvailable = false;
+        TLog.w('TTS', 'Text-to-speech engine unavailable (init returned false)');
+        return;
+      }
+      await _engine.setLanguage('en-US');
+      await _engine.setSpeechRate(0.45);
+      await _engine.setVolume(1.0);
+      await _engine.setPitch(1.0);
+    } catch (e) {
+      _ttsAvailable = false;
+      TLog.w('TTS', 'Text-to-speech engine unavailable: $e');
+      return;
+    }
 
     _engine.onStart = () {
       if (_disposed) return;
@@ -80,25 +98,42 @@ class ArticleTtsService {
   Future<void> speak(String text) async {
     if (text.isEmpty || _disposed) return;
     await _initFuture;
+    if (!_ttsAvailable) return;
     _fullText = text;
     _chunks = _splitIntoChunks(text);
     if (_chunks.isEmpty) return;
     _currentChunkIdx = 0;
     _lastGlobalEnd = 0;
     _stopped = false;
-    await _engine.speak(_chunks.first.text);
+    await _safeSpeak(_chunks.first.text);
+  }
+
+  /// Speaks [text], swallowing any engine error so it never bubbles up as an
+  /// unhandled async exception from a tap callback.
+  Future<void> _safeSpeak(String text) async {
+    try {
+      await _engine.speak(text);
+    } catch (e) {
+      TLog.w('TTS', 'speak failed: $e');
+      _resetPlayback();
+    }
   }
 
   Future<void> pause() async {
     if (stateNotifier.value != TtsState.speaking || _disposed) return;
     _stopped = true;
-    await _engine.stop();
+    try {
+      await _engine.stop();
+    } catch (e) {
+      TLog.w('TTS', 'pause/stop failed: $e');
+    }
     stateNotifier.value = TtsState.paused;
   }
 
   Future<void> resume() async {
     if (stateNotifier.value != TtsState.paused || _disposed) return;
     await _initFuture;
+    if (!_ttsAvailable) return;
     _stopped = false;
 
     if (_lastGlobalEnd > 0 && _lastGlobalEnd < _fullText.length) {
@@ -110,7 +145,7 @@ class ArticleTtsService {
           return;
         }
         _currentChunkIdx = 0;
-        await _engine.speak(_chunks.first.text);
+        await _safeSpeak(_chunks.first.text);
         return;
       }
     }
@@ -122,13 +157,17 @@ class ArticleTtsService {
     }
     _currentChunkIdx = 0;
     _lastGlobalEnd = 0;
-    await _engine.speak(_chunks.first.text);
+    await _safeSpeak(_chunks.first.text);
   }
 
   Future<void> stop() async {
     if (_disposed) return;
     _stopped = true;
-    await _engine.stop();
+    try {
+      await _engine.stop();
+    } catch (e) {
+      TLog.w('TTS', 'stop failed: $e');
+    }
     _resetPlayback();
   }
 
@@ -143,7 +182,7 @@ class ArticleTtsService {
   void _advanceToNextChunk() {
     _currentChunkIdx++;
     if (_currentChunkIdx < _chunks.length) {
-      _engine.speak(_chunks[_currentChunkIdx].text);
+      _safeSpeak(_chunks[_currentChunkIdx].text);
     } else {
       _resetPlayback();
     }
@@ -238,17 +277,21 @@ class ArticleTtsService {
   }
 
   static String _stripMarkdown(String md) {
+    // NOTE: String.replaceAll does NOT interpret `$1` backreferences — only
+    // replaceAllMapped does. Capture-group replacements MUST use
+    // replaceAllMapped, otherwise the literal text "$1" leaks into narration.
+    String g1(Match m) => m.group(1) ?? '';
     return md
         .replaceAll(RegExp(r'!\[([^\]]*)\]\([^\)]+\)'), '')
-        .replaceAll(RegExp(r'\[([^\]]+)\]\([^\)]+\)'), r'$1')
+        .replaceAllMapped(RegExp(r'\[([^\]]+)\]\([^\)]+\)'), g1)
         .replaceAll(RegExp(r'#{1,6}\s*'), '')
-        .replaceAll(RegExp(r'\*{3}([^*]+)\*{3}'), r'$1')
-        .replaceAll(RegExp(r'\*{2}([^*]+)\*{2}'), r'$1')
-        .replaceAll(RegExp(r'\*([^*]+)\*'), r'$1')
-        .replaceAll(RegExp(r'_{2}([^_]+)_{2}'), r'$1')
-        .replaceAll(RegExp(r'_([^_]+)_'), r'$1')
+        .replaceAllMapped(RegExp(r'\*{3}([^*]+)\*{3}'), g1)
+        .replaceAllMapped(RegExp(r'\*{2}([^*]+)\*{2}'), g1)
+        .replaceAllMapped(RegExp(r'\*([^*]+)\*'), g1)
+        .replaceAllMapped(RegExp(r'_{2}([^_]+)_{2}'), g1)
+        .replaceAllMapped(RegExp(r'_([^_]+)_'), g1)
         .replaceAll(RegExp(r'```[^`]*```', dotAll: true), '')
-        .replaceAll(RegExp(r'`([^`]+)`'), r'$1')
+        .replaceAllMapped(RegExp(r'`([^`]+)`'), g1)
         .replaceAll(RegExp(r'^\s*[-*+]\s', multiLine: true), '')
         .replaceAll(RegExp(r'^\s*\d+\.\s', multiLine: true), '')
         .replaceAll(RegExp(r'^\s*>\s?', multiLine: true), '')

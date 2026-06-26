@@ -1,5 +1,15 @@
 import 'package:intl/intl.dart';
 
+/// Parses an ISO-8601 date/time string without ever throwing.
+///
+/// Returns the Unix epoch as a stable, sortable fallback when [raw] is null,
+/// empty, or malformed (which can happen for corrupted/partial server-synced
+/// rows). This lets downstream date math, sorting, and charts degrade
+/// gracefully instead of throwing a [FormatException] mid-build and taking
+/// down the entire screen.
+DateTime safeParseDate(String raw) =>
+    DateTime.tryParse(raw) ?? DateTime.fromMillisecondsSinceEpoch(0);
+
 NumberFormat? _inrFormat;
 NumberFormat? _inrFormatDecimal;
 
@@ -31,13 +41,17 @@ String formatCurrency(num amount, {bool showDecimal = false}) {
 }
 
 String formatDate(String dateStr) {
-  final date = DateTime.parse(dateStr);
+  final date = DateTime.tryParse(dateStr);
+  if (date == null) return dateStr;
   final now = DateTime.now();
   final diff = now.difference(date).inDays;
 
   if (diff == 0) return 'Today';
   if (diff == 1) return 'Yesterday';
-  if (diff < 7) return '$diff days ago';
+  // Only relative-label genuine recent-past dates. Future dates (diff < 0,
+  // e.g. projections) and anything >= 7 days fall through to an absolute date
+  // so we never render "-5 days ago".
+  if (diff > 1 && diff < 7) return '$diff days ago';
 
   try {
     final sameYear = date.year == now.year;
@@ -48,7 +62,8 @@ String formatDate(String dateStr) {
 }
 
 String formatTime(String dateStr) {
-  final date = DateTime.parse(dateStr);
+  final date = DateTime.tryParse(dateStr);
+  if (date == null) return '';
   try {
     return DateFormat('hh:mm a', 'en_IN').format(date);
   } catch (_) {

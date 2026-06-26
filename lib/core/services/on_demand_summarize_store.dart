@@ -144,6 +144,36 @@ class OnDemandSummarizeStore with WidgetsBindingObserver {
     if (set.isEmpty) _listeners.remove(articleId);
   }
 
+  /// Upper bound on retained per-article states. A successful summary is also
+  /// persisted to the DB (summaryShort), so evicting an old in-memory entry
+  /// just means a re-open repopulates 'ready' from the cache for free. This
+  /// keeps the maps from growing for the app's whole lifetime across many
+  /// summarized articles.
+  static const int _kMaxRetainedStates = 64;
+
+  /// Evicts the oldest terminal (non-loading, unobserved) states once the map
+  /// grows past [_kMaxRetainedStates]. Loading entries and any article a UI is
+  /// currently observing are never evicted.
+  void _enforceStateCap() {
+    if (_state.length <= _kMaxRetainedStates) return;
+    final evictable = _state.entries
+        .where((e) =>
+            e.value.status != OnDemandStatus.loading &&
+            !_listeners.containsKey(e.key))
+        .map((e) => e.key)
+        .toList();
+    var over = _state.length - _kMaxRetainedStates;
+    // _state is a LinkedHashMap → iteration is insertion order, so this evicts
+    // the oldest first.
+    for (final id in evictable) {
+      if (over <= 0) break;
+      _state.remove(id);
+      _pending.remove(id);
+      _titles.remove(id);
+      over--;
+    }
+  }
+
   void _emit(String articleId) {
     final set = _listeners[articleId];
     if (set == null) return;
@@ -179,6 +209,7 @@ class OnDemandSummarizeStore with WidgetsBindingObserver {
     _state[id] = const OnDemandSummaryState.loading();
     _titles[id] = article.title;
     _pending[id] = _PendingSummary(article: article, liteModel: liteModel);
+    _enforceStateCap();
     _emit(id);
 
     unawaited(_acquireSlot());

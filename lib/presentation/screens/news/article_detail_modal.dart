@@ -116,6 +116,11 @@ class _ArticleDetailModalState extends ConsumerState<ArticleDetailModal> {
   late bool _read;
   final ScrollController _scroll = ScrollController();
   bool _scrolled = false;
+
+  /// 0..1 read-through fraction, driven by the scroll offset. Powers the
+  /// thin progress line in the sticky header for a modern "reading progress"
+  /// affordance.
+  double _progress = 0;
   late final ArticleTtsService _tts;
 
   /// On-demand AI summary state. [_summaryText] is seeded from the article's
@@ -262,7 +267,15 @@ class _ArticleDetailModalState extends ConsumerState<ArticleDetailModal> {
 
   void _onScroll() {
     final next = _scroll.offset > 140;
-    if (next != _scrolled) setState(() => _scrolled = next);
+    final max = _scroll.hasClients ? _scroll.position.maxScrollExtent : 0.0;
+    final progress =
+        max > 0 ? (_scroll.offset / max).clamp(0.0, 1.0) : 0.0;
+    if (next != _scrolled || (progress - _progress).abs() > 0.004) {
+      setState(() {
+        _scrolled = next;
+        _progress = progress;
+      });
+    }
   }
 
   Future<void> _share() async {
@@ -376,20 +389,13 @@ class _ArticleDetailModalState extends ConsumerState<ArticleDetailModal> {
                         color: colors.text,
                       ),
                     ),
-                    if (widget.article.excerpt.isNotEmpty &&
-                        widget.article.excerpt != 'New article available.') ...[
-                      const SizedBox(height: 18),
-                      Text(
-                        widget.article.excerpt,
-                        style: GoogleFonts.plusJakartaSans(
-                          fontSize: 15,
-                          fontStyle: FontStyle.italic,
-                          height: 1.72,
-                          color: colors.text3,
-                        ),
-                      ),
-                    ],
-                    const SizedBox(height: 24),
+                    // The standalone RSS excerpt used to live here. It is
+                    // intentionally omitted: every article now ships its full
+                    // body (or AI summary) directly below, which always opens
+                    // with the same sentences — so the excerpt was pure
+                    // duplication. Dropping it gives the reader a cleaner,
+                    // distraction-free lead straight into the content.
+                    const SizedBox(height: 22),
                     Divider(height: 1, color: colors.border),
                     const SizedBox(height: 20),
                     _TtsPlayerBar(
@@ -516,27 +522,52 @@ class _ArticleDetailModalState extends ConsumerState<ArticleDetailModal> {
               top: 0,
               left: 0,
               right: 0,
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                padding: EdgeInsets.fromLTRB(
-                    16, MediaQuery.paddingOf(context).top + 10, 16, 10),
-                decoration: BoxDecoration(
-                  color: colors.headerBg.withValues(alpha: 0.94),
-                  border: Border(
-                    bottom: BorderSide(color: colors.border),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    padding: EdgeInsets.fromLTRB(
+                        16, MediaQuery.paddingOf(context).top + 10, 16, 10),
+                    decoration: BoxDecoration(
+                      color: colors.headerBg.withValues(alpha: 0.94),
+                    ),
+                    child: Text(
+                      widget.article.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.center,
+                      style: GoogleFonts.plusJakartaSans(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: colors.text,
+                      ),
+                    ),
                   ),
-                ),
-                child: Text(
-                  widget.article.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  textAlign: TextAlign.center,
-                  style: GoogleFonts.plusJakartaSans(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
-                    color: colors.text,
+                  // Reading-progress line: a faint full-width track with a
+                  // category-coloured fill that tracks how far the reader has
+                  // scrolled through the piece. Doubles as the header's
+                  // bottom divider.
+                  Container(
+                    key: const ValueKey('reading_progress_bar'),
+                    height: 2.5,
+                    color: colors.border,
+                    child: FractionallySizedBox(
+                      alignment: Alignment.centerLeft,
+                      widthFactor: _progress.clamp(0.0, 1.0),
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: cat,
+                          boxShadow: [
+                            BoxShadow(
+                              color: cat.withValues(alpha: 0.5),
+                              blurRadius: 6,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
                   ),
-                ),
+                ],
               ),
             ),
           Positioned(
@@ -2450,7 +2481,7 @@ class _TtsPlayerBar extends StatelessWidget {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      'On-device AI narration',
+                      'On-device voice narration',
                       style: GoogleFonts.plusJakartaSans(
                         fontSize: 11,
                         color: colors.text4,

@@ -1123,7 +1123,9 @@ class _CloudScreenState extends ConsumerState<CloudScreen>
   }
 
   Future<void> _toggleStar(String id) async {
-    final file = _files.firstWhere((f) => f.id == id);
+    final idx = _files.indexWhere((f) => f.id == id);
+    if (idx < 0) return;
+    final file = _files[idx];
     final newStarred = !file.starred;
     setState(() {
       _files = _files
@@ -1145,7 +1147,9 @@ class _CloudScreenState extends ConsumerState<CloudScreen>
   }
 
   Future<void> _deleteFile(String id) async {
-    final file = _files.firstWhere((f) => f.id == id, orElse: () => _files.first);
+    final idx = _files.indexWhere((f) => f.id == id);
+    if (idx < 0) return;
+    final file = _files[idx];
     setState(() {
       _files = _files.where((f) => f.id != id).toList();
       _addHistory(HistoryActionKind.delete, 'Removed from cloud', file.name);

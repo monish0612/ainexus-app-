@@ -140,6 +140,16 @@ class GoogleDriveService {
     }
   }
 
+  /// Authorization header value, guarding against a null/empty token so we
+  /// never send a literal `Bearer null` (which fails with a confusing 401).
+  String get _bearer {
+    final token = _accessToken;
+    if (token == null || token.isEmpty) {
+      throw StateError('Google Drive access token unavailable');
+    }
+    return 'Bearer $token';
+  }
+
   Future<void> _refreshTokenIfNeeded() async {
     if (_tokenExpiry == null) return;
     if (DateTime.now()
@@ -280,7 +290,7 @@ class GoogleDriveService {
       cancelToken: cancelToken,
       options: Options(
         headers: {
-          'Authorization': 'Bearer $_accessToken',
+          'Authorization': _bearer,
           'Content-Type': 'application/json; charset=UTF-8',
           'X-Upload-Content-Type': mimeType,
           'X-Upload-Content-Length': '$fileSize',
@@ -689,7 +699,7 @@ class GoogleDriveService {
           'https://www.googleapis.com/drive/v3/files/$fileId?alt=media',
           savePath,
           options: Options(
-            headers: {'Authorization': 'Bearer $_accessToken'},
+            headers: {'Authorization': _bearer},
           ),
           onReceiveProgress: onProgress,
           cancelToken: cancelToken,

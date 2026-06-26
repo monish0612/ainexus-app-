@@ -276,6 +276,11 @@ void main() {
       // attempt its own decode (or surface a friendly error).
       expect(out.upload, isNotNull);
       expect(out.thumbnail, isNotNull);
+      // The 0×0 dimensions are the signal _pick uses to know the bytes were
+      // NOT re-encoded to JPEG, so it labels the upload with the real sniffed
+      // media type instead of a misleading 'image/jpeg'. Lock that contract.
+      expect(out.width, equals(0));
+      expect(out.height, equals(0));
     });
 
     test(

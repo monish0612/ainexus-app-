@@ -1507,7 +1507,7 @@ Color _dominantCategoryColor(String monthKey, List<Expense> expenses) {
   final end = DateTime(y, mo + 1, 0, 23, 59, 59, 999);
   final byCat = <String, double>{};
   for (final e in expenses) {
-    final d = DateTime.parse(e.date);
+    final d = safeParseDate(e.date);
     if (!d.isBefore(start) && !d.isAfter(end)) {
       byCat[e.category] = (byCat[e.category] ?? 0) + e.amount;
     }
@@ -1529,10 +1529,10 @@ _BudgetHistoryData _computeBudgetHistoryData({
 
   final monthSet = <String>{};
   for (final e in expenses) {
-    monthSet.add(_monthKey(DateTime.parse(e.date)));
+    monthSet.add(_monthKey(safeParseDate(e.date)));
   }
   for (final h in budgetHistory) {
-    monthSet.add(_monthKey(DateTime.parse(h.setAt)));
+    monthSet.add(_monthKey(safeParseDate(h.setAt)));
   }
   if (currentBudget > 0 || budgetHistory.isNotEmpty) {
     monthSet.add(currentMonthKey);
@@ -1541,7 +1541,7 @@ _BudgetHistoryData _computeBudgetHistoryData({
 
   final sorted = List<BudgetHistoryEntry>.from(budgetHistory)
     ..sort(
-      (a, b) => DateTime.parse(b.setAt).compareTo(DateTime.parse(a.setAt)),
+      (a, b) => safeParseDate(b.setAt).compareTo(safeParseDate(a.setAt)),
     );
 
   double getBudget(String monthKey) {
@@ -1551,7 +1551,7 @@ _BudgetHistoryData _computeBudgetHistoryData({
     final endOfMonth = DateTime(y, m + 1, 0, 23, 59, 59);
     BudgetHistoryEntry? entry;
     for (final h in sorted) {
-      if (!DateTime.parse(h.setAt).isAfter(endOfMonth)) {
+      if (!safeParseDate(h.setAt).isAfter(endOfMonth)) {
         entry = h;
         break;
       }
@@ -1567,7 +1567,7 @@ _BudgetHistoryData _computeBudgetHistoryData({
     final end = DateTime(y, m + 1, 0, 23, 59, 59, 999);
     return expenses
         .where((e) {
-          final d = DateTime.parse(e.date);
+          final d = safeParseDate(e.date);
           return !d.isBefore(start) && !d.isAfter(end);
         })
         .fold<double>(0, (s, e) => s + e.amount);
@@ -1615,7 +1615,7 @@ _BudgetHistoryData _computeBudgetHistoryData({
         ? (((entry.amount - prev.amount) / prev.amount) * 100).round()
         : null;
     final displayDate = DateFormat('d MMM yy', 'en_IN').format(
-      DateTime.parse(entry.setAt),
+      safeParseDate(entry.setAt),
     );
     changes.add(
       _ChangeRow(
@@ -1638,7 +1638,7 @@ _BudgetHistoryData _computeBudgetHistoryData({
     final entry = trendReversed[i];
     trendSpots.add(FlSpot(i.toDouble(), entry.amount));
     trendLabels.add(
-      DateFormat.MMMd('en').format(DateTime.parse(entry.setAt)),
+      DateFormat.MMMd('en').format(safeParseDate(entry.setAt)),
     );
   }
 

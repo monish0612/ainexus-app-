@@ -131,8 +131,22 @@ class _RetryInterceptor extends Interceptor {
   static const _maxRetries = 3;
   static final _random = Random();
 
+  /// Marks a request that is itself a retry attempt, so its failure is NOT
+  /// handled by a *fresh* retry loop (which would re-enter this interceptor
+  /// via `_dio.request` and amplify a single user request into an exponential
+  /// storm of backend calls on a persistent outage). The retried request's
+  /// error is instead passed straight back to the awaiting outer loop.
+  static const _retryFlag = '_retryInFlight';
+
   @override
   void onError(DioException err, ErrorInterceptorHandler handler) async {
+    // Re-entrancy guard: errors from a retry attempt bubble up to the
+    // original request's loop instead of starting a new (nested) one.
+    if (err.requestOptions.extra[_retryFlag] == true) {
+      handler.next(err);
+      return;
+    }
+
     if (err.requestOptions.cancelToken?.isCancelled == true) {
       handler.next(err);
       return;
@@ -165,6 +179,7 @@ class _RetryInterceptor extends Interceptor {
           contentType: err.requestOptions.contentType,
           receiveTimeout: err.requestOptions.receiveTimeout,
           sendTimeout: err.requestOptions.sendTimeout,
+          extra: {...err.requestOptions.extra, _retryFlag: true},
         );
         final response = await _dio.request(
           err.requestOptions.path,

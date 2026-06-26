@@ -156,9 +156,17 @@ class ImagePipeline {
 
       final compressed = await _compressAndThumbnail(rawBytes);
 
+      // When the pure-Dart codec can't decode the source, the pipeline ships
+      // the ORIGINAL bytes unmodified (signalled by width/height == 0). Those
+      // bytes are not re-encoded JPEG, so label the upload with the real
+      // sniffed media type instead of a misleading 'image/jpeg' — otherwise a
+      // HEIC/RAW upload gets mistyped and the backend may reject it.
+      final reencoded = compressed.width > 0 && compressed.height > 0;
+      final uploadType = reencoded ? 'image/jpeg' : sourceMediaType;
+
       return PickedImage(
         uploadBytes: compressed.uploadBytes,
-        uploadMediaType: 'image/jpeg',
+        uploadMediaType: uploadType,
         thumbnailBytes: compressed.thumbnailBytes,
         thumbnailMediaType: 'image/jpeg',
         sourcePath: picked.path,

@@ -745,7 +745,14 @@ class NotificationService {
 
     final androidPlugin = _fln.resolvePlatformSpecificImplementation<
         AndroidFlutterLocalNotificationsPlugin>();
-    await androidPlugin?.requestNotificationsPermission();
+    final granted = await androidPlugin?.requestNotificationsPermission();
+    if (granted == false) {
+      // Android 13+ user declined POST_NOTIFICATIONS. Scheduled work still
+      // runs; notifications just won't surface. Log it so it's diagnosable
+      // rather than a silent no-op.
+      TLog.w('Notif',
+          'POST_NOTIFICATIONS permission denied — alerts will be suppressed');
+    }
 
     await Workmanager().initialize(
       notificationCallbackDispatcher,

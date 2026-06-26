@@ -132,7 +132,7 @@ List<Expense> _filter(
   DateTime end,
 ) {
   return expenses
-      .where((e) => _inclusiveInRange(DateTime.parse(e.date), start, end))
+      .where((e) => _inclusiveInRange(safeParseDate(e.date), start, end))
       .toList();
 }
 
@@ -761,7 +761,7 @@ class _ExpenseTrendModalState extends State<ExpenseTrendModal> {
 
   String _avgPerDay(List<Expense> curr, double total) {
     if (curr.isEmpty) return '—';
-    final days = curr.map((e) => _day(DateTime.parse(e.date))).toSet().length;
+    final days = curr.map((e) => _day(safeParseDate(e.date))).toSet().length;
     if (days == 0) return '—';
     return formatCurrency(total / days);
   }
@@ -789,7 +789,7 @@ _ChartSeries _buildChartSeries(
       const names = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
       final m = <int, double>{for (var i = 0; i < 7; i++) i: 0};
       for (final e in curr) {
-        final wd = DateTime.parse(e.date).weekday; // 1..7 Mon..Sun
+        final wd = safeParseDate(e.date).weekday; // 1..7 Mon..Sun
         final idx = wd == DateTime.sunday ? 0 : wd;
         m[idx] = (m[idx] ?? 0) + e.amount;
       }
@@ -808,7 +808,7 @@ _ChartSeries _buildChartSeries(
       final last = DateTime(now.year, now.month + 1, 0).day;
       final m = <int, double>{for (var d = 1; d <= last; d++) d: 0};
       for (final e in curr) {
-        final dt = DateTime.parse(e.date);
+        final dt = safeParseDate(e.date);
         m[dt.day] = (m[dt.day] ?? 0) + e.amount;
       }
       final labels = List.generate(last, (i) => '${i + 1}');
@@ -827,7 +827,7 @@ _ChartSeries _buildChartSeries(
     case ExpenseTrendPeriod.allTime:
       final monthBuckets = <String, double>{};
       for (final e in curr) {
-        final dt = DateTime.parse(e.date);
+        final dt = safeParseDate(e.date);
         final key =
             '${dt.year}-${dt.month.toString().padLeft(2, '0')}';
         monthBuckets[key] = (monthBuckets[key] ?? 0) + e.amount;
@@ -945,7 +945,7 @@ List<_DayAmt> _dayPattern(List<Expense> curr) {
   ];
   final m = List<double>.filled(7, 0);
   for (final e in curr) {
-    final d = DateTime.parse(e.date).weekday;
+    final d = safeParseDate(e.date).weekday;
     final i = d == DateTime.sunday ? 0 : d;
     m[i] += e.amount;
   }

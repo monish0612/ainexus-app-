@@ -76,7 +76,7 @@ class _TrackerTabState extends State<TrackerTab> {
     super.dispose();
   }
 
-  DateTime _parseDate(String raw) => DateTime.parse(raw);
+  DateTime _parseDate(String raw) => safeParseDate(raw);
 
   List<ExpenseData> _expensesInCurrentMonth(DateTime now) {
     final start = DateTime(now.year, now.month, 1);
@@ -1638,7 +1638,7 @@ class _RecentTransactionsSection extends StatelessWidget {
           )
         else
           ...recentExpenses.map((e) {
-            final dt = DateTime.parse(e.date);
+            final dt = safeParseDate(e.date);
             final relTime = formatRelativeTime(dt);
             return Padding(
               padding: const EdgeInsets.only(bottom: 8),

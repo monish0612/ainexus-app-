@@ -223,13 +223,13 @@ class _InsightsTabState extends State<InsightsTab> {
       final ntStart = DateTime(n.year, n.month + 1, 1);
       final ntEnd = DateTime(n.year, n.month + 2, 0, 23, 59, 59, 999);
       return widget.expenses.where((e) {
-        final d = DateTime.parse(e.date).toLocal();
+        final d = safeParseDate(e.date).toLocal();
         return !d.isBefore(ntStart) && !d.isAfter(ntEnd);
       }).toList();
     }
     final cut = _cutoff(_period);
     return widget.expenses
-        .where((e) => !DateTime.parse(e.date).toLocal().isBefore(cut))
+        .where((e) => !safeParseDate(e.date).toLocal().isBefore(cut))
         .toList();
   }
 
@@ -245,7 +245,7 @@ class _InsightsTabState extends State<InsightsTab> {
       final daysInMonth = DateTime(n.year, n.month + 2, 0).day;
       final grouped = <String, double>{};
       for (final e in expenses) {
-        final k = _dayKeyLocal(DateTime.parse(e.date));
+        final k = _dayKeyLocal(safeParseDate(e.date));
         grouped[k] = (grouped[k] ?? 0) + e.amount.toDouble();
       }
       return List<_TrendPoint>.generate(daysInMonth, (i) {
@@ -264,8 +264,8 @@ class _InsightsTabState extends State<InsightsTab> {
       }
       final keys = mm.keys.toList()..sort();
       if (keys.isEmpty) return const [];
-      final start = DateTime.parse('${keys.first}-01');
-      final lastKey = DateTime.parse('${keys.last}-01');
+      final start = safeParseDate('${keys.first}-01');
+      final lastKey = safeParseDate('${keys.last}-01');
       final now = DateTime.now();
       final endDate = lastKey.isAfter(now) ? lastKey : now;
       final out = <_TrendPoint>[];
@@ -283,7 +283,7 @@ class _InsightsTabState extends State<InsightsTab> {
 
     final grouped = <String, double>{};
     for (final e in expenses) {
-      final k = _dayKeyLocal(DateTime.parse(e.date));
+      final k = _dayKeyLocal(safeParseDate(e.date));
       grouped[k] = (grouped[k] ?? 0) + e.amount.toDouble();
     }
 
@@ -312,9 +312,9 @@ class _InsightsTabState extends State<InsightsTab> {
       return _startOfDayLocal(_cutoff(period));
     }
 
-    var oldest = DateTime.parse(expenses.first.date).toLocal();
+    var oldest = safeParseDate(expenses.first.date).toLocal();
     for (final e in expenses.skip(1)) {
-      final current = DateTime.parse(e.date).toLocal();
+      final current = safeParseDate(e.date).toLocal();
       if (current.isBefore(oldest)) oldest = current;
     }
     return _startOfDayLocal(oldest);
@@ -329,7 +329,7 @@ class _InsightsTabState extends State<InsightsTab> {
     final activeDateSets = List.generate(7, (_) => <String>{});
 
     for (final e in expenses) {
-      final dt = DateTime.parse(e.date).toLocal();
+      final dt = safeParseDate(e.date).toLocal();
       final idx = (dt.weekday + 6) % 7;
       totals[idx] += e.amount.toDouble();
       txnCounts[idx]++;
@@ -468,7 +468,7 @@ class _InsightsTabState extends State<InsightsTab> {
     if (_period == _Period.all && periodExp.isNotEmpty) {
       var oldest = DateTime.now().millisecondsSinceEpoch;
       for (final e in periodExp) {
-        final t = DateTime.parse(e.date).toLocal().millisecondsSinceEpoch;
+        final t = safeParseDate(e.date).toLocal().millisecondsSinceEpoch;
         if (t < oldest) oldest = t;
       }
       days = math.max(
@@ -544,7 +544,7 @@ class _InsightsTabState extends State<InsightsTab> {
     // All transactions sorted by date (newest first)
     final allSorted = List<ExpenseData>.from(periodExp)
       ..sort(
-        (a, b) => DateTime.parse(b.date).compareTo(DateTime.parse(a.date)),
+        (a, b) => safeParseDate(b.date).compareTo(safeParseDate(a.date)),
       );
     final shownTxns = allSorted.take(_visibleTxns).toList();
     final hasMoreTxns = allSorted.length > _visibleTxns;
@@ -565,7 +565,7 @@ class _InsightsTabState extends State<InsightsTab> {
               .toList()
             ..sort(
               (a, b) =>
-                  DateTime.parse(b.date).compareTo(DateTime.parse(a.date)),
+                  safeParseDate(b.date).compareTo(safeParseDate(a.date)),
             ))
         : <ExpenseData>[];
     final searchTotal =
@@ -2052,7 +2052,7 @@ class _KpiDetailSheet extends StatelessWidget {
                       AppColors.accent;
                   final emoji =
                       AppColors.categoryIcons[e.category] ?? '📦';
-                  final d = DateTime.parse(e.date).toLocal();
+                  final d = safeParseDate(e.date).toLocal();
                   final dateStr =
                       DateFormat('d MMM · hh:mm a', 'en_IN').format(d);
 
@@ -3459,7 +3459,7 @@ class _TopExpenseItem extends StatelessWidget {
     final catColor =
         AppColors.categoryColors[expense.category] ?? AppColors.accent;
     final emoji = AppColors.categoryIcons[expense.category] ?? '📦';
-    final d = DateTime.parse(expense.date).toLocal();
+    final d = safeParseDate(expense.date).toLocal();
     final dateStr = DateFormat('d MMM', 'en_IN').format(d);
 
     return Column(
@@ -3593,7 +3593,7 @@ class _SearchExpenseRow extends StatelessWidget {
     final catColor =
         AppColors.categoryColors[expense.category] ?? AppColors.accent;
     final emoji = AppColors.categoryIcons[expense.category] ?? '📦';
-    final d = DateTime.parse(expense.date).toLocal();
+    final d = safeParseDate(expense.date).toLocal();
     final dateS = DateFormat('d MMM', 'en_IN').format(d);
     final timeS = DateFormat('hh:mm a', 'en_IN').format(d);
     final desc = expense.description;
