@@ -9,9 +9,11 @@ import 'package:lucide_icons/lucide_icons.dart';
 import '../../../../core/di/injection.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../data/services/ai_categorize_service.dart' show keywordRules;
+import '../../../../core/services/nuke_report.dart';
 import '../../settings/settings_controller.dart';
 import '../expense_timeframe_screen.dart';
 import '../salary_screen.dart';
+import '../widgets/nuke_easter_egg.dart';
 
 /// Opens the AI expense-search ask sheet. The user types a plain-English
 /// question; Gemini (via backend) distils it into a structured query that we
@@ -90,6 +92,15 @@ class _ExpenseAiAskSheetState extends ConsumerState<_ExpenseAiAskSheet> {
   Future<void> _submit([String? preset]) async {
     final question = (preset ?? _ctrl.text).trim();
     if (question.isEmpty || _loading) return;
+
+    // ── Easter egg: typing "nuke" triggers a full from-scratch reset ──
+    // (all expenses + budget + salary, local + cloud). Intercepted before the
+    // AI round-trip so it never leaves the device as a search query.
+    if (question.toLowerCase() == 'nuke') {
+      await _handleNuke();
+      return;
+    }
+
     HapticFeedback.selectionClick();
     if (preset != null) _ctrl.text = preset;
     setState(() => _loading = true);
@@ -142,6 +153,34 @@ class _ExpenseAiAskSheetState extends ConsumerState<_ExpenseAiAskSheet> {
 
     Navigator.of(context).pop();
     await showExpenseTimeframeScreen(context, timeframe);
+  }
+
+  /// Runs the "nuke" easter egg: confirm → wipe expenses/budget/salary
+  /// (local + cloud, with retry) → close the sheet → surface the wipeout toast
+  /// on the screen beneath. The underlying [ExpenseNukeService] handles all the
+  /// robustness (parallel clears, exponential-backoff retry, verify, automatic
+  /// replay on next launch, Telegram flow logs).
+  Future<void> _handleNuke() async {
+    _ctrl.clear();
+    _focus.unfocus();
+
+    final confirmed = await NukeEasterEgg.confirm(context, NukeScope.expense);
+    if (!mounted) return;
+    if (!confirmed) {
+      _focus.requestFocus();
+      return;
+    }
+
+    setState(() => _loading = true);
+    final report = await ref.read(expenseNukeServiceProvider).nuke();
+    if (!mounted) return;
+    setState(() => _loading = false);
+
+    // Capture the (still-mounted) navigator before popping so the result
+    // window opens on the screen we return to, not the dismissed sheet.
+    final navigator = Navigator.of(context);
+    navigator.pop();
+    await NukeEasterEgg.showReport(navigator.context, report);
   }
 
   @override

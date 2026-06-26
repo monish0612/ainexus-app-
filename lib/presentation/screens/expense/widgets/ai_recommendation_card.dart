@@ -33,18 +33,66 @@ class _AiRecommendationCardState extends State<AiRecommendationCard>
     with SingleTickerProviderStateMixin {
   late final AnimationController _shimmer;
 
+  final ScrollController _scroll = ScrollController();
+
+  // Whether the bounded text region has more content to reveal in each
+  // direction — drives the edge fade so the scroll affordance only shows when
+  // it's actually meaningful.
+  bool _canScrollUp = false;
+  bool _canScrollDown = false;
+
+  /// True while the skeleton should pulse — drives whether the shimmer
+  /// controller runs. Stopping it once content is shown avoids burning a frame
+  /// every tick on an invisible animation (and lets host screens settle).
+  bool get _isLoading =>
+      widget.loading ||
+      widget.recommendation == null ||
+      !widget.recommendation!.hasContent;
+
   @override
   void initState() {
     super.initState();
     _shimmer = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1200),
-    )..repeat();
+    );
+    if (_isLoading) _shimmer.repeat();
+    _scroll.addListener(_onScroll);
+  }
+
+  @override
+  void didUpdateWidget(covariant AiRecommendationCard old) {
+    super.didUpdateWidget(old);
+    // Run the shimmer only while loading; stop it the moment content arrives.
+    if (_isLoading && !_shimmer.isAnimating) {
+      _shimmer.repeat();
+    } else if (!_isLoading && _shimmer.isAnimating) {
+      _shimmer.stop();
+    }
+    // Content can change (template -> composed); recompute overflow next frame.
+    if (old.recommendation != widget.recommendation) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _onScroll());
+    }
+  }
+
+  void _onScroll() {
+    if (!mounted || !_scroll.hasClients) return;
+    final pos = _scroll.position;
+    final up = pos.pixels > pos.minScrollExtent + 0.5;
+    final down = pos.pixels < pos.maxScrollExtent - 0.5;
+    if (up != _canScrollUp || down != _canScrollDown) {
+      setState(() {
+        _canScrollUp = up;
+        _canScrollDown = down;
+      });
+    }
   }
 
   @override
   void dispose() {
     _shimmer.dispose();
+    _scroll.removeListener(_onScroll);
+    _scroll.dispose();
     super.dispose();
   }
 
@@ -74,8 +122,8 @@ class _AiRecommendationCardState extends State<AiRecommendationCard>
   Widget build(BuildContext context) {
     final colors = widget.colors;
     final rec = widget.recommendation;
-    final showLoading = widget.loading || rec == null || !rec.hasContent;
-    final accent = showLoading ? AppColors.accent : _toneColor(rec.tone);
+    final showLoading = _isLoading;
+    final accent = showLoading ? AppColors.accent : _toneColor(rec!.tone);
 
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
@@ -94,11 +142,85 @@ class _AiRecommendationCardState extends State<AiRecommendationCard>
       ),
       child: showLoading
           ? _buildLoading(colors, accent)
-          : _buildContent(colors, accent, rec),
+          : _buildContent(context, colors, accent, rec!),
     );
   }
 
   Widget _buildContent(
+    BuildContext context,
+    AppColors colors,
+    Color accent,
+    GroundedRecommendation rec,
+  ) {
+    // Cap the scrollable text region to a fraction of the screen so the card
+    // never dominates the page — the summary + table stay visible. Long tips
+    // scroll inside this bounded area; the chips below stay pinned + tappable.
+    final scrollMax =
+        (MediaQuery.sizeOf(context).height * 0.24).clamp(132.0, 240.0);
+
+    // After the bounded region is laid out, learn whether it overflows so the
+    // edge fade reflects reality on first paint (not just after a manual drag).
+    WidgetsBinding.instance.addPostFrameCallback((_) => _onScroll());
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: scrollMax),
+          child: Scrollbar(
+            controller: _scroll,
+            radius: const Radius.circular(8),
+            child: ShaderMask(
+              // Fade the top/bottom edges only when there's hidden content
+              // there — a subtle, robust "there's more, scroll me" hint that
+              // works over the card's gradient regardless of theme.
+              shaderCallback: (rect) => LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  _canScrollUp ? Colors.transparent : Colors.white,
+                  Colors.white,
+                  Colors.white,
+                  _canScrollDown ? Colors.transparent : Colors.white,
+                ],
+                stops: const [0.0, 0.07, 0.88, 1.0],
+              ).createShader(rect),
+              blendMode: BlendMode.dstIn,
+              child: SingleChildScrollView(
+                controller: _scroll,
+                padding: const EdgeInsets.only(right: 8),
+                child: _headerAndTip(colors, accent, rec),
+              ),
+            ),
+          ),
+        ),
+        if (rec.chips.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          LayoutBuilder(
+            builder: (context, c) => Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final chip in rec.chips)
+                  _Chip(
+                    colors: colors,
+                    accent: accent,
+                    label: chip,
+                    maxWidth: c.maxWidth,
+                    onTap: widget.onChip == null
+                        ? null
+                        : () => widget.onChip!(chip),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _headerAndTip(
     AppColors colors,
     Color accent,
     GroundedRecommendation rec,
@@ -162,24 +284,6 @@ class _AiRecommendationCardState extends State<AiRecommendationCard>
             ),
           ),
         ],
-        if (rec.chips.isNotEmpty) ...[
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              for (final chip in rec.chips)
-                _Chip(
-                  colors: colors,
-                  accent: accent,
-                  label: chip,
-                  onTap: widget.onChip == null
-                      ? null
-                      : () => widget.onChip!(chip),
-                ),
-            ],
-          ),
-        ],
       ],
     );
   }
@@ -213,12 +317,14 @@ class _Chip extends StatelessWidget {
     required this.colors,
     required this.accent,
     required this.label,
+    required this.maxWidth,
     this.onTap,
   });
 
   final AppColors colors;
   final Color accent;
   final String label;
+  final double maxWidth;
   final VoidCallback? onTap;
 
   @override
@@ -228,27 +334,36 @@ class _Chip extends StatelessWidget {
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(20),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-          decoration: BoxDecoration(
-            color: accent.withValues(alpha: 0.10),
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: accent.withValues(alpha: 0.28)),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(LucideIcons.arrowUpRight, size: 12, color: accent),
-              const SizedBox(width: 5),
-              Text(
-                label,
-                style: GoogleFonts.plusJakartaSans(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: colors.text,
+        child: ConstrainedBox(
+          // A single long chip must never exceed the row width (it lives in a
+          // Wrap, which won't shrink it) — cap + ellipsize instead of overflow.
+          constraints: BoxConstraints(maxWidth: maxWidth),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+            decoration: BoxDecoration(
+              color: accent.withValues(alpha: 0.10),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: accent.withValues(alpha: 0.28)),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(LucideIcons.arrowUpRight, size: 12, color: accent),
+                const SizedBox(width: 5),
+                Flexible(
+                  child: Text(
+                    label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.plusJakartaSans(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: colors.text,
+                    ),
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),

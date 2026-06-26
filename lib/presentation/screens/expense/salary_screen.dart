@@ -1,13 +1,17 @@
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+import '../../../core/di/injection.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/utils/currency_formatter.dart';
 import '../../../domain/entities/salary_entities.dart';
 import '../../providers/salary_providers.dart';
+import 'modals/expense_ai_ask_sheet.dart';
 import 'modals/salary_entry_modal.dart';
+import 'widgets/ai_recommendation_card.dart';
 
 const _green = Color(0xFF51CF66);
 const _red = Color(0xFFFF6B6B);
@@ -55,6 +59,7 @@ class SalaryScreen extends ConsumerWidget {
     final colors = Theme.of(context).extension<AppColors>()!;
     final stats = ref.watch(salaryStatsProvider);
     final trend = ref.watch(salaryTrendProvider);
+    final firstName = ref.watch(userFirstNameProvider);
 
     return Scaffold(
       backgroundColor: colors.bg,
@@ -67,12 +72,24 @@ class SalaryScreen extends ConsumerWidget {
               children: [
                 if (aiAnswer != null && aiAnswer!.trim().isNotEmpty)
                   _AiBanner(text: aiAnswer!.trim(), colors: colors),
-                _SalaryHero(stats: stats, colors: colors),
+                _SalaryHero(stats: stats, colors: colors, firstName: firstName),
                 const SizedBox(height: 14),
                 if (stats.hasSalary) ...[
+                  _SalaryAiInsight(colors: colors),
+                  const SizedBox(height: 14),
                   _AllocationCard(stats: stats, colors: colors),
                   const SizedBox(height: 14),
                   _StatGrid(stats: stats, colors: colors),
+                  const SizedBox(height: 14),
+                  _ProjectionCard(stats: stats, colors: colors),
+                  const SizedBox(height: 14),
+                  if (stats.hasCreditCardActivity) ...[
+                    _CreditCardForecastCard(stats: stats, colors: colors),
+                    const SizedBox(height: 14),
+                  ],
+                ],
+                if (stats.monthsRecorded > 0) ...[
+                  _LifetimeCard(stats: stats, colors: colors),
                   const SizedBox(height: 14),
                 ],
                 if (trend.length >= 2) ...[
@@ -172,12 +189,42 @@ class _AiBanner extends StatelessWidget {
   }
 }
 
+// ── Personalized AI insight ──────────────────────────────────────────────────
+
+/// Grounded, personalized AI recommendation for the user's finances. Reuses the
+/// same anti-hallucination [AiRecommendationCard] as the expense insights: shows
+/// a shimmer while composing, then a verified greeting/headline/tip + follow-up
+/// chips. Chips reopen Ask AI primed with the follow-up question.
+class _SalaryAiInsight extends ConsumerWidget {
+  const _SalaryAiInsight({required this.colors});
+  final AppColors colors;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final async = ref.watch(salaryRecommendationProvider);
+    return AiRecommendationCard(
+      colors: colors,
+      loading: async.isLoading,
+      recommendation: async.valueOrNull,
+      onChip: (chip) {
+        HapticFeedback.selectionClick();
+        showExpenseAiAskSheet(context, initialQuestion: chip);
+      },
+    );
+  }
+}
+
 // ── Hero ─────────────────────────────────────────────────────────────────
 
 class _SalaryHero extends ConsumerWidget {
-  const _SalaryHero({required this.stats, required this.colors});
+  const _SalaryHero({
+    required this.stats,
+    required this.colors,
+    required this.firstName,
+  });
   final SalaryStats stats;
   final AppColors colors;
+  final String firstName;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -233,7 +280,9 @@ class _SalaryHero extends ConsumerWidget {
           if (stats.hasSalary)
             Text(
               hike == null
-                  ? 'Your take-home pay this month'
+                  ? (firstName.isEmpty
+                      ? 'Your take-home pay this month'
+                      : '$firstName, this is your take-home pay this month')
                   : (hike > 0
                       ? '${_fmtSigned(stats.hikeAbs)} more than last month'
                       : hike < 0
@@ -591,6 +640,441 @@ class _StatTile extends StatelessWidget {
   }
 }
 
+// ── This-month projection ────────────────────────────────────────────────────
+
+class _ProjectionCard extends StatelessWidget {
+  const _ProjectionCard({required this.stats, required this.colors});
+  final SalaryStats stats;
+  final AppColors colors;
+
+  @override
+  Widget build(BuildContext context) {
+    final hasBudget = stats.budget > 0;
+    final overPace = hasBudget && stats.projectedOverBudget;
+    final projColor = stats.projectedSaved < 0 ? _red : _green;
+
+    // Headline message about the current pace.
+    final String headline;
+    if (stats.projectedSaved < 0) {
+      headline = 'At this pace you\'ll overspend by '
+          '${formatCurrency(stats.projectedSaved.abs())} this month.';
+    } else {
+      headline = 'At this pace you\'ll save '
+          '${formatCurrency(stats.projectedSaved)} this month.';
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: colors.bg2,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: overPace ? _red.withValues(alpha: 0.4) : colors.border,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.speed_outlined, size: 16, color: colors.text2),
+              const SizedBox(width: 7),
+              Expanded(
+                child: Text(
+                  'This month\'s pace',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.plusJakartaSans(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: colors.text,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                'Day ${stats.daysElapsed}/${stats.daysInMonth}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: GoogleFonts.plusJakartaSans(
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w600,
+                  color: colors.text4,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Text(
+            headline,
+            style: GoogleFonts.plusJakartaSans(
+              fontSize: 13,
+              height: 1.35,
+              fontWeight: FontWeight.w600,
+              color: projColor,
+            ),
+          ),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Expanded(
+                child: _MiniStat(
+                  label: 'Projected spend',
+                  value: formatCurrency(stats.projectedSpend),
+                  colors: colors,
+                ),
+              ),
+              Expanded(
+                child: _MiniStat(
+                  label: 'Daily burn',
+                  value: formatCurrency(stats.dailyBurnRate),
+                  colors: colors,
+                ),
+              ),
+              Expanded(
+                child: _MiniStat(
+                  label: 'Safe / day',
+                  value: stats.safeToSpendPerDay > 0
+                      ? formatCurrency(stats.safeToSpendPerDay)
+                      : '₹0',
+                  colors: colors,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            hasBudget
+                ? 'Spend up to ${formatCurrency(stats.safeToSpendPerDay)}/day '
+                    'for the remaining ${stats.daysRemaining} days to stay on budget'
+                : 'Set a budget to get a daily safe-to-spend target',
+            style: GoogleFonts.plusJakartaSans(
+              fontSize: 11,
+              fontWeight: FontWeight.w500,
+              color: colors.text4,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Lifetime ──────────────────────────────────────────────────────────────────
+
+class _LifetimeCard extends StatelessWidget {
+  const _LifetimeCard({required this.stats, required this.colors});
+  final SalaryStats stats;
+  final AppColors colors;
+
+  @override
+  Widget build(BuildContext context) {
+    final savedColor = stats.cumulativeSaved < 0 ? _red : _green;
+    final runway = stats.runwayMonths;
+
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: colors.bg2,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: colors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.account_balance_outlined,
+                  size: 16, color: colors.text2),
+              const SizedBox(width: 7),
+              Expanded(
+                child: Text(
+                  'Lifetime',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.plusJakartaSans(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: colors.text,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                '${stats.monthsRecorded} mo tracked',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: GoogleFonts.plusJakartaSans(
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w600,
+                  color: colors.text4,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Text(
+            stats.cumulativeSaved < 0
+                ? '-${formatCurrency(stats.cumulativeSaved.abs())}'
+                : formatCurrency(stats.cumulativeSaved),
+            style: GoogleFonts.plusJakartaSans(
+              fontSize: 28,
+              fontWeight: FontWeight.w800,
+              letterSpacing: -0.5,
+              color: savedColor,
+            ),
+          ),
+          Text(
+            stats.cumulativeSaved < 0
+                ? 'Net shortfall across recorded months'
+                : 'Net saved across recorded months',
+            style: GoogleFonts.plusJakartaSans(
+              fontSize: 11.5,
+              fontWeight: FontWeight.w500,
+              color: colors.text3,
+            ),
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: _MiniStat(
+                  label: 'Avg savings rate',
+                  value:
+                      '${stats.avgSavingsRatePct.clamp(-999, 999).toStringAsFixed(0)}%',
+                  colors: colors,
+                ),
+              ),
+              Expanded(
+                child: _MiniStat(
+                  label: 'Avg monthly spend',
+                  value: formatCurrency(stats.avgMonthlySpend),
+                  colors: colors,
+                ),
+              ),
+              Expanded(
+                child: _MiniStat(
+                  label: 'Runway',
+                  value: runway != null
+                      ? '${runway.toStringAsFixed(1)} mo'
+                      : '—',
+                  colors: colors,
+                ),
+              ),
+            ],
+          ),
+          if (runway != null) ...[
+            const SizedBox(height: 4),
+            Text(
+              'Your savings could cover ~${runway.toStringAsFixed(1)} months '
+              'of spending at your average burn rate',
+              style: GoogleFonts.plusJakartaSans(
+                fontSize: 11,
+                fontWeight: FontWeight.w500,
+                color: colors.text4,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+// ── Credit-card repayment forecast ───────────────────────────────────────────
+
+/// Surfaces the timing gap of credit-card spending: money charged this month is
+/// a bill that lands next month and is drawn from next month's salary. Shows the
+/// forecasted next-month take-home (current salary − this month's CC charges) so
+/// swiping the card *feels* like spending real future income.
+class _CreditCardForecastCard extends StatelessWidget {
+  const _CreditCardForecastCard({required this.stats, required this.colors});
+  final SalaryStats stats;
+  final AppColors colors;
+
+  @override
+  Widget build(BuildContext context) {
+    final chargedThisMonth = stats.ccSpentThisMonth;
+    final dueNow = stats.ccDueThisMonth;
+    final forecast = stats.forecastNextMonthTakeHome;
+
+    // Severity: red when the bill would leave next month short or negative,
+    // amber as a standing caution whenever there's a card bill building up.
+    final bool severe =
+        stats.ccLeavesNextMonthShort || forecast < 0;
+    final accent = severe ? _red : _amber;
+
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: colors.bg2,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: accent.withValues(alpha: 0.4)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.credit_card_outlined, size: 16, color: accent),
+              const SizedBox(width: 7),
+              Expanded(
+                child: Text(
+                  'Credit card forecast',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.plusJakartaSans(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: colors.text,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: accent.withValues(alpha: 0.14),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text(
+                  'Due next month',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.plusJakartaSans(
+                    fontSize: 10.5,
+                    fontWeight: FontWeight.w700,
+                    color: accent,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          if (chargedThisMonth > 0) ...[
+            Text(
+              'Forecasted take-home next month',
+              style: GoogleFonts.plusJakartaSans(
+                fontSize: 11.5,
+                fontWeight: FontWeight.w500,
+                color: colors.text3,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.baseline,
+              textBaseline: TextBaseline.alphabetic,
+              children: [
+                Flexible(
+                  child: Text(
+                    forecast < 0
+                        ? '-${formatCurrency(forecast.abs())}'
+                        : formatCurrency(forecast),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.plusJakartaSans(
+                      fontSize: 28,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: -0.5,
+                      color: accent,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 2),
+            Text(
+              '${formatCurrency(stats.salary)} salary − '
+              '${formatCurrency(chargedThisMonth)} card bill',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: GoogleFonts.plusJakartaSans(
+                fontSize: 11.5,
+                fontWeight: FontWeight.w600,
+                color: colors.text4,
+              ),
+            ),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Expanded(
+                  child: _MiniStat(
+                    label: 'Charged this month',
+                    value: formatCurrency(chargedThisMonth),
+                    colors: colors,
+                  ),
+                ),
+                Expanded(
+                  child: _MiniStat(
+                    label: 'Repay next month',
+                    value: formatCurrency(chargedThisMonth),
+                    colors: colors,
+                  ),
+                ),
+                Expanded(
+                  child: _MiniStat(
+                    label: 'Of salary',
+                    value:
+                        '${stats.ccPctOfSalary.clamp(0, 999).toStringAsFixed(0)}%',
+                    colors: colors,
+                  ),
+                ),
+              ],
+            ),
+          ],
+          if (dueNow > 0) ...[
+            if (chargedThisMonth > 0) const SizedBox(height: 14),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: colors.bg3,
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.event_repeat_outlined,
+                      size: 15, color: colors.text3),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Last month\'s ${formatCurrency(dueNow)} card bill is due '
+                      'now — real take-home this month is '
+                      '${formatCurrency(stats.effectiveTakeHomeThisMonth)}.',
+                      style: GoogleFonts.plusJakartaSans(
+                        fontSize: 11.5,
+                        height: 1.35,
+                        fontWeight: FontWeight.w500,
+                        color: colors.text2,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+          if (chargedThisMonth > 0) ...[
+            const SizedBox(height: 10),
+            Text(
+              forecast < 0
+                  ? 'This bill alone outweighs a full month\'s salary — pause '
+                      'card spending before it snowballs.'
+                  : 'Every card swipe shrinks next month\'s pay. Spend like '
+                      'it\'s already gone.',
+              style: GoogleFonts.plusJakartaSans(
+                fontSize: 11,
+                height: 1.3,
+                fontWeight: FontWeight.w500,
+                color: colors.text4,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
 // ── Trend chart ──────────────────────────────────────────────────────────────
 
 class _TrendChartCard extends StatelessWidget {
@@ -901,12 +1385,18 @@ class _HistoryRow extends StatelessWidget {
             _HikeChip(pct: item.deltaPct!, colors: colors, small: true),
             const SizedBox(width: 10),
           ],
-          Text(
-            formatCurrency(item.amount),
-            style: GoogleFonts.plusJakartaSans(
-              fontSize: 14.5,
-              fontWeight: FontWeight.w800,
-              color: colors.text,
+          // Flexible so an ultra-narrow screen ellipsizes rather than overflows.
+          Flexible(
+            child: Text(
+              formatCurrency(item.amount),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.right,
+              style: GoogleFonts.plusJakartaSans(
+                fontSize: 14.5,
+                fontWeight: FontWeight.w800,
+                color: colors.text,
+              ),
             ),
           ),
         ],

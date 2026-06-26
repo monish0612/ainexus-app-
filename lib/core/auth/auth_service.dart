@@ -37,6 +37,14 @@ class AuthService {
   /// The display name of the logged-in user (title-cased).
   String get username => _username;
 
+  /// Just the first token of the display name — the canonical handle to use for
+  /// a personal touch across the app (greetings, AI insights). Empty when not
+  /// logged in.
+  String get firstName {
+    final parts = _username.trim().split(RegExp(r'\s+'));
+    return parts.isEmpty ? '' : parts.first;
+  }
+
   /// Read stored session on cold start; auto-expire after [_maxSessionDays].
   Future<void> init() async {
     final token = await _storage.read(key: _sessionKey);

@@ -203,6 +203,15 @@ class ExpenseRepository {
     }
   }
 
+  /// Cheap `COUNT(*)` of budget-history rows — used by the nuke easter egg to
+  /// report exactly how much was wiped, without loading any rows into memory.
+  Future<int> budgetHistoryCount() async {
+    final countExp = _db.budgetEntries.id.count();
+    final q = _db.selectOnly(_db.budgetEntries)..addColumns([countExp]);
+    final row = await q.getSingle();
+    return row.read(countExp) ?? 0;
+  }
+
   Future<double> getBudget() async {
     final row = await (_db.select(_db.budgetEntries)
           ..orderBy([
@@ -678,6 +687,54 @@ class ExpenseRepository {
     q.where(_db.expenses.date.isBiggerOrEqualValue(start));
     q.where(_db.expenses.date.isSmallerThanValue(end));
     return q.watchSingle().map((row) => (row.read(totalExp) ?? 0).toDouble());
+  }
+
+  /// Reactive per-month total spend across ALL months, keyed by 'YYYY-MM'.
+  /// Derived from the compact memory rollup (one row per month/category) rather
+  /// than the raw `expenses` table, so it is constant-cost regardless of how
+  /// many expenses exist and re-emits whenever any month's spend changes.
+  /// Powers the lifetime savings / runway stats that need spend paired with
+  /// each recorded salary month.
+  Stream<Map<String, double>> watchMonthlySpendTotals() {
+    final monthCol = _db.expenseMonthlyCategory.month;
+    final totalCol = _db.expenseMonthlyCategory.total.sum();
+    final q = _db.selectOnly(_db.expenseMonthlyCategory)
+      ..addColumns([monthCol, totalCol])
+      ..groupBy([monthCol]);
+    return q.watch().map((rows) {
+      final out = <String, double>{};
+      for (final r in rows) {
+        final m = r.read(monthCol);
+        if (m == null || m.isEmpty) continue;
+        out[m] = (r.read(totalCol) ?? 0).toDouble();
+      }
+      return out;
+    });
+  }
+
+  /// Reactive per-month spend for a single card type (e.g. 'CC'), keyed by
+  /// 'YYYY-MM'. Grouped in SQL via `substr(date,1,7)` over the indexed `date`
+  /// column with a `card_type` filter, so only the (small) set of distinct
+  /// months is materialized — scales to large histories and re-emits whenever
+  /// any matching expense changes. Powers the credit-card repayment forecast
+  /// (this month's CC spend = next month's bill; last month's = the bill due
+  /// now).
+  Stream<Map<String, double>> watchMonthlyCardSpendTotals(String cardType) {
+    const bucketExp = CustomExpression<String>('substr(expenses.date, 1, 7)');
+    final totalExp = _db.expenses.amount.sum();
+    final q = _db.selectOnly(_db.expenses)
+      ..addColumns([bucketExp, totalExp])
+      ..where(_db.expenses.cardType.equals(cardType))
+      ..groupBy([bucketExp]);
+    return q.watch().map((rows) {
+      final out = <String, double>{};
+      for (final r in rows) {
+        final m = r.read(bucketExp);
+        if (m == null || m.isEmpty) continue;
+        out[m] = (r.read(totalExp) ?? 0).toDouble();
+      }
+      return out;
+    });
   }
 
   /// Inclusive start ('YYYY-MM-01') and exclusive end (first day of next month)

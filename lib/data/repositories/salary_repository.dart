@@ -55,6 +55,15 @@ class SalaryRepository {
   Future<SalaryEntry?> getCurrentMonthSalary() =>
       getSalaryForMonth(monthKeyOf(DateTime.now()));
 
+  /// Cheap `COUNT(*)` of recorded salary months — used by the nuke easter egg
+  /// for its "wiped N salary entries" telemetry.
+  Future<int> salaryCount() async {
+    final countExp = _db.salaryEntries.id.count();
+    final q = _db.selectOnly(_db.salaryEntries)..addColumns([countExp]);
+    final row = await q.getSingle();
+    return row.read(countExp) ?? 0;
+  }
+
   // ── Writes ───────────────────────────────────────────────────────────────
 
   /// Upsert the in-hand salary for [month] ('YYYY-MM'). Reuses the existing

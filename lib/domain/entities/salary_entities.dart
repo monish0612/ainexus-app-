@@ -114,6 +114,13 @@ class SalaryStats extends Equatable {
     required this.monthsRecorded,
     required this.highestSalary,
     required this.averageSalary,
+    this.cumulativeSaved = 0,
+    this.avgSavingsRatePct = 0,
+    this.avgMonthlySpend = 0,
+    this.dayOfMonth = 1,
+    this.daysInMonth = 30,
+    this.ccSpentThisMonth = 0,
+    this.ccDueThisMonth = 0,
   });
 
   /// Current month key 'YYYY-MM'.
@@ -136,6 +143,33 @@ class SalaryStats extends Equatable {
   final int monthsRecorded;
   final double highestSalary;
   final double averageSalary;
+
+  /// Lifetime net savings: Σ(salary − spend) across every recorded salary
+  /// month (the current month's figure is month-to-date). Can be negative.
+  final double cumulativeSaved;
+
+  /// Mean per-month savings rate (%) across recorded months with a salary.
+  final double avgSavingsRatePct;
+
+  /// Mean monthly spend across *completed* recorded months — used as the burn
+  /// baseline for the runway estimate (the in-progress month is excluded so it
+  /// doesn't deflate the figure).
+  final double avgMonthlySpend;
+
+  /// 1-based day of the current month (clamped to [daysInMonth]).
+  final int dayOfMonth;
+
+  /// Number of days in the current calendar month.
+  final int daysInMonth;
+
+  /// Total charged to credit cards (cardType 'CC') *this* calendar month. This
+  /// is a deferred liability: it settles next month and will be drawn from next
+  /// month's salary, so it shrinks the forecasted take-home for next month.
+  final double ccSpentThisMonth;
+
+  /// Total charged to credit cards *last* calendar month — the bill that lands
+  /// and is repaid from *this* month's salary. Reduces the real take-home now.
+  final double ccDueThisMonth;
 
   bool get hasSalary => salary > 0;
 
@@ -177,6 +211,80 @@ class SalaryStats extends Equatable {
   bool get isOverBudget => budget > 0 && spent > budget;
   bool get isOverspent => salary > 0 && spent > salary;
 
+  // ── This-month pace / projection ───────────────────────────────────────────
+
+  /// Days elapsed so far this month (at least 1, capped at [daysInMonth]).
+  int get daysElapsed => dayOfMonth.clamp(1, daysInMonth);
+
+  /// Days left in the current month (0 on the last day).
+  int get daysRemaining => (daysInMonth - dayOfMonth).clamp(0, daysInMonth);
+
+  /// Average spend per elapsed day this month.
+  double get dailyBurnRate => spent / daysElapsed;
+
+  /// Projected full-month spend if the current daily pace continues.
+  double get projectedSpend => dailyBurnRate * daysInMonth;
+
+  /// Projected end-of-month savings at the current pace (can be negative).
+  double get projectedSaved => salary - projectedSpend;
+
+  /// Whether the current pace is on track to finish within budget/salary.
+  bool get projectedOverBudget => budget > 0 && projectedSpend > budget;
+
+  /// How much can still be spent per remaining day to stay within the budget
+  /// (falls back to salary when no budget is set). 0 once the cap is reached.
+  double get safeToSpendPerDay {
+    final cap = budget > 0 ? budget : salary;
+    if (cap <= 0) return 0;
+    final remaining = cap - spent;
+    if (remaining <= 0) return 0;
+    final days = daysRemaining > 0 ? daysRemaining : 1;
+    return remaining / days;
+  }
+
+  // ── Credit-card repayment forecast ──────────────────────────────────────────
+  //
+  // A credit-card charge isn't real cash today — it's a bill you settle next
+  // month out of your salary. We surface that timing gap so spending on the
+  // card feels as "real" as cash: this month's CC charges are forecast as a
+  // deduction from next month's pay.
+
+  /// Any credit-card activity worth surfacing (charging now or a bill landing).
+  bool get hasCreditCardActivity => ccSpentThisMonth > 0 || ccDueThisMonth > 0;
+
+  /// What's actually left of *this* month's salary once last month's credit-card
+  /// bill is repaid. Can be negative if the bill exceeds the salary.
+  double get effectiveTakeHomeThisMonth => salary - ccDueThisMonth;
+
+  /// Forecast take-home for *next* month: we use the current salary as the best
+  /// estimate of next month's pay, then subtract this month's credit-card
+  /// charges (which become next month's bill). Can be negative.
+  double get forecastNextMonthTakeHome => salary - ccSpentThisMonth;
+
+  /// The amount that will be carved out of next month's salary — i.e. this
+  /// month's credit-card spend. Alias kept for intent-revealing call sites.
+  double get nextMonthRepayment => ccSpentThisMonth;
+
+  /// Share of the (current) salary already committed to next month's CC bill.
+  double get ccPctOfSalary => salary > 0 ? (ccSpentThisMonth / salary) * 100 : 0;
+
+  /// True when next month's forecast take-home falls below the average monthly
+  /// spend — i.e. the card bill could leave next month short.
+  bool get ccLeavesNextMonthShort =>
+      hasSalary &&
+      ccSpentThisMonth > 0 &&
+      avgMonthlySpend > 0 &&
+      forecastNextMonthTakeHome < avgMonthlySpend;
+
+  // ── Lifetime ────────────────────────────────────────────────────────────────
+
+  /// Months of expenses the lifetime savings could cover at the average burn
+  /// rate — an emergency-fund runway. Null when there's nothing to compute.
+  double? get runwayMonths {
+    if (avgMonthlySpend <= 0 || cumulativeSaved <= 0) return null;
+    return cumulativeSaved / avgMonthlySpend;
+  }
+
   /// A simple 0..100 "financial health" score blending savings rate and budget
   /// discipline. Used purely for the standout stats display.
   int get healthScore {
@@ -200,6 +308,91 @@ class SalaryStats extends Equatable {
     averageSalary: 0,
   );
 
+  /// Pure aggregation of the full salary picture — kept out of the Riverpod
+  /// provider so it can be unit-tested in isolation (no DB, no container).
+  ///
+  /// [history] must be newest-month-first (as the repository emits it).
+  /// [spendByMonth] maps 'YYYY-MM' → total spend for that month; the current
+  /// month's value is month-to-date. [now] anchors the current-month math.
+  /// [ccByMonth] maps 'YYYY-MM' → total credit-card (cardType 'CC') spend for
+  /// that month. Used to derive the repayment forecast: this month's CC spend
+  /// becomes next month's bill; last month's CC spend is the bill due now.
+  factory SalaryStats.compute({
+    required List<SalaryEntry> history,
+    required double budget,
+    required double spent,
+    required Map<String, double> spendByMonth,
+    required DateTime now,
+    Map<String, double> ccByMonth = const {},
+  }) {
+    final monthKey = monthKeyOf(now);
+    final daysInMonth = DateTime(now.year, now.month + 1, 0).day;
+    final prevMonthKey = monthKeyOf(DateTime(now.year, now.month - 1, 1));
+
+    double salary = 0;
+    double? previousSalary;
+    for (final e in history) {
+      if (e.month == monthKey) {
+        salary = e.amount;
+      } else if (e.month.compareTo(monthKey) < 0 && previousSalary == null) {
+        // history is desc → the first older month is the previous recorded one.
+        previousSalary = e.amount;
+      }
+    }
+
+    final amounts = history.map((e) => e.amount).toList();
+    final total = amounts.fold<double>(0, (s, a) => s + a);
+    final count = amounts.length;
+    final highest =
+        amounts.isEmpty ? 0.0 : amounts.reduce((a, b) => a > b ? a : b);
+    final average = count > 0 ? total / count : 0.0;
+
+    // Lifetime net savings + mean savings rate: pair each recorded salary
+    // month with its spend (current month is month-to-date).
+    var cumulativeSaved = 0.0;
+    var rateSum = 0.0;
+    var rateCount = 0;
+    for (final e in history) {
+      final monthSpend = spendByMonth[e.month] ?? 0.0;
+      cumulativeSaved += e.amount - monthSpend;
+      if (e.amount > 0) {
+        rateSum += ((e.amount - monthSpend) / e.amount) * 100;
+        rateCount++;
+      }
+    }
+    final avgSavingsRatePct = rateCount > 0 ? rateSum / rateCount : 0.0;
+
+    // Burn baseline for runway: mean spend over *completed* months (exclude the
+    // in-progress current month). Fall back to the current month when that's
+    // all the data we have.
+    final completed = spendByMonth.entries
+        .where((e) => e.key != monthKey)
+        .map((e) => e.value)
+        .toList();
+    final avgMonthlySpend = completed.isNotEmpty
+        ? completed.fold<double>(0, (s, a) => s + a) / completed.length
+        : (spendByMonth[monthKey] ?? 0.0);
+
+    return SalaryStats(
+      month: monthKey,
+      salary: salary,
+      budget: budget,
+      spent: spent,
+      previousSalary: previousSalary,
+      totalRecorded: total,
+      monthsRecorded: count,
+      highestSalary: highest,
+      averageSalary: average,
+      cumulativeSaved: cumulativeSaved,
+      avgSavingsRatePct: avgSavingsRatePct,
+      avgMonthlySpend: avgMonthlySpend,
+      dayOfMonth: now.day,
+      daysInMonth: daysInMonth,
+      ccSpentThisMonth: ccByMonth[monthKey] ?? 0.0,
+      ccDueThisMonth: ccByMonth[prevMonthKey] ?? 0.0,
+    );
+  }
+
   @override
   List<Object?> get props => [
         month,
@@ -211,6 +404,13 @@ class SalaryStats extends Equatable {
         monthsRecorded,
         highestSalary,
         averageSalary,
+        cumulativeSaved,
+        avgSavingsRatePct,
+        avgMonthlySpend,
+        dayOfMonth,
+        daysInMonth,
+        ccSpentThisMonth,
+        ccDueThisMonth,
       ];
 }
 

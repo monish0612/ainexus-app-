@@ -263,6 +263,43 @@ class AppDatabase extends _$AppDatabase {
   @override
   int get schemaVersion => 9;
 
+  /// Atomically deletes **every row from every table** while leaving the
+  /// schema (tables, columns, indexes) fully intact. Powers the "nuke" easter
+  /// egg full-reset: the app returns to a pristine first-launch data state
+  /// without a destructive migration. Wrapped in a single transaction so the
+  /// wipe is all-or-nothing — a failure mid-way rolls back rather than leaving
+  /// the DB half-cleared.
+  Future<void> wipeAllRows() async {
+    await transaction(() async {
+      for (final table in allTables) {
+        await delete(table).go();
+      }
+    });
+  }
+
+  /// Cheap `COUNT(*)` of the user-facing data tables, keyed by a friendly
+  /// label. Used by the nuke "what was cleared" window so it can report real
+  /// numbers. Derived caches / queues (memory rollup, sync queue, chat
+  /// mirrors) are intentionally excluded — they aren't user content.
+  Future<Map<String, int>> dataRowCounts() async {
+    Future<int> countOf(String tableName) async {
+      final row = await customSelect('SELECT COUNT(*) AS c FROM $tableName')
+          .getSingleOrNull();
+      return row?.read<int>('c') ?? 0;
+    }
+
+    return {
+      'Expenses': await countOf('expenses'),
+      'Budget history': await countOf('budget_entries'),
+      'Salary': await countOf('salary_entries'),
+      'News': await countOf('news_articles'),
+      'Saved words': await countOf('saved_words'),
+      'Cloud files': await countOf('cloud_files'),
+      'Saved searches': await countOf('saved_searches'),
+      'Learnings': await countOf('category_learnings'),
+    };
+  }
+
   @override
   MigrationStrategy get migration => MigrationStrategy(
     onUpgrade: (migrator, from, to) async {

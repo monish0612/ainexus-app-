@@ -1,8 +1,12 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/di/injection.dart';
+import '../../core/services/insight_grounding.dart';
+import '../../core/services/salary_insight_engine.dart';
+import '../../domain/entities/expense_insight.dart';
 import '../../domain/entities/salary_entities.dart';
 import '../screens/expense/expense_screen.dart' show currentBudgetProvider;
+import '../screens/settings/settings_controller.dart';
 
 /// Live salary history (newest month first).
 final salaryHistoryStreamProvider =
@@ -47,44 +51,75 @@ final currentMonthSpentProvider = StreamProvider<double>((ref) {
       .watchMonthTotal(monthKeyOf(DateTime.now()));
 });
 
+/// Reactive per-month total spend across all months ('YYYY-MM' → spend),
+/// derived from the compact memory rollup. Used to pair each recorded salary
+/// month with its spend for lifetime savings / runway stats.
+final monthlySpendTotalsProvider =
+    StreamProvider<Map<String, double>>((ref) {
+  return ref.watch(expenseRepositoryProvider).watchMonthlySpendTotals();
+});
+
+/// Reactive per-month credit-card (cardType 'CC') spend ('YYYY-MM' → CC spend).
+/// Feeds the repayment forecast: this month's value becomes next month's bill,
+/// last month's value is the bill being repaid from this month's salary.
+final ccMonthlyTotalsProvider =
+    StreamProvider<Map<String, double>>((ref) {
+  return ref.watch(expenseRepositoryProvider).watchMonthlyCardSpendTotals('CC');
+});
+
 /// Fully-computed [SalaryStats] for the current month, blending the in-hand
 /// salary, the live budget and the DB-aggregated month-to-date spend.
 final salaryStatsProvider = Provider<SalaryStats>((ref) {
   final history = ref.watch(salaryHistoryStreamProvider).valueOrNull ?? const [];
   final budget = ref.watch(currentBudgetProvider);
   final spent = ref.watch(currentMonthSpentProvider).valueOrNull ?? 0.0;
+  final spendByMonth =
+      ref.watch(monthlySpendTotalsProvider).valueOrNull ?? const {};
+  final ccByMonth =
+      ref.watch(ccMonthlyTotalsProvider).valueOrNull ?? const {};
 
-  final now = DateTime.now();
-  final monthKey = monthKeyOf(now);
-
-  double salary = 0;
-  double? previousSalary;
-  for (final e in history) {
-    if (e.month == monthKey) {
-      salary = e.amount;
-    } else if (e.month.compareTo(monthKey) < 0 && previousSalary == null) {
-      // history is desc, so the first older month is the previous recorded one
-      previousSalary = e.amount;
-    }
-  }
-
-  final amounts = history.map((e) => e.amount).toList();
-  final total = amounts.fold<double>(0, (s, a) => s + a);
-  final count = amounts.length;
-  final highest = amounts.isEmpty
-      ? 0.0
-      : amounts.reduce((a, b) => a > b ? a : b);
-  final average = count > 0 ? total / count : 0.0;
-
-  return SalaryStats(
-    month: monthKey,
-    salary: salary,
+  return SalaryStats.compute(
+    history: history,
     budget: budget,
     spent: spent,
-    previousSalary: previousSalary,
-    totalRecorded: total,
-    monthsRecorded: count,
-    highestSalary: highest,
-    averageSalary: average,
+    spendByMonth: spendByMonth,
+    ccByMonth: ccByMonth,
+    now: DateTime.now(),
   );
+});
+
+/// Personalized, grounded AI recommendation for the salary screen.
+///
+/// Pipeline (identical anti-hallucination contract to the expense insights):
+///   1. [SalaryInsightEngine.compute] turns the verified [SalaryStats] into
+///      bindable `{{token}}` facts.
+///   2. The backend composer (LLM) phrases those tokens into a [ResponseSpec].
+///   3. [InsightGrounding.ground] validates + binds — any ungrounded prose (or
+///      an offline composer) falls back to the deterministic salary template,
+///      so every figure shown is real and the message is always personalized.
+///
+/// Re-runs whenever the underlying stats change. Network failures degrade to
+/// the template rather than throwing, so the UI always has content.
+final salaryRecommendationProvider =
+    FutureProvider.autoDispose<GroundedRecommendation>((ref) async {
+  final stats = ref.watch(salaryStatsProvider);
+  final name = ref.watch(userFirstNameProvider);
+  final fallback = SalaryInsightEngine.template(stats, name);
+
+  // Nothing to reason about yet — skip the network round-trip entirely.
+  if (!stats.hasSalary) return fallback;
+
+  final facts = SalaryInsightEngine.compute(firstName: name, stats: stats);
+  try {
+    final liteModel = ref.read(settingsProvider).liteModel;
+    final spec = await ref
+        .read(expenseInsightServiceProvider)
+        .compose(facts, liteModel: liteModel);
+    final grounded = InsightGrounding.ground(spec, facts);
+    // InsightGrounding falls back to its EXPENSE template on failure; prefer our
+    // salary-specific template in that case.
+    return grounded.isTemplate ? fallback : grounded;
+  } catch (_) {
+    return fallback;
+  }
 });

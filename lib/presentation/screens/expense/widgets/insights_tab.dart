@@ -122,6 +122,7 @@ class _InsightsTabState extends State<InsightsTab> {
     'clear budget',
     'clear expenses',
     'clear all',
+    'nuke',
   };
 
   @override
@@ -147,6 +148,9 @@ class _InsightsTabState extends State<InsightsTab> {
 
     widget.onEasterEgg!(cmd).then((_) {
       if (!mounted) return;
+      // 'nuke' shows its own cinematic result window (driven by the parent),
+      // so we skip the lightweight inline toast for it.
+      if (cmd == 'nuke') return;
       _showEasterEggNotification(cmd);
     });
   }

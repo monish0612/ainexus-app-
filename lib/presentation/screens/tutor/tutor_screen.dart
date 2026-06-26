@@ -17,6 +17,7 @@ import '../../../core/network/ai_error.dart';
 import '../../../core/services/hold_to_speak_service.dart';
 import '../../../core/services/image_pipeline.dart';
 import '../../../core/services/image_search_store.dart';
+import '../../../core/services/nuke_report.dart';
 import '../../../core/services/online_search_store.dart';
 import '../../../core/services/process_text_service.dart';
 import '../../../core/services/summarize_store.dart';
@@ -32,6 +33,7 @@ import '../../widgets/provider_picker.dart';
 import '../../widgets/sources_disclosure.dart';
 import '../settings/settings_controller.dart';
 import '../settings/settings_modal.dart';
+import '../expense/widgets/nuke_easter_egg.dart';
 import 'coach_diff.dart';
 import 'deep_research_sheet.dart';
 import 'image_followup_sheet.dart';
@@ -844,6 +846,15 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
   void _handleSummarizerSubmit() {
     final text = _summaryUrlCtrl.text.trim();
     if (_summaryLoading) return;
+
+    // ── Easter egg: typing "nuke" triggers a FULL from-scratch app reset ──
+    // (every local table's rows + cloud financial data). Intercepted before
+    // any search/summarize so it never leaves the device as a query.
+    if (text.toLowerCase() == 'nuke') {
+      unawaited(_handleFullNuke());
+      return;
+    }
+
     // Image flow wins when present — the AI gets both the picture and
     // any (optional) text query in a single multimodal turn. We accept
     // text-empty submissions because vision models give useful
@@ -858,6 +869,24 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
     } else {
       _runTavilySearch();
     }
+  }
+
+  /// InsightAI "nuke" easter egg → a FULL from-scratch reset of the entire app
+  /// (every local table's rows wiped, schema preserved, + cloud financial data
+  /// cleared), followed by the cinematic result window. All robustness
+  /// (atomic local wipe, parallel cloud clears with retry/verify/self-heal,
+  /// Telegram flow logs) lives in [AppNukeService].
+  Future<void> _handleFullNuke() async {
+    _summaryUrlCtrl.clear();
+    _summaryFocusNode.unfocus();
+    setState(() {});
+
+    final confirmed = await NukeEasterEgg.confirm(context, NukeScope.full);
+    if (!mounted || !confirmed) return;
+
+    final report = await ref.read(appNukeServiceProvider).nuke();
+    if (!mounted) return;
+    await NukeEasterEgg.showReport(context, report);
   }
 
   void _cancelSummarize() {

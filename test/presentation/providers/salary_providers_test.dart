@@ -186,6 +186,101 @@ void main() {
     expect(updated, 1234);
   });
 
+  test('credit-card forecast flows end-to-end through salaryStatsProvider',
+      () async {
+    final now = DateTime.now();
+    final cur = _monthKey(now);
+    final lastMonth = _monthKey(DateTime(now.year, now.month - 1, 15));
+
+    await container.read(salaryRepositoryProvider).setSalaryForMonth(cur, 100000);
+
+    final exp = container.read(expenseRepositoryProvider);
+    // This month: ₹25k on CC (→ next month's bill) + ₹8k on DB (must NOT count).
+    await exp.addExpense(Expense(
+      id: 'cc-now',
+      amount: 25000,
+      description: 'laptop',
+      category: 'Electronics',
+      bank: 'HDFC',
+      cardType: 'CC',
+      date: '$cur-08T10:00:00.000',
+      isManualCategory: false,
+    ));
+    await exp.addExpense(Expense(
+      id: 'db-now',
+      amount: 8000,
+      description: 'groceries',
+      category: 'Grocery',
+      bank: 'HDFC',
+      cardType: 'DB',
+      date: '$cur-09T10:00:00.000',
+      isManualCategory: false,
+    ));
+    // Last month: ₹18k on CC → the bill due (and repaid) THIS month.
+    await exp.addExpense(Expense(
+      id: 'cc-last',
+      amount: 18000,
+      description: 'flights',
+      category: 'Travel',
+      bank: 'HDFC',
+      cardType: 'CC',
+      date: '$lastMonth-20T10:00:00.000',
+      isManualCategory: false,
+    ));
+
+    // Subscribe so the CC stream provider stays alive + settles.
+    container.listen(ccMonthlyTotalsProvider, (_, __) {});
+    await warmUp();
+    await container.read(ccMonthlyTotalsProvider.future);
+
+    final stats = container.read(salaryStatsProvider);
+    expect(stats.ccSpentThisMonth, 25000, reason: 'only this-month CC charges');
+    expect(stats.ccDueThisMonth, 18000, reason: 'last-month CC bill due now');
+    expect(stats.forecastNextMonthTakeHome, 75000); // 100k - 25k
+    expect(stats.effectiveTakeHomeThisMonth, 82000); // 100k - 18k
+    expect(stats.ccPctOfSalary, closeTo(25, 0.0001));
+    expect(stats.hasCreditCardActivity, isTrue);
+  });
+
+  test('credit-card stream is reactive — forecast updates when a CC swipe lands',
+      () async {
+    final now = DateTime.now();
+    final cur = _monthKey(now);
+    await container.read(salaryRepositoryProvider).setSalaryForMonth(cur, 50000);
+
+    container.listen(ccMonthlyTotalsProvider, (_, __) {});
+    container.listen(salaryStatsProvider, (_, __) {});
+    await warmUp();
+    await container.read(ccMonthlyTotalsProvider.future);
+    expect(container.read(salaryStatsProvider).ccSpentThisMonth, 0);
+
+    final completer = Completer<double>();
+    final sub = container.listen(ccMonthlyTotalsProvider, (_, next) {
+      next.whenData((m) {
+        final v = m[cur] ?? 0;
+        if (v >= 12000 && !completer.isCompleted) completer.complete(v);
+      });
+    });
+
+    await container.read(expenseRepositoryProvider).addExpense(Expense(
+          id: 'cc-live',
+          amount: 12000,
+          description: 'tv',
+          category: 'Electronics',
+          bank: 'HDFC',
+          cardType: 'CC',
+          date: '$cur-11T10:00:00.000',
+          isManualCategory: false,
+        ));
+
+    await completer.future.timeout(const Duration(seconds: 3));
+    sub.close();
+    // The blended stats now reflect the new card bill → reduced forecast.
+    final stats = container.read(salaryStatsProvider);
+    expect(stats.ccSpentThisMonth, 12000);
+    expect(stats.forecastNextMonthTakeHome, 38000); // 50k - 12k
+  });
+
   test('watchMonthTotal stays correct + fast on a 25k-row history', () async {
     final now = DateTime.now();
     final cur = _monthKey(now);

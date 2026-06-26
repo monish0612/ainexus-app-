@@ -17,6 +17,7 @@ import '../settings/settings_modal.dart';
 import 'expense_timeframe_screen.dart';
 import 'widgets/tracker_tab.dart';
 import 'widgets/insights_tab.dart';
+import 'widgets/nuke_easter_egg.dart';
 import 'widgets/expense_item.dart';
 import 'modals/add_expense_modal.dart';
 import 'modals/expense_ai_ask_sheet.dart';
@@ -321,6 +322,12 @@ class _ExpenseScreenState extends ConsumerState<ExpenseScreen>
         final b = await repo.clearBudgetHistory();
         final e = await repo.clearAllExpenses();
         serverOk = b && e;
+      case 'nuke':
+        // Full result is communicated by the cinematic window itself, so we
+        // return early and skip the generic pending-sync log below.
+        final report = await ref.read(expenseNukeServiceProvider).nuke();
+        if (mounted) await NukeEasterEgg.showReport(context, report);
+        return;
     }
     if (!serverOk) {
       TLog.w('Expense', 'Easter egg "$command" — server sync pending, '
