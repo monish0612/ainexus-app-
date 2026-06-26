@@ -96,6 +96,9 @@ abstract final class ApiEndpoints {
   // AI Expense Query (natural-language → structured local query spec)
   static String get aiExpenseQuery => '$_base/api/v1/ai/expense-query';
 
+  // AI Expense Insight (computed facts → generative, grounded recommendation)
+  static String get aiExpenseInsight => '$_base/api/v1/ai/expense-insight';
+
   // Category Learnings
   static String get categoryLearnings => '$_base/api/v1/category-learnings';
   static String get categoryLearningsBatch => '$_base/api/v1/category-learnings/batch';

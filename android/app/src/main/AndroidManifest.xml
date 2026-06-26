@@ -95,6 +95,7 @@
             android:label="@string/widget_search_label">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="app.ainexus.ai_nexus.SEARCH_WIDGET_SET_MODE" />
             </intent-filter>
             <meta-data
                 android:name="android.appwidget.provider"

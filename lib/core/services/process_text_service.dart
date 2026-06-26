@@ -31,6 +31,10 @@ final pendingExpenseTextProvider = StateProvider<String?>((ref) => null);
 /// Set by AppShell, consumed by TutorScreen.
 final pendingSearchQueryProvider = StateProvider<String?>((ref) => null);
 
+/// Set true when the home-screen search widget is tapped in "Expense" mode.
+/// Set by AppShell, consumed by ExpenseScreen to open the "Ask AI" search.
+final pendingExpenseSearchProvider = StateProvider<bool>((ref) => false);
+
 /// Bridges the Android PROCESS_TEXT intent to Flutter via a MethodChannel.
 ///
 /// Two communication paths:

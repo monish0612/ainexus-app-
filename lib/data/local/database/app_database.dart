@@ -48,6 +48,27 @@ class SalaryEntries extends Table {
   Set<Column> get primaryKey => {month};
 }
 
+/// Continuously-updated rollup of spend per (month, category) — the "memory
+/// layer". Instead of scanning the (potentially huge) `expenses` table to build
+/// AI context, we maintain these compact aggregates incrementally on every
+/// write, so a "facts" snapshot for the recommendation engine is constant-cost
+/// regardless of how many base rows exist (scales to billions).
+///
+/// [month] is the 'YYYY-MM' prefix of an expense `date`; [category] the
+/// expense category. [total] is the summed amount and [count] the number of
+/// expenses in that bucket. The memory service prunes buckets once their
+/// [count] reaches 0. This is intentionally local-only (never synced): it is a
+/// derived cache that can always be rebuilt from `expenses`.
+class ExpenseMonthlyCategory extends Table {
+  TextColumn get month => text()();
+  TextColumn get category => text()();
+  RealColumn get total => real().withDefault(const Constant(0))();
+  IntColumn get count => integer().withDefault(const Constant(0))();
+
+  @override
+  Set<Column> get primaryKey => {month, category};
+}
+
 class NewsArticles extends Table {
   TextColumn get id => text()();
   TextColumn get title => text()();
@@ -214,6 +235,7 @@ class SavedSearchChatSummaries extends Table {
     Expenses,
     BudgetEntries,
     SalaryEntries,
+    ExpenseMonthlyCategory,
     NewsArticles,
     CloudFiles,
     SavedWords,
@@ -239,7 +261,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.executor);
 
   @override
-  int get schemaVersion => 8;
+  int get schemaVersion => 9;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -266,6 +288,20 @@ class AppDatabase extends _$AppDatabase {
       }
       if (from < 8) {
         await migrator.createTable(salaryEntries);
+      }
+      if (from < 9) {
+        // Memory layer: create the rollup table and backfill it once from the
+        // existing expenses in a single GROUP BY (one-time cost). From here on
+        // it is maintained incrementally by ExpenseMemoryService on each write.
+        await migrator.createTable(expenseMonthlyCategory);
+        await customStatement(
+          'INSERT INTO expense_monthly_category (month, category, total, count) '
+          'SELECT substr(date, 1, 7) AS month, category, '
+          'SUM(amount) AS total, COUNT(id) AS count '
+          'FROM expenses '
+          'WHERE date IS NOT NULL AND length(date) >= 7 '
+          'GROUP BY substr(date, 1, 7), category',
+        );
       }
     },
     beforeOpen: (details) async {

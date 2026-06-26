@@ -17,8 +17,12 @@
 
     <!-- Search Widget -->
     <string name="widget_search_label">Nexus AI Search</string>
-    <string name="widget_search_desc">Search the web or summarize URLs with AI</string>
+    <string name="widget_search_desc">Search your expenses or the web with AI \u2014 toggle and go</string>
     <string name="widget_search_hint">Search with Nexus AI\u2026</string>
+    <string name="widget_search_mode_expense">Expense</string>
+    <string name="widget_search_mode_web">Web</string>
+    <string name="widget_search_hint_expense">Ask about your expenses\u2026</string>
+    <string name="widget_search_hint_web">Search the web with AI\u2026</string>
 
     <!-- Expense Widget -->
     <string name="widget_expense_label">Nexus AI Expenses</string>

@@ -7,13 +7,20 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
+import '../../../core/auth/auth_service.dart';
 import '../../../core/di/injection.dart';
+import '../../../core/services/expense_insight_engine.dart';
+import '../../../core/services/insight_grounding.dart';
 import '../../../core/services/telegram_logger.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/utils/currency_formatter.dart';
 import '../../../data/repositories/expense_repository.dart';
 import '../../../domain/entities/expense_entities.dart';
+import '../../../domain/entities/expense_insight.dart';
+import '../settings/settings_controller.dart';
 import 'modals/edit_expense_modal.dart';
+import 'modals/expense_ai_ask_sheet.dart';
+import 'widgets/ai_recommendation_card.dart';
 import 'widgets/expense_item.dart';
 
 /// Identifies a slice of spending history opened from the Tracker's
@@ -32,6 +39,8 @@ class ExpenseTimeframe {
     this.sort = ExpenseSort.dateDesc,
     this.aiAnswer,
     this.chart = ExpenseChart.none,
+    this.aiInsight = false,
+    this.aiQuestion,
   });
 
   final String label;
@@ -57,6 +66,16 @@ class ExpenseTimeframe {
 
   /// Optional visualization to render above the (still editable) list.
   final ExpenseChart chart;
+
+  /// When true the screen computes a generative, grounded AI recommendation
+  /// (greeting by name + saving tip + chips) above the summary. Set by the
+  /// "Ask AI" flow; fixed-timeframe drilldowns leave it false (no extra LLM
+  /// call, unchanged behavior).
+  final bool aiInsight;
+
+  /// The user's original natural-language question, passed to the composer so
+  /// the recommendation matches their intent. Falls back to [label].
+  final String? aiQuestion;
 }
 
 /// Opens the full-screen timeframe drill-down with a slide-up transition over
@@ -128,6 +147,10 @@ class _ExpenseTimeframeScreenState
   List<({String category, double total, int count})> _categories = const [];
   List<ExpenseBucket> _timeBuckets = const [];
 
+  // Generative AI recommendation (only when opened from "Ask AI").
+  GroundedRecommendation? _recommendation;
+  bool _insightLoading = false;
+
   @override
   void initState() {
     super.initState();
@@ -168,6 +191,62 @@ class _ExpenseTimeframeScreenState
     });
     await Future.wait([_loadSummary(), _loadMore()]);
     if (mounted) setState(() => _initialLoading = false);
+    // The summary is now loaded; build the AI recommendation off it (the table
+    // is already painting, so the insight "streams in" without blocking).
+    if (widget.timeframe.aiInsight) unawaited(_loadInsight());
+  }
+
+  /// Computes deterministic facts from the loaded slice + the memory layer,
+  /// shows the grounded template instantly, then upgrades to the composed
+  /// (LLM-authored) version. Every figure shown is verified — the model only
+  /// phrases pre-computed tokens, and ungrounded prose falls back to template.
+  Future<void> _loadInsight() async {
+    if (!mounted) return;
+    setState(() => _insightLoading = true);
+    try {
+      final repo = ref.read(expenseRepositoryProvider);
+      final memory = await repo.memorySnapshot();
+      final tf = widget.timeframe;
+      final facts = ExpenseInsightEngine.compute(
+        question: (tf.aiQuestion?.trim().isNotEmpty ?? false)
+            ? tf.aiQuestion!.trim()
+            : tf.label,
+        firstName: AuthService.instance.username,
+        sliceTotal: _total,
+        sliceCount: _count,
+        sliceCategories: _categories,
+        timeBuckets: _timeBuckets,
+        memory: memory,
+      );
+
+      // Instant, always-grounded fallback so the user never waits on the
+      // network for a useful insight.
+      if (mounted) {
+        setState(() => _recommendation = InsightGrounding.template(facts));
+      }
+
+      final liteModel = ref.read(settingsProvider).liteModel;
+      final spec = await ref
+          .read(expenseInsightServiceProvider)
+          .compose(facts, liteModel: liteModel);
+      if (!mounted) return;
+      setState(() {
+        _recommendation = InsightGrounding.ground(spec, facts);
+        _insightLoading = false;
+      });
+    } catch (e) {
+      TLog.w('ExpenseTimeframe', 'AI recommendation failed', error: e);
+      if (mounted) setState(() => _insightLoading = false);
+    }
+  }
+
+  void _onInsightChip(String chip) {
+    HapticFeedback.selectionClick();
+    // A chip is a fresh follow-up question — reopen Ask AI primed with it.
+    Navigator.of(context).maybePop().then((_) {
+      if (!mounted) return;
+      showExpenseAiAskSheet(context, initialQuestion: chip);
+    });
   }
 
   Future<void> _loadSummary() async {
@@ -399,7 +478,14 @@ class _ExpenseTimeframeScreenState
               timeframe: widget.timeframe,
               onClose: () => Navigator.of(context).maybePop(),
             ),
-            if ((widget.timeframe.aiAnswer ?? '').trim().isNotEmpty)
+            if (widget.timeframe.aiInsight)
+              AiRecommendationCard(
+                colors: colors,
+                loading: _insightLoading,
+                recommendation: _recommendation,
+                onChip: _onInsightChip,
+              )
+            else if ((widget.timeframe.aiAnswer ?? '').trim().isNotEmpty)
               _AiAnswerBanner(
                 colors: colors,
                 answer: widget.timeframe.aiAnswer!.trim(),

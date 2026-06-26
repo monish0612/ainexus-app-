@@ -1,44 +1,109 @@
 <?xml version="1.0" encoding="utf-8"?>
-<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<!-- Nexus AI search widget — an AMOLED glass card with a segmented
+     Expense / Web toggle on top and a tappable search capsule below.
+     The toggle pills broadcast to SearchWidgetProvider to switch mode;
+     the capsule launches the app into the matching search. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/widget_search_root"
     android:layout_width="match_parent"
-    android:layout_height="match_parent">
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_search_bg"
+    android:gravity="center"
+    android:orientation="vertical"
+    android:paddingStart="14dp"
+    android:paddingEnd="14dp"
+    android:paddingTop="12dp"
+    android:paddingBottom="14dp">
 
+    <!-- ═══ Segmented Mode Toggle ═══ -->
     <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center_horizontal"
+        android:background="@drawable/widget_search_toggle_track"
+        android:orientation="horizontal"
+        android:padding="3dp">
+
+        <TextView
+            android:id="@+id/widget_search_toggle_expense"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="@drawable/widget_search_toggle_active"
+            android:ellipsize="end"
+            android:fontFamily="sans-serif-medium"
+            android:gravity="center"
+            android:includeFontPadding="false"
+            android:maxLines="1"
+            android:minWidth="84dp"
+            android:paddingStart="18dp"
+            android:paddingEnd="18dp"
+            android:paddingTop="7dp"
+            android:paddingBottom="7dp"
+            android:text="@string/widget_search_mode_expense"
+            android:textColor="#FFFFFF"
+            android:textSize="12sp" />
+
+        <TextView
+            android:id="@+id/widget_search_toggle_web"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="@android:color/transparent"
+            android:ellipsize="end"
+            android:fontFamily="sans-serif-medium"
+            android:gravity="center"
+            android:includeFontPadding="false"
+            android:maxLines="1"
+            android:minWidth="84dp"
+            android:paddingStart="18dp"
+            android:paddingEnd="18dp"
+            android:paddingTop="7dp"
+            android:paddingBottom="7dp"
+            android:text="@string/widget_search_mode_web"
+            android:textColor="#6A7187"
+            android:textSize="12sp" />
+
+    </LinearLayout>
+
+    <!-- ═══ Search Capsule ═══ -->
+    <LinearLayout
+        android:id="@+id/widget_search_bar"
         android:layout_width="match_parent"
-        android:layout_height="56dp"
-        android:layout_gravity="center_vertical"
-        android:background="@drawable/widget_search_bg"
+        android:layout_height="52dp"
+        android:layout_marginTop="12dp"
+        android:background="@drawable/widget_search_bar_bg"
         android:gravity="center_vertical"
         android:orientation="horizontal"
         android:paddingStart="18dp"
-        android:paddingEnd="18dp">
+        android:paddingEnd="16dp">
 
         <ImageView
-            android:layout_width="24dp"
-            android:layout_height="24dp"
+            android:id="@+id/widget_search_mode_icon"
+            android:layout_width="22dp"
+            android:layout_height="22dp"
             android:contentDescription="@string/widget_search_label"
-            android:src="@drawable/ic_widget_sparkle" />
+            android:src="@drawable/ic_widget_wallet" />
 
         <TextView
+            android:id="@+id/widget_search_hint"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_marginStart="14dp"
-            android:layout_marginEnd="14dp"
+            android:layout_marginEnd="12dp"
             android:layout_weight="1"
             android:ellipsize="end"
             android:fontFamily="sans-serif-medium"
             android:maxLines="1"
-            android:text="@string/widget_search_hint"
-            android:textColor="#78849E"
+            android:text="@string/widget_search_hint_expense"
+            android:textColor="#7C849B"
             android:textSize="15sp" />
 
         <ImageView
-            android:layout_width="24dp"
-            android:layout_height="24dp"
+            android:id="@+id/widget_search_go"
+            android:layout_width="22dp"
+            android:layout_height="22dp"
             android:contentDescription="@string/shortcut_search"
             android:src="@drawable/ic_widget_search" />
 
     </LinearLayout>
 
-</FrameLayout>
+</LinearLayout>

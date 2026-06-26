@@ -359,6 +359,18 @@ class _ExpenseScreenState extends ConsumerState<ExpenseScreen>
     );
   }
 
+  /// Entry point from the home-screen search widget (Expense mode). Makes sure
+  /// the Tracker sub-tab is active, then opens the "Ask AI" search sheet (which
+  /// autofocuses its field, raising the keyboard) once the frame settles.
+  void _openAiSearchFromWidget() {
+    if (_tabCtrl.index != 0) _tabCtrl.animateTo(0);
+    Future.delayed(const Duration(milliseconds: 350), () {
+      if (!mounted) return;
+      TLog.i('Widget', 'Opening Expense Ask AI from search widget');
+      showExpenseAiAskSheet(context);
+    });
+  }
+
   void _openAiSearch() {
     showExpenseAiAskSheet(context);
   }
@@ -486,6 +498,13 @@ class _ExpenseScreenState extends ConsumerState<ExpenseScreen>
       if (next != null && next.trim().isNotEmpty) {
         ref.read(pendingExpenseTextProvider.notifier).state = null;
         _openAddExpenseModalWithText(next);
+      }
+    });
+
+    ref.listen<bool>(pendingExpenseSearchProvider, (prev, next) {
+      if (next) {
+        ref.read(pendingExpenseSearchProvider.notifier).state = false;
+        _openAiSearchFromWidget();
       }
     });
 

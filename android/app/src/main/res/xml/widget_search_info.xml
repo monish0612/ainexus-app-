@@ -3,11 +3,11 @@
     android:description="@string/widget_search_desc"
     android:initialLayout="@layout/widget_search"
     android:minWidth="250dp"
-    android:minHeight="56dp"
+    android:minHeight="110dp"
     android:previewImage="@drawable/widget_search_preview"
     android:previewLayout="@layout/widget_search"
     android:resizeMode="horizontal"
     android:targetCellWidth="4"
-    android:targetCellHeight="1"
+    android:targetCellHeight="2"
     android:updatePeriodMillis="0"
     android:widgetCategory="home_screen" />

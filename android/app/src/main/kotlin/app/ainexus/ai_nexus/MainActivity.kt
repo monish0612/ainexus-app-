@@ -191,17 +191,20 @@ class MainActivity : FlutterActivity() {
 
             val subtab = extras.get("shortcut_subtab")?.toString()
             val widgetLaunch = extras.get("widget_launch")?.toString()
+            val widgetSearchMode = extras.get("widget_search_mode")?.toString()
 
             val data = mutableMapOf("tab" to tab)
             if (subtab != null) data["subtab"] = subtab
             if (widgetLaunch != null) data["widget_launch"] = widgetLaunch
+            if (widgetSearchMode != null) data["widget_search_mode"] = widgetSearchMode
 
-            Log.d(TAG, "Shortcut detected: tab=$tab, subtab=$subtab, widget=$widgetLaunch")
+            Log.d(TAG, "Shortcut detected: tab=$tab, subtab=$subtab, widget=$widgetLaunch, searchMode=$widgetSearchMode")
             pendingShortcut = data
 
             intent.removeExtra("shortcut_tab")
             intent.removeExtra("shortcut_subtab")
             intent.removeExtra("widget_launch")
+            intent.removeExtra("widget_search_mode")
 
             return true
         } catch (e: Exception) {

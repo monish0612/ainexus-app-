@@ -9,6 +9,7 @@ import '../../core/network/api_endpoints.dart';
 import '../../core/services/telegram_logger.dart';
 import '../../domain/entities/expense_entities.dart' as domain;
 import '../local/database/app_database.dart' as db;
+import '../services/expense_memory_service.dart';
 
 /// Ordering options for [ExpenseRepository.getExpensesPage]. Newest-first is
 /// the default; amount ordering powers AI queries like "highest expense".
@@ -26,6 +27,38 @@ class ExpenseRepository {
   final db.AppDatabase _db;
   final ApiClient _api;
   final SharedPreferences _prefs;
+
+  /// Continuously-updated aggregate cache used by the AI insight engine.
+  /// Owned internally (only needs the DB) so the public constructor stays
+  /// unchanged and existing call sites/tests keep working.
+  late final ExpenseMemoryService _memory = ExpenseMemoryService(_db);
+
+  /// Compact, billions-scale-safe snapshot of all spending for the AI
+  /// recommendation engine. Derived from the small rollup, so it is instant.
+  Future<MemoryFacts> memorySnapshot({DateTime? now}) =>
+      _memory.snapshot(now: now);
+
+  /// Best-effort: keep the memory layer from breaking a real expense write.
+  /// The rollup is a derived cache, so a failure here is logged and ignored —
+  /// it can always be rebuilt via [_memory.recompute].
+  Future<void> _safeApplyMemory({
+    domain.Expense? oldExpense,
+    domain.Expense? newExpense,
+  }) async {
+    try {
+      await _memory.applyDelta(oldExpense: oldExpense, newExpense: newExpense);
+    } catch (e) {
+      TLog.w('ExpenseRepo', 'Memory delta failed (non-fatal)', error: e);
+    }
+  }
+
+  Future<void> _safeRecomputeMemory() async {
+    try {
+      await _memory.recompute();
+    } catch (e) {
+      TLog.w('ExpenseRepo', 'Memory recompute failed (non-fatal)', error: e);
+    }
+  }
 
   static const _uuid = Uuid();
 
@@ -87,6 +120,8 @@ class ExpenseRepository {
       rethrow;
     }
 
+    await _safeApplyMemory(newExpense: expense);
+
     try {
       await _syncPostWithRetry(ApiEndpoints.expenses, data: expense.toJson());
       TLog.i('ExpenseRepo',
@@ -101,6 +136,16 @@ class ExpenseRepository {
   }
 
   Future<bool> updateExpense(domain.Expense expense) async {
+    domain.Expense? previous;
+    try {
+      final oldRow = await (_db.select(_db.expenses)
+            ..where((t) => t.id.equals(expense.id)))
+          .getSingleOrNull();
+      previous = oldRow == null ? null : _rowToExpense(oldRow);
+    } catch (_) {
+      previous = null; // memory will self-heal on next recompute if needed
+    }
+
     try {
       await (_db.update(_db.expenses)..where((t) => t.id.equals(expense.id)))
           .write(_expenseToUpdateCompanion(expense));
@@ -110,6 +155,8 @@ class ExpenseRepository {
       TLog.e('ExpenseRepo', 'Local update failed', error: e);
       rethrow;
     }
+
+    await _safeApplyMemory(oldExpense: previous, newExpense: expense);
 
     try {
       await _syncPostWithRetry(ApiEndpoints.expenses, data: expense.toJson());
@@ -125,6 +172,16 @@ class ExpenseRepository {
   }
 
   Future<bool> deleteExpense(String id) async {
+    domain.Expense? previous;
+    try {
+      final oldRow =
+          await (_db.select(_db.expenses)..where((t) => t.id.equals(id)))
+              .getSingleOrNull();
+      previous = oldRow == null ? null : _rowToExpense(oldRow);
+    } catch (_) {
+      previous = null;
+    }
+
     try {
       await (_db.delete(_db.expenses)..where((t) => t.id.equals(id))).go();
       TLog.i('ExpenseRepo', '🗑️ Deleted expense: $id');
@@ -132,6 +189,8 @@ class ExpenseRepository {
       TLog.e('ExpenseRepo', 'Local delete failed', error: e);
       rethrow;
     }
+
+    if (previous != null) await _safeApplyMemory(oldExpense: previous);
 
     try {
       await _syncDeleteWithRetry(ApiEndpoints.expense(id));
@@ -260,6 +319,9 @@ class ExpenseRepository {
       TLog.e('ExpenseRepo', 'Failed to clear expenses locally', error: e);
       rethrow;
     }
+
+    // Memory layer is derived from expenses — rebuild it (now empty).
+    await _safeRecomputeMemory();
 
     final serverOk = await _serverDeleteWithRetry(
       endpoint: ApiEndpoints.expenses,
@@ -494,7 +556,12 @@ class ExpenseRepository {
         inserted++;
       }
 
-      if (inserted > 0) TLog.i('ExpenseRepo', 'Synced $inserted expenses from server');
+      if (inserted > 0) {
+        TLog.i('ExpenseRepo', 'Synced $inserted expenses from server');
+        // Bulk inserts bypass the per-write delta hooks; rebuild the rollup
+        // once so the memory layer reflects the freshly-pulled rows.
+        await _safeRecomputeMemory();
+      }
       return inserted;
     } catch (e) {
       TLog.w('ExpenseRepo', 'Expense pull sync failed: $e', error: e);

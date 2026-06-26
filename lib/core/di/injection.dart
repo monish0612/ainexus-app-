@@ -7,6 +7,7 @@ import '../../data/repositories/news_repository.dart';
 import '../../data/repositories/salary_repository.dart';
 import '../../data/services/ai_categorize_service.dart';
 import '../../data/services/expense_ai_search_service.dart';
+import '../../data/services/expense_insight_service.dart';
 import '../../data/services/news_summarize_service.dart';
 import '../../data/services/tutor_ai_service.dart';
 import '../../data/services/user_preferences_service.dart';
@@ -56,6 +57,10 @@ final aiCategorizeServiceProvider = Provider<AICategorizeService>((ref) {
 
 final expenseAiSearchServiceProvider = Provider<ExpenseAiSearchService>((ref) {
   return ExpenseAiSearchService(ref.watch(apiClientProvider));
+});
+
+final expenseInsightServiceProvider = Provider<ExpenseInsightService>((ref) {
+  return ExpenseInsightService(ref.watch(apiClientProvider));
 });
 
 final tutorAiServiceProvider = Provider<TutorAiService>((ref) {

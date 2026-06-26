@@ -24,6 +24,58 @@ final currentTabProvider = StateProvider<int>((ref) => 0);
 final pendingSubtabProvider = StateProvider<int?>((ref) => null);
 final pendingWidgetLaunchProvider = StateProvider<bool>((ref) => false);
 
+/// Pure, side-effect-free description of where a shortcut/widget tap should
+/// navigate. Kept separate from [_AppShellState] so the routing decision is
+/// fully unit-testable without pumping the whole shell.
+@immutable
+class ShortcutRoute {
+  const ShortcutRoute({
+    required this.tab,
+    this.subtab,
+    this.openExpenseSearch = false,
+    this.focusWebSearch = false,
+  });
+
+  /// Bottom-nav tab index (0..3).
+  final int tab;
+
+  /// Optional Tutor sub-tab index to switch to.
+  final int? subtab;
+
+  /// Open the Expense Tracker "Ask AI" search (search widget, Expense mode).
+  final bool openExpenseSearch;
+
+  /// Focus the Tutor online-search field (search widget Web mode / legacy
+  /// search widget).
+  final bool focusWebSearch;
+}
+
+/// Resolves raw shortcut extras (forwarded from the native side) into a
+/// [ShortcutRoute]. Returns `null` when the payload is missing/invalid so the
+/// caller can safely ignore it.
+///
+/// Precedence: the search widget's `widget_search_mode == 'expense'` always
+/// wins over the legacy `widget_launch` flag, so Expense mode never also
+/// triggers the web-search focus.
+ShortcutRoute? resolveShortcutRoute(Map<String, String> data) {
+  final tabStr = data['tab'];
+  if (tabStr == null || tabStr.isEmpty) return null;
+
+  final tab = int.tryParse(tabStr);
+  if (tab == null || tab < 0 || tab > 3) return null;
+
+  final subtab = int.tryParse(data['subtab'] ?? '');
+  final isWidgetLaunch = data['widget_launch'] == 'true';
+  final openExpenseSearch = data['widget_search_mode'] == 'expense';
+
+  return ShortcutRoute(
+    tab: tab,
+    subtab: subtab,
+    openExpenseSearch: openExpenseSearch,
+    focusWebSearch: !openExpenseSearch && isWidgetLaunch,
+  );
+}
+
 class AppShell extends ConsumerStatefulWidget {
   const AppShell({super.key});
 
@@ -115,31 +167,35 @@ class _AppShellState extends ConsumerState<AppShell>
 
   void _handleShortcut(Map<String, String> data) {
     try {
-      final tabStr = data['tab'];
-      if (tabStr == null || tabStr.isEmpty) return;
-
-      final tab = int.tryParse(tabStr);
-      if (tab == null || tab < 0 || tab > 3) {
-        TLog.w('Shortcut', 'Invalid tab: $tabStr');
+      final route = resolveShortcutRoute(data);
+      if (route == null) {
+        TLog.w('Shortcut', 'Ignored invalid shortcut data: $data');
         return;
       }
 
-      final subtab = int.tryParse(data['subtab'] ?? '');
-      final isWidgetLaunch = data['widget_launch'] == 'true';
-
       TLog.i(
         'Shortcut',
-        'Navigating → tab=$tab, subtab=$subtab, widget=$isWidgetLaunch',
+        'Navigating → tab=${route.tab}, subtab=${route.subtab}, '
+            'expenseSearch=${route.openExpenseSearch}, '
+            'webSearch=${route.focusWebSearch}',
       );
-      ref.read(currentTabProvider.notifier).state = tab;
+      ref.read(currentTabProvider.notifier).state = route.tab;
+
+      final subtab = route.subtab;
       if (subtab != null) {
         Future.delayed(const Duration(milliseconds: 300), () {
           if (!mounted) return;
           activeTutorSubtabSwitcher?.call(subtab);
         });
       }
-      if (isWidgetLaunch) {
-        TLog.i('Widget', 'Home screen widget tap → opening Summarizer');
+
+      if (route.openExpenseSearch) {
+        // Search widget, Expense mode → open the Expense Tracker "Ask AI" search.
+        TLog.i('Widget', 'Search widget (Expense) tap → opening Ask AI');
+        ref.read(pendingExpenseSearchProvider.notifier).state = true;
+      } else if (route.focusWebSearch) {
+        // Search widget, Web mode (or legacy widget) → focus the online search.
+        TLog.i('Widget', 'Search widget (Web) tap → opening Summarizer');
         ref.read(pendingWidgetLaunchProvider.notifier).state = true;
       }
     } catch (e) {

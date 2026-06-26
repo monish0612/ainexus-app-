@@ -969,6 +969,276 @@ class SalaryEntriesCompanion extends UpdateCompanion<SalaryEntry> {
   }
 }
 
+class $ExpenseMonthlyCategoryTable extends ExpenseMonthlyCategory
+    with TableInfo<$ExpenseMonthlyCategoryTable, ExpenseMonthlyCategoryData> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $ExpenseMonthlyCategoryTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _monthMeta = const VerificationMeta('month');
+  @override
+  late final GeneratedColumn<String> month = GeneratedColumn<String>(
+      'month', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _categoryMeta =
+      const VerificationMeta('category');
+  @override
+  late final GeneratedColumn<String> category = GeneratedColumn<String>(
+      'category', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _totalMeta = const VerificationMeta('total');
+  @override
+  late final GeneratedColumn<double> total = GeneratedColumn<double>(
+      'total', aliasedName, false,
+      type: DriftSqlType.double,
+      requiredDuringInsert: false,
+      defaultValue: const Constant(0));
+  static const VerificationMeta _countMeta = const VerificationMeta('count');
+  @override
+  late final GeneratedColumn<int> count = GeneratedColumn<int>(
+      'count', aliasedName, false,
+      type: DriftSqlType.int,
+      requiredDuringInsert: false,
+      defaultValue: const Constant(0));
+  @override
+  List<GeneratedColumn> get $columns => [month, category, total, count];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'expense_monthly_category';
+  @override
+  VerificationContext validateIntegrity(
+      Insertable<ExpenseMonthlyCategoryData> instance,
+      {bool isInserting = false}) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('month')) {
+      context.handle(
+          _monthMeta, month.isAcceptableOrUnknown(data['month']!, _monthMeta));
+    } else if (isInserting) {
+      context.missing(_monthMeta);
+    }
+    if (data.containsKey('category')) {
+      context.handle(_categoryMeta,
+          category.isAcceptableOrUnknown(data['category']!, _categoryMeta));
+    } else if (isInserting) {
+      context.missing(_categoryMeta);
+    }
+    if (data.containsKey('total')) {
+      context.handle(
+          _totalMeta, total.isAcceptableOrUnknown(data['total']!, _totalMeta));
+    }
+    if (data.containsKey('count')) {
+      context.handle(
+          _countMeta, count.isAcceptableOrUnknown(data['count']!, _countMeta));
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {month, category};
+  @override
+  ExpenseMonthlyCategoryData map(Map<String, dynamic> data,
+      {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return ExpenseMonthlyCategoryData(
+      month: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}month'])!,
+      category: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}category'])!,
+      total: attachedDatabase.typeMapping
+          .read(DriftSqlType.double, data['${effectivePrefix}total'])!,
+      count: attachedDatabase.typeMapping
+          .read(DriftSqlType.int, data['${effectivePrefix}count'])!,
+    );
+  }
+
+  @override
+  $ExpenseMonthlyCategoryTable createAlias(String alias) {
+    return $ExpenseMonthlyCategoryTable(attachedDatabase, alias);
+  }
+}
+
+class ExpenseMonthlyCategoryData extends DataClass
+    implements Insertable<ExpenseMonthlyCategoryData> {
+  final String month;
+  final String category;
+  final double total;
+  final int count;
+  const ExpenseMonthlyCategoryData(
+      {required this.month,
+      required this.category,
+      required this.total,
+      required this.count});
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['month'] = Variable<String>(month);
+    map['category'] = Variable<String>(category);
+    map['total'] = Variable<double>(total);
+    map['count'] = Variable<int>(count);
+    return map;
+  }
+
+  ExpenseMonthlyCategoryCompanion toCompanion(bool nullToAbsent) {
+    return ExpenseMonthlyCategoryCompanion(
+      month: Value(month),
+      category: Value(category),
+      total: Value(total),
+      count: Value(count),
+    );
+  }
+
+  factory ExpenseMonthlyCategoryData.fromJson(Map<String, dynamic> json,
+      {ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return ExpenseMonthlyCategoryData(
+      month: serializer.fromJson<String>(json['month']),
+      category: serializer.fromJson<String>(json['category']),
+      total: serializer.fromJson<double>(json['total']),
+      count: serializer.fromJson<int>(json['count']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'month': serializer.toJson<String>(month),
+      'category': serializer.toJson<String>(category),
+      'total': serializer.toJson<double>(total),
+      'count': serializer.toJson<int>(count),
+    };
+  }
+
+  ExpenseMonthlyCategoryData copyWith(
+          {String? month, String? category, double? total, int? count}) =>
+      ExpenseMonthlyCategoryData(
+        month: month ?? this.month,
+        category: category ?? this.category,
+        total: total ?? this.total,
+        count: count ?? this.count,
+      );
+  ExpenseMonthlyCategoryData copyWithCompanion(
+      ExpenseMonthlyCategoryCompanion data) {
+    return ExpenseMonthlyCategoryData(
+      month: data.month.present ? data.month.value : this.month,
+      category: data.category.present ? data.category.value : this.category,
+      total: data.total.present ? data.total.value : this.total,
+      count: data.count.present ? data.count.value : this.count,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('ExpenseMonthlyCategoryData(')
+          ..write('month: $month, ')
+          ..write('category: $category, ')
+          ..write('total: $total, ')
+          ..write('count: $count')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(month, category, total, count);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is ExpenseMonthlyCategoryData &&
+          other.month == this.month &&
+          other.category == this.category &&
+          other.total == this.total &&
+          other.count == this.count);
+}
+
+class ExpenseMonthlyCategoryCompanion
+    extends UpdateCompanion<ExpenseMonthlyCategoryData> {
+  final Value<String> month;
+  final Value<String> category;
+  final Value<double> total;
+  final Value<int> count;
+  final Value<int> rowid;
+  const ExpenseMonthlyCategoryCompanion({
+    this.month = const Value.absent(),
+    this.category = const Value.absent(),
+    this.total = const Value.absent(),
+    this.count = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  ExpenseMonthlyCategoryCompanion.insert({
+    required String month,
+    required String category,
+    this.total = const Value.absent(),
+    this.count = const Value.absent(),
+    this.rowid = const Value.absent(),
+  })  : month = Value(month),
+        category = Value(category);
+  static Insertable<ExpenseMonthlyCategoryData> custom({
+    Expression<String>? month,
+    Expression<String>? category,
+    Expression<double>? total,
+    Expression<int>? count,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (month != null) 'month': month,
+      if (category != null) 'category': category,
+      if (total != null) 'total': total,
+      if (count != null) 'count': count,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  ExpenseMonthlyCategoryCompanion copyWith(
+      {Value<String>? month,
+      Value<String>? category,
+      Value<double>? total,
+      Value<int>? count,
+      Value<int>? rowid}) {
+    return ExpenseMonthlyCategoryCompanion(
+      month: month ?? this.month,
+      category: category ?? this.category,
+      total: total ?? this.total,
+      count: count ?? this.count,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (month.present) {
+      map['month'] = Variable<String>(month.value);
+    }
+    if (category.present) {
+      map['category'] = Variable<String>(category.value);
+    }
+    if (total.present) {
+      map['total'] = Variable<double>(total.value);
+    }
+    if (count.present) {
+      map['count'] = Variable<int>(count.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('ExpenseMonthlyCategoryCompanion(')
+          ..write('month: $month, ')
+          ..write('category: $category, ')
+          ..write('total: $total, ')
+          ..write('count: $count, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 class $NewsArticlesTable extends NewsArticles
     with TableInfo<$NewsArticlesTable, NewsArticle> {
   @override
@@ -4885,6 +5155,8 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final $ExpensesTable expenses = $ExpensesTable(this);
   late final $BudgetEntriesTable budgetEntries = $BudgetEntriesTable(this);
   late final $SalaryEntriesTable salaryEntries = $SalaryEntriesTable(this);
+  late final $ExpenseMonthlyCategoryTable expenseMonthlyCategory =
+      $ExpenseMonthlyCategoryTable(this);
   late final $NewsArticlesTable newsArticles = $NewsArticlesTable(this);
   late final $CloudFilesTable cloudFiles = $CloudFilesTable(this);
   late final $SavedWordsTable savedWords = $SavedWordsTable(this);
@@ -4908,6 +5180,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
         expenses,
         budgetEntries,
         salaryEntries,
+        expenseMonthlyCategory,
         newsArticles,
         cloudFiles,
         savedWords,
@@ -5449,6 +5722,171 @@ typedef $$SalaryEntriesTableProcessedTableManager = ProcessedTableManager<
     ),
     SalaryEntry,
     PrefetchHooks Function()>;
+typedef $$ExpenseMonthlyCategoryTableCreateCompanionBuilder
+    = ExpenseMonthlyCategoryCompanion Function({
+  required String month,
+  required String category,
+  Value<double> total,
+  Value<int> count,
+  Value<int> rowid,
+});
+typedef $$ExpenseMonthlyCategoryTableUpdateCompanionBuilder
+    = ExpenseMonthlyCategoryCompanion Function({
+  Value<String> month,
+  Value<String> category,
+  Value<double> total,
+  Value<int> count,
+  Value<int> rowid,
+});
+
+class $$ExpenseMonthlyCategoryTableFilterComposer
+    extends Composer<_$AppDatabase, $ExpenseMonthlyCategoryTable> {
+  $$ExpenseMonthlyCategoryTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get month => $composableBuilder(
+      column: $table.month, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get category => $composableBuilder(
+      column: $table.category, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<double> get total => $composableBuilder(
+      column: $table.total, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<int> get count => $composableBuilder(
+      column: $table.count, builder: (column) => ColumnFilters(column));
+}
+
+class $$ExpenseMonthlyCategoryTableOrderingComposer
+    extends Composer<_$AppDatabase, $ExpenseMonthlyCategoryTable> {
+  $$ExpenseMonthlyCategoryTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get month => $composableBuilder(
+      column: $table.month, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get category => $composableBuilder(
+      column: $table.category, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<double> get total => $composableBuilder(
+      column: $table.total, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<int> get count => $composableBuilder(
+      column: $table.count, builder: (column) => ColumnOrderings(column));
+}
+
+class $$ExpenseMonthlyCategoryTableAnnotationComposer
+    extends Composer<_$AppDatabase, $ExpenseMonthlyCategoryTable> {
+  $$ExpenseMonthlyCategoryTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get month =>
+      $composableBuilder(column: $table.month, builder: (column) => column);
+
+  GeneratedColumn<String> get category =>
+      $composableBuilder(column: $table.category, builder: (column) => column);
+
+  GeneratedColumn<double> get total =>
+      $composableBuilder(column: $table.total, builder: (column) => column);
+
+  GeneratedColumn<int> get count =>
+      $composableBuilder(column: $table.count, builder: (column) => column);
+}
+
+class $$ExpenseMonthlyCategoryTableTableManager extends RootTableManager<
+    _$AppDatabase,
+    $ExpenseMonthlyCategoryTable,
+    ExpenseMonthlyCategoryData,
+    $$ExpenseMonthlyCategoryTableFilterComposer,
+    $$ExpenseMonthlyCategoryTableOrderingComposer,
+    $$ExpenseMonthlyCategoryTableAnnotationComposer,
+    $$ExpenseMonthlyCategoryTableCreateCompanionBuilder,
+    $$ExpenseMonthlyCategoryTableUpdateCompanionBuilder,
+    (
+      ExpenseMonthlyCategoryData,
+      BaseReferences<_$AppDatabase, $ExpenseMonthlyCategoryTable,
+          ExpenseMonthlyCategoryData>
+    ),
+    ExpenseMonthlyCategoryData,
+    PrefetchHooks Function()> {
+  $$ExpenseMonthlyCategoryTableTableManager(
+      _$AppDatabase db, $ExpenseMonthlyCategoryTable table)
+      : super(TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$ExpenseMonthlyCategoryTableFilterComposer(
+                  $db: db, $table: table),
+          createOrderingComposer: () =>
+              $$ExpenseMonthlyCategoryTableOrderingComposer(
+                  $db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$ExpenseMonthlyCategoryTableAnnotationComposer(
+                  $db: db, $table: table),
+          updateCompanionCallback: ({
+            Value<String> month = const Value.absent(),
+            Value<String> category = const Value.absent(),
+            Value<double> total = const Value.absent(),
+            Value<int> count = const Value.absent(),
+            Value<int> rowid = const Value.absent(),
+          }) =>
+              ExpenseMonthlyCategoryCompanion(
+            month: month,
+            category: category,
+            total: total,
+            count: count,
+            rowid: rowid,
+          ),
+          createCompanionCallback: ({
+            required String month,
+            required String category,
+            Value<double> total = const Value.absent(),
+            Value<int> count = const Value.absent(),
+            Value<int> rowid = const Value.absent(),
+          }) =>
+              ExpenseMonthlyCategoryCompanion.insert(
+            month: month,
+            category: category,
+            total: total,
+            count: count,
+            rowid: rowid,
+          ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ));
+}
+
+typedef $$ExpenseMonthlyCategoryTableProcessedTableManager
+    = ProcessedTableManager<
+        _$AppDatabase,
+        $ExpenseMonthlyCategoryTable,
+        ExpenseMonthlyCategoryData,
+        $$ExpenseMonthlyCategoryTableFilterComposer,
+        $$ExpenseMonthlyCategoryTableOrderingComposer,
+        $$ExpenseMonthlyCategoryTableAnnotationComposer,
+        $$ExpenseMonthlyCategoryTableCreateCompanionBuilder,
+        $$ExpenseMonthlyCategoryTableUpdateCompanionBuilder,
+        (
+          ExpenseMonthlyCategoryData,
+          BaseReferences<_$AppDatabase, $ExpenseMonthlyCategoryTable,
+              ExpenseMonthlyCategoryData>
+        ),
+        ExpenseMonthlyCategoryData,
+        PrefetchHooks Function()>;
 typedef $$NewsArticlesTableCreateCompanionBuilder = NewsArticlesCompanion
     Function({
   required String id,
@@ -7485,6 +7923,9 @@ class $AppDatabaseManager {
       $$BudgetEntriesTableTableManager(_db, _db.budgetEntries);
   $$SalaryEntriesTableTableManager get salaryEntries =>
       $$SalaryEntriesTableTableManager(_db, _db.salaryEntries);
+  $$ExpenseMonthlyCategoryTableTableManager get expenseMonthlyCategory =>
+      $$ExpenseMonthlyCategoryTableTableManager(
+          _db, _db.expenseMonthlyCategory);
   $$NewsArticlesTableTableManager get newsArticles =>
       $$NewsArticlesTableTableManager(_db, _db.newsArticles);
   $$CloudFilesTableTableManager get cloudFiles =>

@@ -46,6 +46,9 @@ android {
 
 dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
+
+    // JVM unit tests for framework-free logic (e.g. SearchWidgetLogic).
+    testImplementation("junit:junit:4.13.2")
 }
 
 flutter {

@@ -16,12 +16,15 @@ import '../salary_screen.dart';
 /// Opens the AI expense-search ask sheet. The user types a plain-English
 /// question; Gemini (via backend) distils it into a structured query that we
 /// run against the local DB and render in the editable results screen.
-Future<void> showExpenseAiAskSheet(BuildContext context) {
+Future<void> showExpenseAiAskSheet(
+  BuildContext context, {
+  String? initialQuestion,
+}) {
   return showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
     backgroundColor: Colors.transparent,
-    builder: (_) => const _ExpenseAiAskSheet(),
+    builder: (_) => _ExpenseAiAskSheet(initialQuestion: initialQuestion),
   );
 }
 
@@ -42,7 +45,11 @@ const _gradB = Color(0xFFA855F7); // purple
 const _gradC = Color(0xFF22D3EE); // cyan
 
 class _ExpenseAiAskSheet extends ConsumerStatefulWidget {
-  const _ExpenseAiAskSheet();
+  const _ExpenseAiAskSheet({this.initialQuestion});
+
+  /// When provided (e.g. tapping a recommendation chip), the sheet opens with
+  /// this question pre-filled and submits it automatically.
+  final String? initialQuestion;
 
   @override
   ConsumerState<_ExpenseAiAskSheet> createState() => _ExpenseAiAskSheetState();
@@ -58,6 +65,13 @@ class _ExpenseAiAskSheetState extends ConsumerState<_ExpenseAiAskSheet> {
   void initState() {
     super.initState();
     _ctrl.addListener(_onTextChanged);
+    final preset = widget.initialQuestion?.trim();
+    if (preset != null && preset.isNotEmpty) {
+      _ctrl.text = preset;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _submit(preset);
+      });
+    }
   }
 
   void _onTextChanged() {
@@ -109,6 +123,8 @@ class _ExpenseAiAskSheetState extends ConsumerState<_ExpenseAiAskSheet> {
             seedSearch: question,
             aiAnswer: 'Showing keyword matches for "$question" '
                 '(AI is offline — refine with the search box).',
+            aiInsight: true,
+            aiQuestion: question,
           )
         : ExpenseTimeframe(
             label: spec.title,
@@ -120,6 +136,8 @@ class _ExpenseAiAskSheetState extends ConsumerState<_ExpenseAiAskSheet> {
             sort: spec.sort,
             aiAnswer: spec.answer.isEmpty ? null : spec.answer,
             chart: spec.chart,
+            aiInsight: true,
+            aiQuestion: question,
           );
 
     Navigator.of(context).pop();
