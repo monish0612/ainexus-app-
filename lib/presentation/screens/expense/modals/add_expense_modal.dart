@@ -32,6 +32,114 @@ const List<String> kDefaultExpenseModalBanks = [
   'CASH',
 ];
 
+/// Offline / last-resort parser for templated bank & card transaction SMS
+/// alerts (e.g. "Spent Rs.842 On HDFC Bank Card 5901 At SANTHOSH SUPER
+/// STORES On ..."). Only used for the shared-text path when the LLM
+/// smart-parse is unavailable (offline) or returned nothing, so the feature
+/// still works without a network round-trip. The LLM remains the primary,
+/// smarter path. Returns empty strings for fields it can't confidently
+/// recover. Kept top-level + pure so it is directly unit-testable.
+({String amount, String description, String bank, String cardType})
+    parseBankTransactionSms(String text) {
+  String amount = '';
+  String description = '';
+  String bank = '';
+  String cardType = '';
+
+  final flat = text.replaceAll('\n', ' ');
+  final lower = flat.toLowerCase();
+
+  // Amount: first Rs./INR/₹ followed by a number.
+  final amtMatch = RegExp(
+    r'(?:rs\.?|inr|₹)\s*([\d,]+(?:\.\d{1,2})?)',
+    caseSensitive: false,
+  ).firstMatch(flat);
+  if (amtMatch != null) {
+    final raw = double.tryParse(amtMatch.group(1)!.replaceAll(',', ''));
+    if (raw != null && raw > 0) amount = raw.toStringAsFixed(0);
+  }
+
+  // Issuing bank.
+  if (lower.contains('hdfc')) {
+    bank = 'HDFC';
+  } else if (lower.contains('icici')) {
+    bank = 'ICICI';
+  } else if (lower.contains('axis')) {
+    bank = 'AXIS';
+  } else if (lower.contains('scapia')) {
+    bank = 'SCAPIA';
+  }
+
+  // Card type.
+  final hasCc =
+      RegExp(r'block\s+cc|\bcredit\s*card\b|\bcc\b', caseSensitive: false)
+          .hasMatch(flat);
+  final hasDb = RegExp(
+    r'block\s+dc|\bdebit\s*card\b|\bdc\b|\bdb\b|a/c|account|\bupi\b',
+    caseSensitive: false,
+  ).hasMatch(flat);
+  if (hasCc) {
+    cardType = 'CC';
+  } else if (hasDb || bank.isNotEmpty) {
+    cardType = 'DB';
+  }
+
+  // Merchant / payee: text right after "At" or "To", up to a stop keyword.
+  // Stop the capture at the next structural keyword (by/on/ref/...) or the
+  // end. We deliberately do NOT stop on a bare "." so spaced initials like
+  // "B . KAMALAKANNAN" survive intact.
+  for (final m in RegExp(
+    r'\b(?:at|to)\s+(.+?)(?:\s+(?:by\b|on\b|ref\b|not\s+you|avl\b|to\s+block)|$)',
+    caseSensitive: false,
+  ).allMatches(flat)) {
+    final candidate = cleanMerchantName(m.group(1)!);
+    // A real merchant/payee must contain letters — this rejects the
+    // boilerplate "...BLOCK CC 5901 to <phone-number>" tail, so we never
+    // pick a phone/reference number as the description.
+    if (candidate.length >= 2 && RegExp(r'[A-Za-z]').hasMatch(candidate)) {
+      description = candidate;
+      break;
+    }
+  }
+
+  return (
+    amount: amount,
+    description: description,
+    bank: bank,
+    cardType: cardType,
+  );
+}
+
+/// Tidies a raw merchant/payee token from an SMS into a readable name:
+/// resolves UPI VPAs to the brand, normalises spacing/punctuation, and
+/// converts ALL-CAPS into Title Case.
+String cleanMerchantName(String raw) {
+  var s = raw.trim();
+
+  // UPI VPA like "paytm.s29gayk@pty" or "Q089615363@ybl".
+  if (s.contains('@')) {
+    final prefix = s.split('@').first;
+    final brand = prefix.split(RegExp(r'[.\d]')).first.trim();
+    if (brand.length >= 3 && RegExp(r'^[A-Za-z]+$').hasMatch(brand)) {
+      s = brand;
+    } else {
+      return 'UPI Payment';
+    }
+  }
+
+  s = s.replaceAll(RegExp(r'\s*\.\s*'), '. ');
+  s = s.replaceAll(RegExp(r'\s+'), ' ').trim();
+  if (s.isEmpty) return '';
+
+  return s
+      .split(' ')
+      .where((w) => w.isNotEmpty)
+      .map((w) => w.length == 1
+          ? w.toUpperCase()
+          : '${w[0].toUpperCase()}${w.substring(1).toLowerCase()}')
+      .join(' ');
+}
+
 class ExpenseSubmitPayload {
   const ExpenseSubmitPayload({
     required this.amount,
@@ -74,6 +182,7 @@ Future<void> showAddExpenseModal(
   required void Function(String description, String category) onTeachAI,
   List<String>? banks,
   String? initialImagePath,
+  String? initialText,
 }) {
   return showModalBottomSheet<void>(
     context: context,
@@ -87,6 +196,7 @@ Future<void> showAddExpenseModal(
       onAdd: onAdd,
       onTeachAI: onTeachAI,
       initialImagePath: initialImagePath,
+      initialText: initialText,
     ),
   );
 }
@@ -131,6 +241,7 @@ class _AddExpenseSheet extends StatefulWidget {
     required this.onAdd,
     required this.onTeachAI,
     this.initialImagePath,
+    this.initialText,
   });
 
   final CategoryLearning learnings;
@@ -144,6 +255,7 @@ class _AddExpenseSheet extends StatefulWidget {
   ) onAdd;
   final void Function(String description, String category) onTeachAI;
   final String? initialImagePath;
+  final String? initialText;
 
   @override
   State<_AddExpenseSheet> createState() => _AddExpenseSheetState();
@@ -165,6 +277,15 @@ class _AddExpenseSheetState extends State<_AddExpenseSheet>
     (text: 'AI categorizing expense…', emoji: '🧠', ms: 800),
   ];
 
+  // Shared-text path (e.g. a bank transaction SMS) — no OCR step, so the
+  // first two phases are lighter than the image/PDF flows.
+  static const _textScanPhases = [
+    (text: 'Reading shared text…', emoji: '📝', ms: 450),
+    (text: 'Understanding the message…', emoji: '🔍', ms: 650),
+    (text: 'Detecting amount & merchant…', emoji: '💰', ms: 900),
+    (text: 'AI categorizing expense…', emoji: '🧠', ms: 800),
+  ];
+
   // Mode: 0 = Scan, 1 = Manual, 2 = Voice
   // On web the Scan mode is hidden (Google ML Kit OCR is Android-only),
   // so we open the modal in Manual mode by default.
@@ -173,6 +294,18 @@ class _AddExpenseSheetState extends State<_AddExpenseSheet>
   int _scanPhaseIdx = 0;
   File? _capturedImage;
   bool _isPdf = false;
+
+  /// Non-null when the scan was started from shared freeform text (e.g. a
+  /// bank transaction SMS) instead of an image/PDF. Drives the preview card
+  /// and the active scan-phase labels.
+  String? _sharedText;
+
+  /// Phase list for whichever scan kind is currently running. Text shares
+  /// have no OCR step, so they get their own lighter phase labels.
+  List<({String text, String emoji, int ms})> get _activeScanPhases =>
+      _sharedText != null
+          ? _textScanPhases
+          : (_isPdf ? _pdfScanPhases : _scanPhases);
 
   final _amountCtrl = TextEditingController();
   final _descCtrl = TextEditingController();
@@ -272,6 +405,11 @@ class _AddExpenseSheetState extends State<_AddExpenseSheet>
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _processSharedImage(widget.initialImagePath!);
       });
+    } else if (widget.initialText != null &&
+        widget.initialText!.trim().isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _processSharedText(widget.initialText!);
+      });
     }
   }
 
@@ -350,6 +488,38 @@ class _AddExpenseSheetState extends State<_AddExpenseSheet>
     }
 
     await _runExtractionPipeline(ocrText, 'shared_image');
+    if (mounted) setState(() => _mode = 1);
+  }
+
+  /// Parse freeform text shared into the app (e.g. a bank transaction SMS)
+  /// straight through the smart-parse pipeline — no OCR step. Mirrors the
+  /// image/PDF share flow so the form auto-fills identically.
+  Future<void> _processSharedText(String text) async {
+    final trimmed = text.trim();
+    if (trimmed.isEmpty) return;
+
+    // Hold a foreground-service slot so the LLM round-trip survives the
+    // app being backgrounded mid-parse, identical to the image/PDF paths.
+    _acquireScanSlot('\uD83D\uDCDD Parsing shared text\u2026');
+    setState(() {
+      _isPdf = false;
+      _capturedImage = null;
+      _sharedText = trimmed;
+      _scanState = _ScanState.scanning;
+      _scanPhaseIdx = 0;
+      _mode = 0;
+    });
+
+    await Future<void>.delayed(
+      Duration(milliseconds: _textScanPhases[0].ms),
+    );
+    if (!mounted) return;
+    setState(() => _scanPhaseIdx = 1);
+    await Future<void>.delayed(
+      Duration(milliseconds: _textScanPhases[1].ms),
+    );
+
+    await _runExtractionPipeline(trimmed, 'shared_text');
     if (mounted) setState(() => _mode = 1);
   }
 
@@ -978,6 +1148,7 @@ class _AddExpenseSheetState extends State<_AddExpenseSheet>
       _scanState = _ScanState.idle;
       _capturedImage = null;
       _isPdf = false;
+      _sharedText = null;
     });
   }
 
@@ -1036,7 +1207,7 @@ class _AddExpenseSheetState extends State<_AddExpenseSheet>
     if (!mounted) return;
     setState(() => _scanPhaseIdx = 2);
     await Future<void>.delayed(
-      Duration(milliseconds: _scanPhases[2].ms),
+      Duration(milliseconds: _activeScanPhases[2].ms),
     );
 
     if (!mounted) return;
@@ -1069,6 +1240,27 @@ class _AddExpenseSheetState extends State<_AddExpenseSheet>
           }
         } catch (e) {
           TLog.w('AddExpense', 'Smart-parse failed for $source', error: e);
+        }
+      }
+
+      // Offline / failure fallback for shared bank-transaction SMS. These
+      // alerts are highly templated, so a local regex parse recovers the
+      // key fields when the LLM is unreachable (no network) or returns
+      // nothing — keeping the feature usable offline.
+      if (source == 'shared_text' &&
+          (extractedAmount.isEmpty || extractedDesc.isEmpty)) {
+        final local = parseBankTransactionSms(trimmedOcr);
+        if (extractedAmount.isEmpty && local.amount.isNotEmpty) {
+          extractedAmount = local.amount;
+        }
+        if (extractedDesc.isEmpty && local.description.isNotEmpty) {
+          extractedDesc = local.description;
+        }
+        if (extractedBank.isEmpty && local.bank.isNotEmpty) {
+          extractedBank = local.bank;
+        }
+        if (extractedCardType.isEmpty && local.cardType.isNotEmpty) {
+          extractedCardType = local.cardType;
         }
       }
 
@@ -1108,7 +1300,7 @@ class _AddExpenseSheetState extends State<_AddExpenseSheet>
     }
 
     await Future<void>.delayed(
-      Duration(milliseconds: _scanPhases[3].ms),
+      Duration(milliseconds: _activeScanPhases[3].ms),
     );
     if (!mounted) return;
 
@@ -1319,6 +1511,7 @@ class _AddExpenseSheetState extends State<_AddExpenseSheet>
                       _scanState = _ScanState.idle;
                       _capturedImage = null;
                       _isPdf = false;
+                      _sharedText = null;
                       _amountCtrl.clear();
                       _descCtrl.clear();
                     }
@@ -1672,7 +1865,7 @@ class _AddExpenseSheetState extends State<_AddExpenseSheet>
     }
 
     if (_scanState == _ScanState.scanning || _scanState == _ScanState.done) {
-      final phases = _isPdf ? _pdfScanPhases : _scanPhases;
+      final phases = _activeScanPhases;
       final phase = phases[_scanPhaseIdx];
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1704,6 +1897,32 @@ class _AddExpenseSheetState extends State<_AddExpenseSheet>
                             style: textTheme.bodySmall?.copyWith(
                               color: colors.text3,
                               fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    )
+                  else if (_sharedText != null)
+                    Container(
+                      color: colors.bg3,
+                      padding: const EdgeInsets.fromLTRB(16, 16, 16, 56),
+                      alignment: Alignment.topLeft,
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Icon(LucideIcons.messageSquare,
+                              size: 22,
+                              color: AppColors.accent.withValues(alpha: 0.8)),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              _sharedText!,
+                              maxLines: 6,
+                              overflow: TextOverflow.ellipsis,
+                              style: textTheme.bodySmall?.copyWith(
+                                color: colors.text2,
+                                height: 1.4,
+                              ),
                             ),
                           ),
                         ],
@@ -1767,7 +1986,11 @@ class _AddExpenseSheetState extends State<_AddExpenseSheet>
                           ),
                           const SizedBox(height: 8),
                           Text(
-                            _isPdf ? 'PDF Extracted ✓' : 'Bill Extracted ✓',
+                            _sharedText != null
+                                ? 'Text Parsed ✓'
+                                : (_isPdf
+                                    ? 'PDF Extracted ✓'
+                                    : 'Bill Extracted ✓'),
                             style: textTheme.titleSmall?.copyWith(
                               color: const Color(0xFF86EFAC),
                               fontWeight: FontWeight.w700,
@@ -1789,6 +2012,7 @@ class _AddExpenseSheetState extends State<_AddExpenseSheet>
                               _scanState = _ScanState.idle;
                               _capturedImage = null;
                               _isPdf = false;
+                              _sharedText = null;
                               _hasAttemptedSubmit = false;
                               _amountCtrl.clear();
                               _descCtrl.clear();

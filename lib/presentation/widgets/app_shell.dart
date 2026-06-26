@@ -225,6 +225,11 @@ class _AppShellState extends ConsumerState<AppShell>
           ref.read(currentTabProvider.notifier).state = 0;
           if (hasImage) {
             ref.read(pendingExpenseImageProvider.notifier).state = imagePath;
+          } else if (text != null && text.trim().isNotEmpty) {
+            // Shared text (e.g. a bank transaction SMS) → feed it through the
+            // same smart-parse pipeline the bill scanner uses to auto-fill the
+            // add-expense form.
+            ref.read(pendingExpenseTextProvider.notifier).state = text;
           }
         case 'summarizer':
           final url = text != null

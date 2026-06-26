@@ -426,12 +426,64 @@ class _ExpenseScreenState extends ConsumerState<ExpenseScreen>
     );
   }
 
+  void _openAddExpenseModalWithText(String sharedText) {
+    final learnings = ref.read(learningsProvider);
+    final aiService = ref.read(aiCategorizeServiceProvider);
+    final liteModel = ref.read(settingsProvider).liteModel;
+
+    showAddExpenseModal(
+      context,
+      learnings: learnings,
+      categorize: (description, l) =>
+          aiService.categorize(description, l, liteModel: liteModel),
+      smartParse: (text) => aiService.smartParse(text, liteModel: liteModel),
+      initialText: sharedText,
+      onAdd: (payload, isManual, meta) async {
+        final expense = Expense(
+          id: DateTime.now().millisecondsSinceEpoch.toString(),
+          amount: payload.amount,
+          description: payload.description,
+          category: payload.category,
+          bank: payload.bank,
+          cardType: payload.cardType,
+          date: payload.date,
+          isManualCategory: isManual,
+          comments: payload.comments,
+        );
+        final sw = Stopwatch()..start();
+        try {
+          final synced =
+              await ref.read(expenseRepositoryProvider).addExpense(expense);
+          sw.stop();
+          TLog.i('Expense',
+              '✅ Added (shared text) in ${sw.elapsedMilliseconds}ms: ₹${payload.amount.toStringAsFixed(0)} | ${payload.description} | ${payload.category}');
+          if (!synced) _showSyncError();
+        } catch (e) {
+          sw.stop();
+          TLog.e('Expense', 'Failed to add expense from shared text (${sw.elapsedMilliseconds}ms)', error: e);
+        }
+      },
+      onTeachAI: (description, category) {
+        ref
+            .read(learningsProvider.notifier)
+            .learnFromDescription(description, category);
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     ref.listen<String?>(pendingExpenseImageProvider, (prev, next) {
       if (next != null && next.isNotEmpty) {
         ref.read(pendingExpenseImageProvider.notifier).state = null;
         _openAddExpenseModalWithImage(next);
+      }
+    });
+
+    ref.listen<String?>(pendingExpenseTextProvider, (prev, next) {
+      if (next != null && next.trim().isNotEmpty) {
+        ref.read(pendingExpenseTextProvider.notifier).state = null;
+        _openAddExpenseModalWithText(next);
       }
     });
 

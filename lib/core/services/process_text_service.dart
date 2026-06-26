@@ -20,6 +20,13 @@ final pendingSummarizerUrlProvider = StateProvider<String?>((ref) => null);
 /// Set by AppShell, consumed by ExpenseScreen.
 final pendingExpenseImageProvider = StateProvider<String?>((ref) => null);
 
+/// Holds freeform text shared via ACTION_SEND (e.g. a bank transaction SMS)
+/// that should be parsed into an expense. Set by AppShell, consumed by
+/// ExpenseScreen. The text is fed straight into the smart-parse pipeline —
+/// the same one the bill/image scanner uses — to auto-fill the add-expense
+/// form (amount, merchant, category, bank, card type).
+final pendingExpenseTextProvider = StateProvider<String?>((ref) => null);
+
 /// Holds a search query to route to the Summarizer tab's search flow.
 /// Set by AppShell, consumed by TutorScreen.
 final pendingSearchQueryProvider = StateProvider<String?>((ref) => null);
