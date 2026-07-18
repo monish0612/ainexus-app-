@@ -1,12 +1,17 @@
+// Live integration test: exercises the REAL Google Drive service through the
+// backend token broker. Requires network + configured cloud credentials, so it
+// is tagged `live` and skipped in the default `flutter test` run (see
+// dart_test.yaml). Run explicitly with:
+//   flutter test --tags live --run-skipped test/google_drive_integration_test.dart
+@Tags(['live'])
+library;
+
 import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:ai_nexus/data/services/google_drive_service.dart';
-
-/// Integration test that exercises the real Google Drive service.
-/// Requires network access. Run with: flutter test test/google_drive_integration_test.dart
 void main() {
   late GoogleDriveService service;
   late File tempFile;

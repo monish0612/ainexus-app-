@@ -1,0 +1,24 @@
+---
+description: Canonical web-app directory — never edit any legacy web/src copy
+alwaysApply: true
+---
+
+# Web App Lives in `ainexus-web/` — NEVER `web/src`
+
+The React/Vite web app is a **sibling** of this Flutter workspace.
+
+- ✅ CANONICAL (always edit here): `D:\Projects\Android-App\ainexus-web\`
+  - This is the deployed repo (`src/`, `package.json`, `Dockerfile`, `vite.config.ts`, `nginx.conf.template`).
+- ❌ NEVER edit any `web/src` directory. A legacy "split-brain" copy at
+  `ai_nexus/web/src/` caused fixes to silently not ship. It has been removed —
+  do not recreate it, and do not edit files under any `web/src` path.
+- ℹ️ `ai_nexus/web/` is ONLY Flutter's web shell (`index.html`, `manifest.json`,
+  `favicon.png`, `icons/`). It is **not** the React app. The Android/Flutter
+  build never touches React source.
+
+## Before changing web code
+
+1. Confirm the file path starts with `D:\Projects\Android-App\ainexus-web\src\`.
+2. If you find yourself opening anything under a `web/src` folder, STOP — that is
+   the wrong (dead) copy. Port the change to `ainexus-web/` instead.
+3. Run the web checks from `ainexus-web/`: `npm run test -- --run` and `npm run build`.

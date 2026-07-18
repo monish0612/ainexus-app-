@@ -117,19 +117,25 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('quick chips log yesterday / tomorrow (any month boundary safe)',
+  testWidgets('quick chips log yesterday / tomorrow (relative to real today)',
       (tester) async {
-    final today = DateTime(2026, 7, 3);
+    // The Yesterday/Today/Tomorrow chips are anchored to the REAL current
+    // date (DateTime.now()), not to the selected date — "Yesterday" always
+    // means the day before today, regardless of which day is selected. So we
+    // derive the expectations from now() the same way the widget does, which
+    // keeps this test correct on every calendar day (the old version hard-
+    // coded 2026-07-02/04 and only passed on 2026-07-03).
+    final today = dateOnly(DateTime.now());
     final log = <DateTime>[];
     await _pump(tester, today, log);
 
     await tester.tap(find.text('Yesterday'));
     await tester.pumpAndSettle();
-    expect(log.last, DateTime(2026, 7, 2));
+    expect(log.last, today.subtract(const Duration(days: 1)));
 
     await tester.tap(find.text('Tomorrow'));
     await tester.pumpAndSettle();
-    expect(log.last, DateTime(2026, 7, 4));
+    expect(log.last, today.add(const Duration(days: 1)));
     expect(tester.takeException(), isNull);
   });
 

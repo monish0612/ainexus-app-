@@ -1,0 +1,12 @@
+# Test runner config.
+#
+# `live` tags real end-to-end tests that hit the deployed backend / Google
+# Drive / LLM providers. They need network access and configured credentials,
+# so they are SKIPPED in the default `flutter test` run (keeps CI green and
+# avoids burning provider tokens). Run them explicitly against a live backend:
+#
+#   flutter test --tags live --run-skipped \
+#     --dart-define=API_BASE_URL=http://localhost:3000
+tags:
+  live:
+    skip: "Live backend/credentials required. Run: flutter test --tags live --run-skipped"

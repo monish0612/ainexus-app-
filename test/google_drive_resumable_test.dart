@@ -1,3 +1,10 @@
+// Live integration test (resumable/chunked upload). Requires network +
+// configured cloud credentials, so it is tagged `live` and skipped by default
+// (see dart_test.yaml). Run explicitly with:
+//   flutter test --tags live --run-skipped test/google_drive_resumable_test.dart
+@Tags(['live'])
+library;
+
 import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
