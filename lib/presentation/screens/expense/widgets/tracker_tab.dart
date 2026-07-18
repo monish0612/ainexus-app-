@@ -78,10 +78,11 @@ class _TrackerTabState extends State<TrackerTab> {
 
   DateTime _parseDate(String raw) => safeParseDate(raw);
 
-  /// Spending only — investments are wealth-building, not expenses, so every
-  /// total / chart / list on this tab is computed from this filtered view.
+  /// Spending only — investments (wealth) and loan repayments (debt) are not
+  /// expenses, so every total / chart / list on this tab is computed from this
+  /// filtered view.
   List<ExpenseData> get _spend => widget.expenses
-      .where((e) => !isInvestmentCategory(e.category))
+      .where((e) => !isNonSpendCategory(e.category))
       .toList(growable: false);
 
   List<ExpenseData> _expensesInCurrentMonth(DateTime now) {
@@ -97,29 +98,38 @@ class _TrackerTabState extends State<TrackerTab> {
   double _sumAmounts(Iterable<ExpenseData> items) =>
       items.fold<double>(0, (s, e) => s + e.amount.toDouble());
 
+  /// Filters [_spend] to the half-open range `[start, end)`. A null [end] means
+  /// no upper bound (used by the "All" period, which includes future-dated
+  /// entries such as a next-month bill).
+  List<ExpenseData> _inRange(DateTime start, DateTime? end) {
+    return _spend.where((e) {
+      final d = _parseDate(e.date);
+      if (d.isBefore(start)) return false;
+      if (end != null && !d.isBefore(end)) return false;
+      return true;
+    }).toList();
+  }
+
   List<ExpenseData> _analysisExpenses(int index, DateTime now) {
+    // Upper bound for the bounded periods: start of tomorrow, so anything
+    // logged today counts but future-dated entries (e.g. NM 1st) do NOT leak
+    // into Today/7D — they surface in their own period and under "All".
+    final tomorrow = DateTime(now.year, now.month, now.day)
+        .add(const Duration(days: 1));
+    final nextMonthStart = DateTime(now.year, now.month + 1, 1);
     switch (index) {
       case 0:
-        final start = DateTime(now.year, now.month, now.day);
-        return _spend
-            .where((e) => !_parseDate(e.date).isBefore(start))
-            .toList();
+        return _inRange(DateTime(now.year, now.month, now.day), tomorrow);
       case 1:
         final start = DateTime(now.year, now.month, now.day)
             .subtract(const Duration(days: 6));
-        return _spend
-            .where((e) => !_parseDate(e.date).isBefore(start))
-            .toList();
+        return _inRange(start, tomorrow);
       case 2:
-        final start = DateTime(now.year, now.month, 1);
-        return _spend
-            .where((e) => !_parseDate(e.date).isBefore(start))
-            .toList();
+        // This calendar month only.
+        return _inRange(DateTime(now.year, now.month, 1), nextMonthStart);
       case 3:
-        final start = DateTime(now.year, now.month - 6, 1);
-        return _spend
-            .where((e) => !_parseDate(e.date).isBefore(start))
-            .toList();
+        // Trailing six months through the end of the current month.
+        return _inRange(DateTime(now.year, now.month - 6, 1), nextMonthStart);
       default:
         return List<ExpenseData>.from(_spend);
     }
@@ -290,13 +300,18 @@ class _TrackerTabState extends State<TrackerTab> {
         .toList();
   }
 
-  List<ExpenseData> _last24Hours(DateTime now) {
-    final cutoff = now.subtract(const Duration(hours: 24));
-    final recent = _spend
-        .where((e) => !_parseDate(e.date).isBefore(cutoff))
-        .toList()
+  /// How many rows the "Most Recent Transactions" section shows before the
+  /// "View all" affordance takes over.
+  static const int _recentLimit = 15;
+
+  /// The most recent transactions by their (user-selected) date, newest first.
+  /// Because this sorts by the expense date — not the 24h clock — a backdated
+  /// entry (yesterday / last month) or a forward-dated one (next month) shows
+  /// up here immediately after logging, so nothing ever feels "untracked".
+  List<ExpenseData> _mostRecentTransactions() {
+    final sorted = List<ExpenseData>.from(_spend)
       ..sort((a, b) => _parseDate(b.date).compareTo(_parseDate(a.date)));
-    return recent;
+    return sorted.take(_recentLimit).toList();
   }
 
   void _goAnalysis(int index) {
@@ -364,7 +379,8 @@ class _TrackerTabState extends State<TrackerTab> {
       allTimeTop: allTimeSlices,
     );
 
-    final recent24h = _last24Hours(now);
+    final recent = _mostRecentTransactions();
+    final totalTxns = _spend.length;
 
     return SingleChildScrollView(
       padding: const EdgeInsets.only(bottom: 120),
@@ -461,11 +477,13 @@ class _TrackerTabState extends State<TrackerTab> {
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: _RecentTransactionsSection(
               colors: colors,
-              recentExpenses: recent24h,
+              recentExpenses: recent,
+              totalCount: totalTxns,
               allExpensesEmpty: _spend.isEmpty,
               onAddExpense: widget.onAddExpense,
               onEdit: widget.onEditExpense,
               onDelete: widget.onDeleteExpense,
+              onViewAll: () => widget.onOpenTimeframe(4),
             ),
           ),
         ],
@@ -1486,18 +1504,29 @@ class _RecentTransactionsSection extends StatelessWidget {
   const _RecentTransactionsSection({
     required this.colors,
     required this.recentExpenses,
+    required this.totalCount,
     required this.allExpensesEmpty,
     required this.onAddExpense,
     required this.onEdit,
     required this.onDelete,
+    required this.onViewAll,
   });
 
   final AppColors colors;
   final List<ExpenseData> recentExpenses;
+
+  /// Total number of (spending) transactions across all time — drives the
+  /// header badge and whether the "View all" footer is shown.
+  final int totalCount;
   final bool allExpensesEmpty;
   final VoidCallback onAddExpense;
   final void Function(ExpenseData expense) onEdit;
   final void Function(String id) onDelete;
+  final VoidCallback onViewAll;
+
+  /// Calendar-day grouping key so we render one date header per day.
+  String _dayKey(DateTime d) =>
+      '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
 
   @override
   Widget build(BuildContext context) {
@@ -1538,11 +1567,43 @@ class _RecentTransactionsSection extends StatelessWidget {
       );
     }
 
-    final count = recentExpenses.length;
-    final total = recentExpenses.fold<double>(
-      0,
-      (s, e) => s + e.amount.toDouble(),
-    );
+    final hasMore = totalCount > recentExpenses.length;
+
+    // Build a grouped list: one small date header per calendar day, then the
+    // transactions for that day. Newest day first (list is already sorted).
+    final children = <Widget>[];
+    String? lastKey;
+    for (final e in recentExpenses) {
+      final dt = safeParseDate(e.date);
+      final key = _dayKey(dt);
+      if (key != lastKey) {
+        children.add(
+          Padding(
+            padding: EdgeInsets.only(left: 4, top: lastKey == null ? 0 : 8, bottom: 6),
+            child: Text(
+              formatRelativeTime(dt).toUpperCase(),
+              style: GoogleFonts.plusJakartaSans(
+                fontSize: 9,
+                fontWeight: FontWeight.w700,
+                color: colors.text5,
+                letterSpacing: 0.8,
+              ),
+            ),
+          ),
+        );
+        lastKey = key;
+      }
+      children.add(
+        Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: ExpenseItem(
+            expense: e,
+            onEdit: () => onEdit(e),
+            onDelete: () => onDelete(e.id),
+          ),
+        ),
+      );
+    }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1564,120 +1625,95 @@ class _RecentTransactionsSection extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 8),
-            Text(
-              'Last 24 Hours',
-              style: GoogleFonts.plusJakartaSans(
-                fontSize: 14,
-                fontWeight: FontWeight.w700,
-                letterSpacing: 0.3,
-                color: colors.text,
-              ),
-            ),
-            const Spacer(),
-            if (count > 0) ...[
-              Flexible(
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 4,
-                  ),
-                  decoration: BoxDecoration(
-                    color: const Color(0x1A6366F1),
-                    borderRadius: BorderRadius.circular(999),
-                    border: Border.all(
-                      color: const Color(0x336366F1),
-                    ),
-                  ),
-                  child: Text(
-                    '$count txn${count != 1 ? 's' : ''} · ${formatCurrency(total)}',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: GoogleFonts.plusJakartaSans(
-                      fontSize: 10,
-                      fontWeight: FontWeight.w700,
-                      color: const Color(0xFF818CF8),
-                    ),
-                  ),
+            Expanded(
+              child: Text(
+                'Most Recent Transactions',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: GoogleFonts.plusJakartaSans(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.3,
+                  color: colors.text,
                 ),
               ),
-            ],
+            ),
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 10,
+                vertical: 4,
+              ),
+              decoration: BoxDecoration(
+                color: const Color(0x1A6366F1),
+                borderRadius: BorderRadius.circular(999),
+                border: Border.all(
+                  color: const Color(0x336366F1),
+                ),
+              ),
+              child: Text(
+                '$totalCount txn${totalCount != 1 ? 's' : ''}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: GoogleFonts.plusJakartaSans(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w700,
+                  color: const Color(0xFF818CF8),
+                ),
+              ),
+            ),
           ],
         ),
         const SizedBox(height: 4),
-        Row(
-          children: [
-            const SizedBox(width: 16),
-            Text(
-              '← swipe to edit/delete',
-              style: GoogleFonts.plusJakartaSans(
-                fontSize: 9,
-                color: colors.text5,
-              ),
+        Padding(
+          padding: const EdgeInsets.only(left: 16),
+          child: Text(
+            '← swipe to edit / delete',
+            style: GoogleFonts.plusJakartaSans(
+              fontSize: 9,
+              color: colors.text5,
             ),
-          ],
+          ),
         ),
         const SizedBox(height: 12),
-        if (recentExpenses.isEmpty)
-          Container(
-            padding: const EdgeInsets.symmetric(vertical: 32, horizontal: 24),
-            decoration: BoxDecoration(
-              color: colors.bg2,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: colors.border),
-            ),
-            child: Column(
-              children: [
-                const Text('✨', style: TextStyle(fontSize: 36)),
-                const SizedBox(height: 12),
-                Text(
-                  'All clear!',
-                  style: GoogleFonts.plusJakartaSans(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w700,
-                    color: colors.text3,
-                  ),
+        ...children,
+        if (hasMore) ...[
+          const SizedBox(height: 4),
+          Material(
+            color: colors.bg2,
+            borderRadius: BorderRadius.circular(14),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(14),
+              onTap: onViewAll,
+              child: Container(
+                padding: const EdgeInsets.symmetric(vertical: 13),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: colors.border),
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  'No expenses in the last 24 hours',
-                  style: GoogleFonts.plusJakartaSans(
-                    fontSize: 12,
-                    color: colors.text5,
-                  ),
-                ),
-              ],
-            ),
-          )
-        else
-          ...recentExpenses.map((e) {
-            final dt = safeParseDate(e.date);
-            final relTime = formatRelativeTime(dt);
-            return Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.only(left: 4, bottom: 4),
-                    child: Text(
-                      relTime,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      'View all $totalCount transactions',
                       style: GoogleFonts.plusJakartaSans(
-                        fontSize: 9,
-                        fontWeight: FontWeight.w600,
-                        color: colors.text5,
-                        letterSpacing: 0.3,
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w700,
+                        color: const Color(0xFF818CF8),
                       ),
                     ),
-                  ),
-                  ExpenseItem(
-                    expense: e,
-                    onEdit: () => onEdit(e),
-                    onDelete: () => onDelete(e.id),
-                  ),
-                ],
+                    const SizedBox(width: 4),
+                    const Icon(
+                      LucideIcons.arrowRight,
+                      size: 14,
+                      color: Color(0xFF818CF8),
+                    ),
+                  ],
+                ),
               ),
-            );
-          }),
+            ),
+          ),
+        ],
       ],
     );
   }

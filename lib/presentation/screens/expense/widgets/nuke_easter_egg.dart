@@ -69,14 +69,28 @@ class _NukeConfirmDialog extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isFull = scope == NukeScope.full;
-    final title = isFull ? 'Nuke the entire app?' : 'Nuke expenses?';
-    final body = isFull
-        ? 'This permanently deletes ALL local data — expenses, budget, salary, '
-            'news, saved words, files, searches & learnings — and clears your '
-            'cloud financial data. Tables stay, every row is wiped. No undo.'
-        : 'This permanently deletes ALL expenses, budget history and salary '
-            'records from this device AND the cloud. There is no undo.';
+    final (String title, String body, String cta) = switch (scope) {
+      NukeScope.full => (
+          'Nuke the entire app?',
+          'This permanently deletes ALL local data — expenses, budget, salary, '
+              'news, saved words, files, searches & learnings — and clears your '
+              'cloud financial data. Tables stay, every row is wiped. No undo.',
+          'Nuke all',
+        ),
+      NukeScope.news => (
+          'Nuke all news?',
+          'This permanently deletes EVERY article — including your saved ones — '
+              'from this device AND the server. Read, unread, saved: all of it. '
+              'There is no undo.',
+          'Nuke news',
+        ),
+      NukeScope.expense => (
+          'Nuke expenses?',
+          'This permanently deletes ALL expenses, budget history and salary '
+              'records from this device AND the cloud. There is no undo.',
+          'Nuke it',
+        ),
+    };
 
     return Dialog(
       backgroundColor: Colors.transparent,
@@ -178,7 +192,7 @@ class _NukeConfirmDialog extends StatelessWidget {
                         color: Colors.white,
                       ),
                       label: Text(
-                        isFull ? 'Nuke all' : 'Nuke it',
+                        cta,
                         style: GoogleFonts.plusJakartaSans(
                           fontSize: 14,
                           fontWeight: FontWeight.w800,
@@ -248,9 +262,24 @@ class _NukeReportWindowState extends State<_NukeReportWindow>
   @override
   Widget build(BuildContext context) {
     final report = widget.report;
-    final isFull = report.scope == NukeScope.full;
     final lines = report.nonEmptyLines;
-    final headline = isFull ? 'SYSTEM WIPED' : 'EXPENSES NUKED';
+    final (String headline, String coreGlyph, String subtitle) = switch (report.scope) {
+      NukeScope.full => (
+          'SYSTEM WIPED',
+          '☢️',
+          'All systems reset to a clean slate',
+        ),
+      NukeScope.news => (
+          'NEWS WIPED',
+          '📰',
+          'Every article cleared — a clean slate',
+        ),
+      NukeScope.expense => (
+          'EXPENSES NUKED',
+          '💥',
+          'Financial data reset to a clean slate',
+        ),
+    };
 
     return Center(
       child: Padding(
@@ -294,7 +323,7 @@ class _NukeReportWindowState extends State<_NukeReportWindow>
                             colorB: _neonA,
                           ),
                           child: Center(
-                            child: _PulsingGlyph(emoji: isFull ? '☢️' : '💥'),
+                            child: _PulsingGlyph(emoji: coreGlyph),
                           ),
                         ),
                       ),
@@ -327,9 +356,7 @@ class _NukeReportWindowState extends State<_NukeReportWindow>
                         ),
                         const SizedBox(height: 6),
                         Text(
-                          isFull
-                              ? 'All systems reset to a clean slate'
-                              : 'Financial data reset to a clean slate',
+                          subtitle,
                           textAlign: TextAlign.center,
                           style: GoogleFonts.plusJakartaSans(
                             fontSize: 12.5,

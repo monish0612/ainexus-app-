@@ -21,6 +21,7 @@ import 'package:ai_nexus/core/services/reset_sync_service.dart';
 import 'package:ai_nexus/core/services/saved_search_store.dart';
 import 'package:ai_nexus/data/local/database/app_database.dart' as db;
 import 'package:ai_nexus/data/repositories/expense_repository.dart';
+import 'package:ai_nexus/data/repositories/news_repository.dart';
 import 'package:ai_nexus/data/repositories/salary_repository.dart';
 import 'package:ai_nexus/data/repositories/saved_words_repository.dart';
 import 'package:dio/dio.dart';
@@ -114,6 +115,7 @@ void main() {
         expenseRepo,
         salaryRepo,
         savedWordsRepo,
+        NewsRepository(database, api),
         resetSync,
         clearSavedSearches: () async {
           savedSearchCalls++;

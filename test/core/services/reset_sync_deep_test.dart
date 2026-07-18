@@ -16,6 +16,7 @@ import 'package:ai_nexus/core/services/nuke_report.dart';
 import 'package:ai_nexus/core/services/reset_sync_service.dart';
 import 'package:ai_nexus/data/local/database/app_database.dart' as db;
 import 'package:ai_nexus/data/repositories/expense_repository.dart';
+import 'package:ai_nexus/data/repositories/news_repository.dart';
 import 'package:ai_nexus/data/repositories/salary_repository.dart';
 import 'package:ai_nexus/data/repositories/saved_words_repository.dart';
 import 'package:dio/dio.dart';
@@ -111,6 +112,7 @@ class _Device {
         expenseRepo,
         salaryRepo,
         savedWordsRepo,
+        NewsRepository(database, api),
         reset,
         clearSavedSearches: () async => true,
       );

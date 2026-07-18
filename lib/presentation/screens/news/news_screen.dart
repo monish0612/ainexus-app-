@@ -10,6 +10,7 @@ import 'package:lucide_icons/lucide_icons.dart';
 import '../../../core/di/injection.dart';
 import '../../../core/services/news_summarize_store.dart';
 import '../../../core/services/notification_service.dart';
+import '../../../core/services/nuke_report.dart';
 import '../../../core/services/telegram_logger.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/utils/retry.dart';
@@ -17,6 +18,7 @@ import '../../../domain/entities/news_entities.dart';
 import '../../widgets/compact_header.dart';
 import '../../widgets/news_action_fab.dart';
 import '../../widgets/swipe_to_delete.dart';
+import '../expense/widgets/nuke_easter_egg.dart';
 import '../settings/settings_controller.dart';
 import '../settings/settings_modal.dart';
 import 'article_detail_modal.dart';
@@ -194,6 +196,32 @@ class _NewsScreenState extends ConsumerState<NewsScreen>
         .toList(growable: false);
   }
 
+  /// Saved-search box handler. Doubles as the entry point for the hidden
+  /// `nuke` command: typing it (exact, case-insensitive) wipes EVERY article —
+  /// including saved ones — locally and on the server, instead of filtering.
+  /// Intercepted before it ever becomes a search query.
+  void _onSavedSearch(String value) {
+    if (value.trim().toLowerCase() == 'nuke') {
+      _savedSearchCtrl.clear();
+      setState(() => _savedSearch = '');
+      unawaited(_handleNewsNuke());
+      return;
+    }
+    setState(() => _savedSearch = value);
+  }
+
+  /// Runs the news-scope nuke easter egg: friction-y confirm → wipe all
+  /// articles (saved + unread + read) local + server → cinematic report.
+  Future<void> _handleNewsNuke() async {
+    final confirmed = await NukeEasterEgg.confirm(context, NukeScope.news);
+    if (!mounted || !confirmed) return;
+
+    TLog.w('News', '☢️ News nuke confirmed — wiping ALL articles incl. saved');
+    final report = await ref.read(newsNukeServiceProvider).nuke();
+    if (!mounted) return;
+    await NukeEasterEgg.showReport(context, report);
+  }
+
   Future<void> _handleRefresh() async {
     try {
       final newCount =
@@ -311,19 +339,18 @@ class _NewsScreenState extends ConsumerState<NewsScreen>
   /// Swipe-to-delete handler used by Movies/General list rows.
   ///
   /// Semantics:
-  ///   • Local DB is mutated first (mark as read) so the row disappears
-  ///     instantly — the Drift stream rebuilds the feed within one frame.
-  ///   • Article follow-up chat state is wiped (mirrors the Saved-tab
-  ///     `onRemove` contract).
-  ///   • All work is wrapped in [_runWithRetry] so a transient local-DB
+  ///   • The article is permanently removed — the local DB row is deleted
+  ///     first so it disappears instantly (the Drift stream rebuilds the feed
+  ///     within one frame), then the server is told to delete + tombstone it
+  ///     so the RSS sync never re-imports it and it leaves the website too.
+  ///   • Article follow-up chat state is wiped (handled inside
+  ///     `deleteArticle`, mirrored by the Saved-tab `onRemove` contract).
+  ///   • All work is wrapped in [runWithRetry] so a transient local-DB
   ///     failure (very rare — main-thread SQLite contention) gets one quiet
   ///     retry before we surface the error to the user.
   ///   • Successes are logged at info, failures at error. Both flow through
   ///     the production [TLog] pipeline (batched + exponential-backoff
   ///     Telegram delivery). Error logs are flushed immediately.
-  ///
-  /// The remote leg (already-built `markRead` repo API) is best-effort and
-  /// fire-and-forget — the user-visible UX never blocks on the network.
   Future<void> _deleteArticle(Article article) async {
     final id = article.id;
     final category = article.category;
@@ -336,10 +363,9 @@ class _NewsScreenState extends ConsumerState<NewsScreen>
         operation: 'swipe-delete[$category]',
         attempts: 3,
         action: () async {
-          await ref.read(newsControllerProvider.notifier).markRead(id);
+          await ref.read(newsControllerProvider.notifier).deleteArticle(id);
         },
       );
-      ArticleFollowUpStore.instance.clear(id);
       TLog.i('News',
           'Swipe-delete ✓ id=$id category=$category title="${_safeTitle(article.title)}"');
     } catch (e, st) {
@@ -671,7 +697,7 @@ class _NewsScreenState extends ConsumerState<NewsScreen>
                         colors: colors,
                         searchController: _savedSearchCtrl,
                         search: _savedSearch,
-                        onSearch: (s) => setState(() => _savedSearch = s),
+                        onSearch: _onSavedSearch,
                         savedEmpty: savedArticles.isEmpty,
                         filteredEmpty:
                             filteredSaved.isEmpty && savedArticles.isNotEmpty,
@@ -679,13 +705,12 @@ class _NewsScreenState extends ConsumerState<NewsScreen>
                         onRefresh: _handleRefresh,
                         onOpen: _openArticle,
                         onRemove: (id) {
+                          // Removing from Saved deletes the article outright
+                          // (local row + server delete + tombstone) so it
+                          // never resurfaces in the feed or on the website.
                           ref
                               .read(newsControllerProvider.notifier)
-                              .toggleSaved(id);
-                          ref
-                              .read(newsControllerProvider.notifier)
-                              .markRead(id);
-                          ArticleFollowUpStore.instance.clear(id);
+                              .deleteArticle(id);
                         },
                       ),
                     ],
@@ -2057,7 +2082,7 @@ class _ClearAllConfirmSheet extends StatelessWidget {
         : 'Clear all unread?';
     final bodyText = scopeLabel != null
         ? '$count article${count == 1 ? '' : 's'} from $scopeLabel will be removed from your feed. Saved articles are not affected.'
-        : '$count article${count == 1 ? '' : 's'} will be marked as read and disappear from For You. Saved articles are not affected.';
+        : '$count article${count == 1 ? '' : 's'} will be removed from For You. Saved articles are not affected.';
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Container(

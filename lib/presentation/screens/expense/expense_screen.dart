@@ -203,9 +203,18 @@ class _ExpenseScreenState extends ConsumerState<ExpenseScreen>
     showAddExpenseModal(
       context,
       learnings: learnings,
+      bankConfigs: ref.read(settingsProvider).banks,
       categorize: (description, l) =>
           aiService.categorize(description, l, liteModel: liteModel),
-      smartParse: (text) => aiService.smartParse(text, liteModel: liteModel),
+      smartParse: (text) => aiService.smartParse(
+        text,
+        liteModel: liteModel,
+        banks: ref
+            .read(settingsProvider)
+            .banks
+            .map((b) => b.name)
+            .toList(),
+      ),
       onAdd: (payload, isManual, meta) async {
         final expense = Expense(
           id: DateTime.now().millisecondsSinceEpoch.toString(),
@@ -270,6 +279,7 @@ class _ExpenseScreenState extends ConsumerState<ExpenseScreen>
     showEditExpenseModal(
       context,
       expense: expense,
+      bankConfigs: ref.read(settingsProvider).banks,
       onUpdate: (updated) async {
         final sw = Stopwatch()..start();
         try {
@@ -346,31 +356,44 @@ class _ExpenseScreenState extends ConsumerState<ExpenseScreen>
 
   void _openTimeframe(int index) {
     final now = DateTime.now();
+    // Exclusive upper bounds ([start, end)) so future-dated entries (e.g. a
+    // next-month bill) stay out of Today/7D/1M/6M and only appear under "All".
+    // Mirrors TrackerTab's analysis ranges. (endIso is applied as `date < end`.)
+    final tomorrow =
+        DateTime(now.year, now.month, now.day).add(const Duration(days: 1));
+    final nextMonthStart = DateTime(now.year, now.month + 1, 1);
     String label;
     DateTime? start;
+    DateTime? end;
     switch (index) {
       case 0:
         label = 'Today';
         start = DateTime(now.year, now.month, now.day);
+        end = tomorrow;
       case 1:
         label = '7D';
         start = DateTime(now.year, now.month, now.day)
             .subtract(const Duration(days: 6));
+        end = tomorrow;
       case 2:
         label = '1M';
         start = DateTime(now.year, now.month, 1);
+        end = nextMonthStart;
       case 3:
         label = '6M';
         start = DateTime(now.year, now.month - 6, 1);
+        end = nextMonthStart;
       default:
         label = 'All';
         start = null;
+        end = null;
     }
     showExpenseTimeframeScreen(
       context,
       ExpenseTimeframe(
         label: label,
         startIso: start?.toIso8601String(),
+        endIso: end?.toIso8601String(),
       ),
     );
   }
@@ -391,6 +414,18 @@ class _ExpenseScreenState extends ConsumerState<ExpenseScreen>
     showExpenseAiAskSheet(context);
   }
 
+  /// Entry point from the home-screen Expense widget's "Add" pill. Ensures the
+  /// Tracker sub-tab is active, then opens the Add-expense sheet once the frame
+  /// settles (mirrors [_openAiSearchFromWidget]).
+  void _openAddExpenseFromWidget() {
+    if (_tabCtrl.index != 0) _tabCtrl.animateTo(0);
+    Future.delayed(const Duration(milliseconds: 350), () {
+      if (!mounted) return;
+      TLog.i('Widget', 'Opening Add expense from widget');
+      _openAddExpenseModal();
+    });
+  }
+
   /// Opens the full Investments portfolio drill-down (all-time), reusing the
   /// robust timeframe screen scoped to the Investment category.
   void _openInvestments() {
@@ -401,6 +436,21 @@ class _ExpenseScreenState extends ConsumerState<ExpenseScreen>
         startIso: null,
         subtitle: 'Your portfolio · cost basis',
         seedCategory: kInvestmentCategory,
+        chart: ExpenseChart.monthly,
+      ),
+    );
+  }
+
+  /// Opens the full Loan repayments drill-down (all-time), reusing the robust
+  /// timeframe screen scoped to the Loan category.
+  void _openLoans() {
+    showExpenseTimeframeScreen(
+      context,
+      const ExpenseTimeframe(
+        label: 'Loans',
+        startIso: null,
+        subtitle: 'Repayments · debt',
+        seedCategory: kLoanCategory,
         chart: ExpenseChart.monthly,
       ),
     );
@@ -434,9 +484,18 @@ class _ExpenseScreenState extends ConsumerState<ExpenseScreen>
     showAddExpenseModal(
       context,
       learnings: learnings,
+      bankConfigs: ref.read(settingsProvider).banks,
       categorize: (description, l) =>
           aiService.categorize(description, l, liteModel: liteModel),
-      smartParse: (text) => aiService.smartParse(text, liteModel: liteModel),
+      smartParse: (text) => aiService.smartParse(
+        text,
+        liteModel: liteModel,
+        banks: ref
+            .read(settingsProvider)
+            .banks
+            .map((b) => b.name)
+            .toList(),
+      ),
       initialImagePath: imagePath,
       onAdd: (payload, isManual, meta) async {
         final expense = Expense(
@@ -479,9 +538,18 @@ class _ExpenseScreenState extends ConsumerState<ExpenseScreen>
     showAddExpenseModal(
       context,
       learnings: learnings,
+      bankConfigs: ref.read(settingsProvider).banks,
       categorize: (description, l) =>
           aiService.categorize(description, l, liteModel: liteModel),
-      smartParse: (text) => aiService.smartParse(text, liteModel: liteModel),
+      smartParse: (text) => aiService.smartParse(
+        text,
+        liteModel: liteModel,
+        banks: ref
+            .read(settingsProvider)
+            .banks
+            .map((b) => b.name)
+            .toList(),
+      ),
       initialText: sharedText,
       onAdd: (payload, isManual, meta) async {
         final expense = Expense(
@@ -536,6 +604,13 @@ class _ExpenseScreenState extends ConsumerState<ExpenseScreen>
       if (next) {
         ref.read(pendingExpenseSearchProvider.notifier).state = false;
         _openAiSearchFromWidget();
+      }
+    });
+
+    ref.listen<bool>(pendingExpenseAddProvider, (prev, next) {
+      if (next) {
+        ref.read(pendingExpenseAddProvider.notifier).state = false;
+        _openAddExpenseFromWidget();
       }
     });
 
@@ -611,6 +686,7 @@ class _ExpenseScreenState extends ConsumerState<ExpenseScreen>
                     budget: budget,
                     onEasterEgg: _handleEasterEgg,
                     onOpenInvestments: _openInvestments,
+                    onOpenLoans: _openLoans,
                   ),
                 ],
               ),

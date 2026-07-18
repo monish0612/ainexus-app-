@@ -1,8 +1,8 @@
-// Integration tests for the `excludeInvestment` flag on ExpenseRepository
+// Integration tests for the `excludeNonSpend` flag on ExpenseRepository
 // aggregations. Runs the REAL repository over an in-memory Drift DB and proves
-// that Investment-category transactions are kept OUT of spending figures
-// (rangeSummary / categoryBreakdown / timeBreakdown / getExpensesPage) while
-// remaining fully queryable when a view is explicitly scoped to Investment.
+// that Investment- and Loan-category transactions are kept OUT of spending
+// figures (rangeSummary / categoryBreakdown / timeBreakdown / getExpensesPage)
+// while remaining fully queryable when a view is explicitly scoped to them.
 
 import 'package:dio/dio.dart';
 import 'package:drift/native.dart';
@@ -85,7 +85,7 @@ void main() {
   tearDown(() async => database.close());
 
   test('rangeSummary excludes investment from spend total/count', () async {
-    final spend = await repo.rangeSummary(excludeInvestment: true);
+    final spend = await repo.rangeSummary(excludeNonSpend: true);
     expect(spend.total, 15000);
     expect(spend.count, 2);
 
@@ -103,7 +103,7 @@ void main() {
   });
 
   test('categoryBreakdown drops the Investment bucket when excluded', () async {
-    final cats = await repo.categoryBreakdown(excludeInvestment: true);
+    final cats = await repo.categoryBreakdown(excludeNonSpend: true);
     final names = cats.map((c) => c.category).toList();
     expect(names, isNot(contains(kInvestmentCategory)));
     expect(cats.fold<double>(0, (s, c) => s + c.total), 15000);
@@ -112,7 +112,7 @@ void main() {
   test('timeBreakdown month bucket excludes investment', () async {
     final buckets = await repo.timeBreakdown(
       monthly: true,
-      excludeInvestment: true,
+      excludeNonSpend: true,
     );
     final june = buckets.firstWhere((b) => b.bucket == '2026-06');
     expect(june.total, 15000);
@@ -122,7 +122,7 @@ void main() {
   test('getExpensesPage hides investments when excluded, shows when scoped',
       () async {
     final spendPage = await repo.getExpensesPage(
-      excludeInvestment: true,
+      excludeNonSpend: true,
       limit: 50,
       offset: 0,
     );
@@ -150,7 +150,7 @@ void main() {
     await r2.addExpense(_exp(
         id: 'i2', amount: 20000, category: kInvestmentCategory, date: '2026-06-02T10:00:00.000'));
 
-    final spend = await r2.rangeSummary(excludeInvestment: true);
+    final spend = await r2.rangeSummary(excludeNonSpend: true);
     expect(spend.total, 0);
     expect(spend.count, 0);
 
@@ -164,7 +164,7 @@ void main() {
     // never leaks into spend totals.
     await repo.addExpense(_exp(
         id: 'bad', amount: 9999, category: kInvestmentCategory, date: 'not-a-date'));
-    final spend = await repo.rangeSummary(excludeInvestment: true);
+    final spend = await repo.rangeSummary(excludeNonSpend: true);
     expect(spend.total, 15000); // unchanged from setUp's 10k + 5k
     expect(spend.count, 2);
   });
@@ -174,7 +174,7 @@ void main() {
     // the spend total either.
     await repo.addExpense(_exp(
         id: 'neg', amount: -5000, category: kInvestmentCategory, date: '2026-06-09T10:00:00.000'));
-    final spend = await repo.rangeSummary(excludeInvestment: true);
+    final spend = await repo.rangeSummary(excludeNonSpend: true);
     expect(spend.total, 15000);
     expect(spend.count, 2);
   });
@@ -189,7 +189,7 @@ void main() {
     final june = await repo.rangeSummary(
       startIso: '2026-06-01T00:00:00.000',
       endIso: '2026-07-01T00:00:00.000',
-      excludeInvestment: true,
+      excludeNonSpend: true,
     );
     expect(june.total, 15000);
     expect(june.count, 2);
@@ -235,8 +235,8 @@ void main() {
     });
 
     final sw = Stopwatch()..start();
-    final spend = await r2.rangeSummary(excludeInvestment: true);
-    final cats = await r2.categoryBreakdown(excludeInvestment: true);
+    final spend = await r2.rangeSummary(excludeNonSpend: true);
+    final cats = await r2.categoryBreakdown(excludeNonSpend: true);
     sw.stop();
 
     expect(spend.total, 40000);
@@ -244,5 +244,73 @@ void main() {
     expect(cats.any((c) => c.category == kInvestmentCategory), isFalse);
     // SQL aggregation over 5k rows should be comfortably sub-second.
     expect(sw.elapsedMilliseconds, lessThan(1500));
+  });
+
+  // ── Loan exclusion (mirrors Investment) ───────────────────────────────────
+
+  test('a large loan repayment never touches the spend/budget total', () async {
+    // The core scenario: budget for the month is small, a 50k home-loan EMI is
+    // logged, and it must NOT be consumed by the month's spend figure.
+    await repo.addExpense(_exp(
+        id: 'homeloan',
+        amount: 50000,
+        category: kLoanCategory,
+        date: '2026-06-20T10:00:00.000'));
+
+    final spend = await repo.rangeSummary(excludeNonSpend: true);
+    expect(spend.total, 15000); // unchanged from setUp's 10k + 5k
+    expect(spend.count, 2);
+  });
+
+  test('rangeSummary scoped to Loan still returns the loan', () async {
+    await repo.addExpense(_exp(
+        id: 'homeloan',
+        amount: 50000,
+        category: kLoanCategory,
+        date: '2026-06-20T10:00:00.000'));
+
+    final loans = await repo.rangeSummary(category: kLoanCategory);
+    expect(loans.total, 50000);
+    expect(loans.count, 1);
+  });
+
+  test('categoryBreakdown drops the Loan bucket when excluded', () async {
+    await repo.addExpense(_exp(
+        id: 'homeloan',
+        amount: 50000,
+        category: kLoanCategory,
+        date: '2026-06-20T10:00:00.000'));
+
+    final cats = await repo.categoryBreakdown(excludeNonSpend: true);
+    final names = cats.map((c) => c.category).toList();
+    expect(names, isNot(contains(kLoanCategory)));
+    expect(names, isNot(contains(kInvestmentCategory)));
+    expect(cats.fold<double>(0, (s, c) => s + c.total), 15000);
+  });
+
+  test('getExpensesPage hides loans when excluded, shows when scoped',
+      () async {
+    await repo.addExpense(_exp(
+        id: 'homeloan',
+        amount: 50000,
+        category: kLoanCategory,
+        date: '2026-06-20T10:00:00.000'));
+
+    final spendPage = await repo.getExpensesPage(
+      excludeNonSpend: true,
+      limit: 50,
+      offset: 0,
+    );
+    expect(spendPage.any((e) => isLoanCategory(e.category)), isFalse);
+    expect(spendPage.any((e) => isInvestmentCategory(e.category)), isFalse);
+    expect(spendPage.length, 2);
+
+    final loanPage = await repo.getExpensesPage(
+      category: kLoanCategory,
+      limit: 50,
+      offset: 0,
+    );
+    expect(loanPage.length, 1);
+    expect(loanPage.single.amount, 50000);
   });
 }

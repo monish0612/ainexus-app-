@@ -72,13 +72,30 @@ String formatTime(String dateStr) {
 }
 
 String formatRelativeTime(DateTime date) {
-  final diff = DateTime.now().difference(date);
+  final now = DateTime.now();
+  final diff = now.difference(date);
+  String absLabel() => DateFormat(
+        date.year == now.year ? 'd MMM' : 'd MMM yyyy',
+        'en_IN',
+      ).format(date);
+
+  // Future-dated entries (e.g. a next-month bill logged in advance).
+  if (diff.isNegative) {
+    final today = DateTime(now.year, now.month, now.day);
+    final target = DateTime(date.year, date.month, date.day);
+    final days = target.difference(today).inDays;
+    if (days <= 0) return 'Later today';
+    if (days == 1) return 'Tomorrow';
+    if (days < 7) return 'In $days days';
+    return absLabel();
+  }
+
   if (diff.inMinutes < 1) return 'Just now';
   if (diff.inMinutes < 60) return '${diff.inMinutes} min ago';
   if (diff.inHours < 24) return '${diff.inHours} hr ago';
   if (diff.inDays == 1) return 'Yesterday';
   if (diff.inDays < 7) return '${diff.inDays} days ago';
-  return DateFormat('d MMM', 'en_IN').format(date);
+  return absLabel();
 }
 
 String formatBytes(int bytes) {

@@ -7,6 +7,11 @@ enum NukeScope {
   /// Full from-scratch app wipe — every local table reset to zero rows.
   /// Triggered from the InsightAI search box.
   full,
+
+  /// News-only wipe — deletes EVERY article (including saved ones), locally
+  /// and on the server. Triggered by the `nuke` command in the News tab's
+  /// saved-articles search box.
+  news,
 }
 
 /// A single line in the post-nuke "what got cleared" window.

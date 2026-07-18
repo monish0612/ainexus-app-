@@ -1,5 +1,6 @@
 import '../../data/local/database/app_database.dart';
 import '../../data/repositories/expense_repository.dart';
+import '../../data/repositories/news_repository.dart';
 import '../../data/repositories/salary_repository.dart';
 import '../../data/repositories/saved_words_repository.dart';
 import 'nuke_report.dart';
@@ -13,13 +14,15 @@ import 'telegram_logger.dart';
 /// otherwise re-hydrate from the server on next use.
 ///
 /// Cloud-backed domains cleared on the server too: expenses, budget, salary,
-/// **saved words**, **category learnings** and **saved searches**. Each of
-/// these has a server copy that the app pulls back down on next launch, so a
-/// local-only wipe would silently "come back" (the saved-words-reappear bug).
+/// **saved words**, **category learnings**, **saved searches** and **news**.
+/// Each of these has a server copy that the app pulls back down on next launch,
+/// so a local-only wipe would silently "come back" (the saved-words-reappear
+/// bug). News uses the same unified [NewsRepository.clearAllNews] path as the
+/// dedicated news `nuke` command — it deletes EVERY article (including saved)
+/// server-side and tombstones their guids so the RSS/X schedulers can't
+/// immediately re-import them.
 ///
 /// Genuinely local domains are wiped locally only:
-///   • News — server re-fills it from the RSS/X schedulers, so a cloud clear is
-///     pointless (it would repopulate within minutes regardless).
 ///   • Cloud files — these rows are just metadata for the user's Google Drive;
 ///     the nuke must NOT touch the actual Drive files.
 ///
@@ -33,6 +36,7 @@ class AppNukeService {
     this._expenseRepo,
     this._salaryRepo,
     this._savedWordsRepo,
+    this._newsRepo,
     this._resetSync, {
     required Future<bool> Function() clearSavedSearches,
   }) : _clearSavedSearches = clearSavedSearches;
@@ -41,6 +45,7 @@ class AppNukeService {
   final ExpenseRepository _expenseRepo;
   final SalaryRepository _salaryRepo;
   final SavedWordsRepository _savedWordsRepo;
+  final NewsRepository _newsRepo;
   final ResetSyncService _resetSync;
   final Future<bool> Function() _clearSavedSearches;
 
@@ -62,7 +67,7 @@ class AppNukeService {
     TLog.w(
       _tag,
       '☢️☢️ FULL NUKE initiated — wiping ALL local data ($total rows) + cloud '
-      'data (financial, saved words, learnings, saved searches). Tables '
+      'data (financial, saved words, learnings, saved searches, news). Tables '
       'preserved, rows reset. This is irreversible.',
     );
 
@@ -86,6 +91,10 @@ class AppNukeService {
       _guard('savedWords', _savedWordsRepo.clearAll),
       _guard('learnings', _expenseRepo.clearLearnings),
       _guard('savedSearches', _clearSavedSearches),
+      // News uses the same unified path as the dedicated `nuke` command. The
+      // local rows are already gone (wipeAllRows above), so this only fires the
+      // server wipe + guid-tombstone — `serverOk` drives the SYNCED/QUEUED badge.
+      _guard('news', () async => (await _newsRepo.clearAllNews()).serverOk),
     ]);
 
     // Bump the cross-device reset epoch ONLY after the cloud is actually
@@ -109,8 +118,9 @@ class AppNukeService {
         NukeLine(label: 'Saved words', emoji: '📖', count: c('Saved words'), cloudSynced: cloud[3]),
         NukeLine(label: 'Learnings', emoji: '🧠', count: c('Learnings'), cloudSynced: cloud[4]),
         NukeLine(label: 'Saved searches', emoji: '🔍', count: c('Saved searches'), cloudSynced: cloud[5]),
-        // Local-only: server re-fills news; cloud files are Drive metadata.
-        NukeLine(label: 'News', emoji: '📰', count: c('News')),
+        // News is now cloud-cleared too (server wipe + guid tombstones).
+        NukeLine(label: 'News', emoji: '📰', count: c('News'), cloudSynced: cloud[6]),
+        // Local-only: cloud files are Drive metadata; the nuke never touches Drive.
         NukeLine(label: 'Cloud files', emoji: '☁️', count: c('Cloud files')),
       ],
     );
@@ -126,6 +136,7 @@ class AppNukeService {
       'domains [cloud: expenses ${_mark(cloud[0])} · budget ${_mark(cloud[1])} · '
       'salary ${_mark(cloud[2])} · words ${_mark(cloud[3])} · '
       'learnings ${_mark(cloud[4])} · searches ${_mark(cloud[5])} · '
+      'news ${_mark(cloud[6])} · '
       'cross-device ${_mark(resetOk)}] — $summary',
     );
 

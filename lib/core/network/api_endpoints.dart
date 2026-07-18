@@ -7,6 +7,11 @@ abstract final class ApiEndpoints {
   static String get expenses => '$_base/api/v1/expenses';
   static String expense(String id) => '$_base/api/v1/expenses/$id';
 
+  /// Cross-device delete sync — pull-only endpoint that returns expense
+  /// tombstones newer than the optional `since` ISO-8601 timestamp.
+  static String get expenseTombstones =>
+      '$_base/api/v1/expenses/tombstones';
+
   // Budget
   static String get budget => '$_base/api/v1/budget';
   static String get budgetHistory => '$_base/api/v1/budget/history';
@@ -51,6 +56,10 @@ abstract final class ApiEndpoints {
   static String get news => '$_base/api/v1/news';
   static String get newsRefresh => '$_base/api/v1/news/refresh';
   static String get newsMarkAllRead => '$_base/api/v1/news/mark-all-read';
+
+  /// Easter-egg "nuke": deletes EVERY article server-side, including saved
+  /// ones, and tombstones their guids so the feed sync can't re-import them.
+  static String get newsNuke => '$_base/api/v1/news/nuke';
   static String get newsXFeedSync => '$_base/api/v1/news/x-feed/sync';
   static String get newsXFeedStatus => '$_base/api/v1/news/x-feed/status';
   static String article(String id) => '$_base/api/v1/news/$id';
@@ -62,6 +71,10 @@ abstract final class ApiEndpoints {
   static String get cloudUpload => '$_base/api/v1/cloud/upload';
   static String get cloudSyncHistory => '$_base/api/v1/cloud/sync-history';
 
+  /// Token broker — returns a short-lived Google Drive access token so the app
+  /// can talk to Drive directly without embedding the service-account key.
+  static String get cloudDriveToken => '$_base/api/v1/cloud/token';
+
   // Auth
   static String get login => '$_base/api/v1/auth/login';
   static String get register => '$_base/api/v1/auth/register';
@@ -69,6 +82,11 @@ abstract final class ApiEndpoints {
   // Saved Words
   static String get savedWords => '$_base/api/v1/saved-words';
   static String savedWord(String id) => '$_base/api/v1/saved-words/$id';
+
+  /// Cross-device delete sync — pull-only endpoint that returns saved-word
+  /// tombstones newer than the optional `since` ISO-8601 timestamp.
+  static String get savedWordTombstones =>
+      '$_base/api/v1/saved-words/tombstones';
 
   // Article Chats
   static String articleChats(String articleId) =>

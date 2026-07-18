@@ -312,6 +312,9 @@ class _CloudScreenState extends ConsumerState<CloudScreen>
   FileFilter _filter = FileFilter.all;
   bool _loading = true;
   String? _error;
+  String? _errorDetail;
+  String _errorTitle = 'Connection Failed';
+  IconData _errorIcon = LucideIcons.cloudOff;
 
   double _usedGb = 0;
   double _totalGb = 15;
@@ -382,8 +385,30 @@ class _CloudScreenState extends ConsumerState<CloudScreen>
       if (!mounted) return;
       setState(() {
         _isSearching = false;
-        _error = e.toString();
+        _applyDriveError(e);
       });
+    }
+  }
+
+  /// Translate a raw Drive failure into an accurate title/message/detail so the
+  /// error view explains the real cause instead of always blaming the network.
+  void _applyDriveError(Object e) {
+    final de = GoogleDriveService.classifyError(e);
+    _error = de.message;
+    _errorDetail = de.detail;
+    switch (de.kind) {
+      case DriveErrorKind.notConfigured:
+        _errorTitle = 'Cloud Not Set Up';
+        _errorIcon = LucideIcons.settings;
+      case DriveErrorKind.auth:
+        _errorTitle = 'Authentication Failed';
+        _errorIcon = LucideIcons.lock;
+      case DriveErrorKind.network:
+        _errorTitle = 'Connection Failed';
+        _errorIcon = LucideIcons.cloudOff;
+      case DriveErrorKind.unknown:
+        _errorTitle = 'Something Went Wrong';
+        _errorIcon = LucideIcons.alertTriangle;
     }
   }
 
@@ -421,7 +446,7 @@ class _CloudScreenState extends ConsumerState<CloudScreen>
       if (!mounted) return;
       setState(() {
         _loading = false;
-        _error = e.toString();
+        _applyDriveError(e);
       });
     }
   }
@@ -1285,7 +1310,14 @@ class _CloudScreenState extends ConsumerState<CloudScreen>
               _loading
                   ? _LoadingView(colors: colors)
                   : _error != null
-                      ? _ErrorView(colors: colors, error: _error!, onRetry: _loadFiles)
+                      ? _ErrorView(
+                          colors: colors,
+                          title: _errorTitle,
+                          message: _error!,
+                          detail: _errorDetail,
+                          icon: _errorIcon,
+                          onRetry: _loadFiles,
+                        )
                       : _FilesTab(
                           colors: colors,
                           usedFraction: _totalGb > 0 ? _usedGb / _totalGb : 0,
@@ -1377,9 +1409,19 @@ class _LoadingView extends StatelessWidget {
 }
 
 class _ErrorView extends StatelessWidget {
-  const _ErrorView({required this.colors, required this.error, required this.onRetry});
+  const _ErrorView({
+    required this.colors,
+    required this.title,
+    required this.message,
+    required this.icon,
+    required this.onRetry,
+    this.detail,
+  });
   final AppColors colors;
-  final String error;
+  final String title;
+  final String message;
+  final String? detail;
+  final IconData icon;
   final VoidCallback onRetry;
 
   @override
@@ -1390,15 +1432,31 @@ class _ErrorView extends StatelessWidget {
         child: Padding(
           padding: const EdgeInsets.all(32),
           child: Column(mainAxisSize: MainAxisSize.min, children: [
-            Icon(LucideIcons.cloudOff, size: 48, color: colors.text4),
+            Icon(icon, size: 48, color: colors.text4),
             const SizedBox(height: 16),
-            Text('Connection Failed',
+            Text(title,
+                textAlign: TextAlign.center,
                 style: GoogleFonts.plusJakartaSans(
                     color: colors.text, fontSize: 18, fontWeight: FontWeight.w700)),
             const SizedBox(height: 8),
-            Text('Could not connect to Google Drive. Check your internet connection.',
+            Text(message,
                 textAlign: TextAlign.center,
                 style: GoogleFonts.plusJakartaSans(color: colors.text3, fontSize: 13)),
+            if (detail != null && detail!.trim().isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: colors.bg2,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: colors.border),
+                ),
+                child: Text(detail!,
+                    textAlign: TextAlign.center,
+                    style: GoogleFonts.jetBrainsMono(
+                        color: colors.text4, fontSize: 11, height: 1.4)),
+              ),
+            ],
             const SizedBox(height: 20),
             FilledButton.icon(
               onPressed: onRetry,

@@ -15,6 +15,7 @@ import 'package:ai_nexus/core/services/nuke_report.dart';
 import 'package:ai_nexus/core/services/reset_sync_service.dart';
 import 'package:ai_nexus/data/local/database/app_database.dart' as db;
 import 'package:ai_nexus/data/repositories/expense_repository.dart';
+import 'package:ai_nexus/data/repositories/news_repository.dart';
 import 'package:ai_nexus/data/repositories/salary_repository.dart';
 import 'package:ai_nexus/data/repositories/saved_words_repository.dart';
 import 'package:dio/dio.dart';
@@ -90,6 +91,7 @@ void main() {
         expenseRepo,
         salaryRepo,
         savedWordsRepo,
+        NewsRepository(database, api),
         resetSync,
         clearSavedSearches: clearSavedSearches,
       );
@@ -297,8 +299,10 @@ void main() {
       expect(savedSearchCleared, 1);
       expect(lineFor(report, 'Saved searches').cloudSynced, isTrue);
 
-      // News + cloud files stay genuinely local-only (no cloud badge).
-      expect(lineFor(report, 'News').cloudSynced, isNull);
+      // News is NOW cloud-cleared too (unified with the dedicated nuke
+      // command): it must report a confirmed server clear, not local-only null.
+      expect(lineFor(report, 'News').cloudSynced, isTrue);
+      // Cloud files stay genuinely local-only (Drive metadata — no cloud badge).
       expect(lineFor(report, 'Cloud files').cloudSynced, isNull);
 
       expect(report.fullySynced, isTrue);
@@ -307,6 +311,9 @@ void main() {
       expect(api.deletes.where((p) => p.contains('saved-words')), isNotEmpty);
       expect(
           api.deletes.where((p) => p.contains('category-learnings')), isNotEmpty);
+
+      // The full nuke also fired the server-side news wipe (POST /news/nuke).
+      expect(api.posts.where((p) => p.path.contains('news/nuke')), isNotEmpty);
 
       // EVERY data table is now empty — schema preserved.
       final after = await database.dataRowCounts();

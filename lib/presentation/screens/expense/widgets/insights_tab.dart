@@ -43,6 +43,7 @@ class InsightsTab extends StatefulWidget {
     required this.budget,
     this.onEasterEgg,
     this.onOpenInvestments,
+    this.onOpenLoans,
   });
 
   final List<ExpenseData> expenses;
@@ -53,6 +54,10 @@ class InsightsTab extends StatefulWidget {
   /// investment KPI card). Wired by the parent to the timeframe screen.
   final VoidCallback? onOpenInvestments;
 
+  /// Opens the dedicated Loan repayments drill-down (tap on the loan KPI card).
+  /// Wired by the parent to the timeframe screen.
+  final VoidCallback? onOpenLoans;
+
   @override
   State<InsightsTab> createState() => _InsightsTabState();
 }
@@ -60,6 +65,53 @@ class InsightsTab extends StatefulWidget {
 enum _Period { week, month, m3, m6, all, nt }
 
 const List<String> _periodUiLabels = ['Week', 'Month', '3M', '6M', 'All', 'NT'];
+
+/// Pure, timezone-aware period bucketing — the single source of truth for
+/// "which insight period does an expense's logged date fall into?".
+///
+/// [periodKey] is an [_Period] name ('week' | 'month' | 'm3' | 'm6' | 'all' |
+/// 'nt'). Investments are always excluded (they are wealth-building, not
+/// spend). Rolling windows have an inclusive upper bound of end-of-today so a
+/// *future*-dated entry (a next-month bill logged in advance) never leaks into
+/// Week/Month/3M/6M — it surfaces under 'nt' (next month) and 'all'.
+///
+/// Kept a top-level pure function so the date→bucket contract can be unit
+/// tested with a fixed `now`, independent of the (huge) widget tree.
+List<ExpenseData> expensesInInsightPeriod(
+  List<ExpenseData> all,
+  String periodKey,
+  DateTime now,
+) {
+  final spend = all.where((e) => !isNonSpendCategory(e.category));
+
+  if (periodKey == 'nt') {
+    final ntStart = DateTime(now.year, now.month + 1, 1);
+    final ntEnd = DateTime(now.year, now.month + 2, 0, 23, 59, 59, 999);
+    return spend.where((e) {
+      final d = safeParseDate(e.date).toLocal();
+      return !d.isBefore(ntStart) && !d.isAfter(ntEnd);
+    }).toList();
+  }
+
+  final cut = switch (periodKey) {
+    'week' => now.subtract(const Duration(days: 7)),
+    'month' => now.subtract(const Duration(days: 30)),
+    'm3' => now.subtract(const Duration(days: 90)),
+    'm6' => DateTime(now.year, now.month - 6, now.day),
+    _ => DateTime.fromMillisecondsSinceEpoch(0), // 'all'
+  };
+  // 'all' keeps no upper bound (all-time includes future-dated entries).
+  final upper = periodKey == 'all'
+      ? null
+      : DateTime(now.year, now.month, now.day, 23, 59, 59, 999);
+
+  return spend.where((e) {
+    final d = safeParseDate(e.date).toLocal();
+    if (d.isBefore(cut)) return false;
+    if (upper != null && d.isAfter(upper)) return false;
+    return true;
+  }).toList();
+}
 
 const Map<_Period, String> _periodSubtitles = {
   _Period.week: 'last 7 days',
@@ -252,12 +304,6 @@ class _InsightsTabState extends State<InsightsTab> {
     }
   }
 
-  /// All consumption expenses (investments removed) — the basis for every spend
-  /// total, chart and breakdown on this tab. Investments are surfaced through
-  /// the dedicated portfolio card instead.
-  Iterable<ExpenseData> get _spendAll =>
-      widget.expenses.where((e) => !isInvestmentCategory(e.category));
-
   /// All investment transactions, newest-first — powers the portfolio card.
   List<ExpenseData> get _investmentsAll {
     final list = widget.expenses
@@ -267,20 +313,25 @@ class _InsightsTabState extends State<InsightsTab> {
     return list;
   }
 
-  List<ExpenseData> _periodExpenses() {
-    if (_period == _Period.nt) {
-      final n = DateTime.now();
-      final ntStart = DateTime(n.year, n.month + 1, 1);
-      final ntEnd = DateTime(n.year, n.month + 2, 0, 23, 59, 59, 999);
-      return _spendAll.where((e) {
-        final d = safeParseDate(e.date).toLocal();
-        return !d.isBefore(ntStart) && !d.isAfter(ntEnd);
-      }).toList();
-    }
-    final cut = _cutoff(_period);
-    return _spendAll
-        .where((e) => !safeParseDate(e.date).toLocal().isBefore(cut))
-        .toList();
+  /// All loan repayment transactions, newest-first — powers the loan card.
+  List<ExpenseData> get _loansAll {
+    final list = widget.expenses
+        .where((e) => isLoanCategory(e.category))
+        .toList()
+      ..sort((a, b) => safeParseDate(b.date).compareTo(safeParseDate(a.date)));
+    return list;
+  }
+
+  List<ExpenseData> _periodExpenses() =>
+      expensesInInsightPeriod(widget.expenses, _period.name, DateTime.now());
+
+  /// Upper bound (inclusive) for a rolling period so future-dated entries (a
+  /// next-month bill) don't leak into "Week/Month/3M/6M". `all` and `nt` have
+  /// their own handling and return null here.
+  DateTime? _periodUpperBound(_Period period) {
+    if (period == _Period.all || period == _Period.nt) return null;
+    final n = DateTime.now();
+    return DateTime(n.year, n.month, n.day, 23, 59, 59, 999);
   }
 
   /// Investments that fall inside the currently-selected period — the "this
@@ -298,9 +349,13 @@ class _InsightsTabState extends State<InsightsTab> {
       }).fold<double>(0, (s, e) => s + e.amount.toDouble());
     }
     final cut = _cutoff(_period);
-    return invs
-        .where((e) => !safeParseDate(e.date).toLocal().isBefore(cut))
-        .fold<double>(0, (s, e) => s + e.amount.toDouble());
+    final upper = _periodUpperBound(_period);
+    return invs.where((e) {
+      final d = safeParseDate(e.date).toLocal();
+      if (d.isBefore(cut)) return false;
+      if (upper != null && d.isAfter(upper)) return false;
+      return true;
+    }).fold<double>(0, (s, e) => s + e.amount.toDouble());
   }
 
   /// Cumulative invested-by-month series (oldest→newest) for the card sparkline.
@@ -689,6 +744,14 @@ class _InsightsTabState extends State<InsightsTab> {
     final investedPeriod = _investedInPeriod(investments);
     final investSeries = _investmentCumulativeSeries(investments);
 
+    // ── Loan repayments (debt, kept entirely separate from spend) ──
+    // Reuses the same period / cumulative helpers as investments — both are
+    // just "non-spend" lists surfaced in their own card.
+    final loans = _loansAll;
+    final loanTotal = loans.fold<double>(0, (s, e) => s + e.amount.toDouble());
+    final loanPeriod = _investedInPeriod(loans);
+    final loanSeries = _investmentCumulativeSeries(loans);
+
     return ColoredBox(
       color: c.bg,
       child: ListView(
@@ -866,6 +929,23 @@ class _InsightsTabState extends State<InsightsTab> {
                 onTap: widget.onOpenInvestments,
               ),
             ),
+
+            // ── Loan repayments (separate from spending) ──
+            // Only shown once at least one loan has been logged, so the Insights
+            // tab stays clean for users who never track loans.
+            if (loans.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
+                child: _LoanRepaymentCard(
+                  colors: c,
+                  totalRepaid: loanTotal,
+                  periodRepaid: loanPeriod,
+                  periodLabel: _periodSubtitles[_period] ?? '',
+                  count: loans.length,
+                  cumulativeSeries: loanSeries,
+                  onTap: widget.onOpenLoans,
+                ),
+              ),
 
             // ── KPI Carousel ──
             Builder(builder: (_) {
@@ -2485,6 +2565,303 @@ class _InvestmentPortfolioCard extends StatelessWidget {
             Expanded(
               child: _miniStat(
                 label: 'AVG / INVESTMENT',
+                value: compactInr(avg),
+                labelColor: labelColor,
+                valueColor: heroColor,
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _miniStat({
+    required String label,
+    required String value,
+    required Color labelColor,
+    required Color valueColor,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: GoogleFonts.plusJakartaSans(
+            fontSize: 8.5,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 0.8,
+            color: labelColor,
+          ),
+        ),
+        const SizedBox(height: 3),
+        Text(
+          value,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: GoogleFonts.plusJakartaSans(
+            fontSize: 14,
+            fontWeight: FontWeight.w800,
+            color: valueColor,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Dedicated "Loan Repayments" KPI card — mirrors [_InvestmentPortfolioCard] in
+/// layout but is themed for debt (amber accent). Loan-category expenses are not
+/// consumption: they never touch the monthly budget and are surfaced here as
+/// total repaid, this-period repaid and a cumulative trend.
+class _LoanRepaymentCard extends StatelessWidget {
+  const _LoanRepaymentCard({
+    required this.colors,
+    required this.totalRepaid,
+    required this.periodRepaid,
+    required this.periodLabel,
+    required this.count,
+    required this.cumulativeSeries,
+    this.onTap,
+  });
+
+  final AppColors colors;
+  final double totalRepaid;
+  final double periodRepaid;
+  final String periodLabel;
+  final int count;
+  final List<double> cumulativeSeries;
+  final VoidCallback? onTap;
+
+  static const _accent = AppColors.categoryLoan; // 0xFFFAB005
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = colors.isDark;
+    final useLightFg = isDark;
+    final heroColor = useLightFg ? Colors.white : const Color(0xFF92660A);
+    final labelColor =
+        useLightFg ? Colors.white.withValues(alpha: 0.55) : colors.text3;
+    final subColor =
+        useLightFg ? Colors.white.withValues(alpha: 0.40) : colors.text4;
+    final isEmpty = count == 0;
+    final avg = count > 0 ? totalRepaid / count : 0.0;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: isEmpty ? null : onTap,
+        borderRadius: BorderRadius.circular(22),
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: isDark
+                  ? const [Color(0xFF352A05), Color(0xFF433609), Color(0xFF2C2405)]
+                  : const [Color(0xFFFFFBEB), Color(0xFFFEF3C7)],
+            ),
+            borderRadius: BorderRadius.circular(22),
+            border: Border.all(
+              color: _accent.withValues(alpha: isDark ? 0.32 : 0.40),
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: _accent.withValues(alpha: isDark ? 0.22 : 0.16),
+                blurRadius: 22,
+                offset: const Offset(0, 8),
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 34,
+                    height: 34,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: _accent.withValues(alpha: 0.18),
+                      borderRadius: BorderRadius.circular(11),
+                      border: Border.all(
+                        color: _accent.withValues(alpha: 0.45),
+                      ),
+                    ),
+                    child: const Text('💰', style: TextStyle(fontSize: 17)),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'LOAN REPAYMENTS',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.plusJakartaSans(
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 1.4,
+                        color: labelColor,
+                      ),
+                    ),
+                  ),
+                  if (!isEmpty && onTap != null)
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          'Manage',
+                          style: GoogleFonts.plusJakartaSans(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            color: _accent,
+                          ),
+                        ),
+                        const Icon(Icons.chevron_right_rounded,
+                            size: 17, color: _accent),
+                      ],
+                    ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              if (isEmpty)
+                _buildEmpty(subColor)
+              else
+                _buildBody(heroColor, labelColor, subColor, avg),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEmpty(Color subColor) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Track your loans',
+                  style: GoogleFonts.plusJakartaSans(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w800,
+                    color: colors.isDark ? Colors.white : const Color(0xFF92660A),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Log an expense under the Loan category and it is tracked here as debt repayment — never counted against your monthly budget.',
+                  style: GoogleFonts.plusJakartaSans(
+                    fontSize: 11.5,
+                    height: 1.45,
+                    color: subColor,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBody(
+    Color heroColor,
+    Color labelColor,
+    Color subColor,
+    double avg,
+  ) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'TOTAL REPAID',
+                    style: GoogleFonts.plusJakartaSans(
+                      fontSize: 9.5,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 1.2,
+                      color: labelColor,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  TweenAnimationBuilder<double>(
+                    tween: Tween<double>(begin: 0, end: totalRepaid),
+                    duration: const Duration(milliseconds: 750),
+                    curve: Curves.easeOutCubic,
+                    builder: (context, value, _) => FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        formatCurrency(value),
+                        maxLines: 1,
+                        style: GoogleFonts.plusJakartaSans(
+                          fontSize: 30,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: -1,
+                          height: 1,
+                          color: heroColor,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '$count payment${count == 1 ? '' : 's'} · repaid',
+                    style: GoogleFonts.plusJakartaSans(
+                      fontSize: 11,
+                      color: subColor,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (cumulativeSeries.length >= 2)
+              SizedBox(
+                width: 92,
+                height: 46,
+                child: CustomPaint(
+                  painter: _SparklinePainter(
+                    values: cumulativeSeries,
+                    color: _accent,
+                  ),
+                ),
+              ),
+          ],
+        ),
+        const SizedBox(height: 14),
+        Row(
+          children: [
+            Expanded(
+              child: _miniStat(
+                label: 'THIS ${periodLabel.toUpperCase()}',
+                value: compactInr(periodRepaid),
+                labelColor: labelColor,
+                valueColor: heroColor,
+              ),
+            ),
+            Container(
+              width: 1,
+              height: 26,
+              color: heroColor.withValues(alpha: 0.12),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: _miniStat(
+                label: 'AVG / PAYMENT',
                 value: compactInr(avg),
                 labelColor: labelColor,
                 valueColor: heroColor,

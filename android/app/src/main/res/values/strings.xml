@@ -15,9 +15,9 @@
     <string name="shortcut_cloud">Cloud Upload</string>
     <string name="shortcut_cloud_long">Upload to Google Drive</string>
 
-    <!-- Search Widget -->
-    <string name="widget_search_label">Nexus AI Search</string>
-    <string name="widget_search_desc">Search your expenses or the web with AI \u2014 toggle and go</string>
+    <!-- Search Widget (web-focused 4x1) -->
+    <string name="widget_search_label">Nexus AI Web Search</string>
+    <string name="widget_search_desc">Search the web with AI \u2014 one tap to ask anything online</string>
     <string name="widget_search_hint">Search with Nexus AI\u2026</string>
     <string name="widget_search_mode_expense">Expense</string>
     <string name="widget_search_mode_web">Web</string>
@@ -26,5 +26,5 @@
 
     <!-- Expense Widget -->
     <string name="widget_expense_label">Nexus AI Expenses</string>
-    <string name="widget_expense_desc">Today\'s expense summary at a glance</string>
+    <string name="widget_expense_desc">Live expense dashboard \u2014 today\'s spend, month total, top category, budget pace &amp; time progress</string>
 </resources>

@@ -30,6 +30,37 @@ void main() {
     });
   });
 
+  group('resolveShortcutRoute — Expense widget "Add" pill', () {
+    test('opens the Add-expense sheet on tab 0, no search focus', () {
+      final r = resolveShortcutRoute({
+        'tab': '0',
+        'expense_action': 'add',
+      })!;
+      expect(r.tab, 0);
+      expect(r.openExpenseAdd, isTrue);
+      expect(r.openExpenseSearch, isFalse);
+      expect(r.focusWebSearch, isFalse);
+    });
+
+    test('add wins over a stray widget_launch flag (no double-trigger)', () {
+      final r = resolveShortcutRoute({
+        'tab': '0',
+        'expense_action': 'add',
+        'widget_launch': 'true',
+      })!;
+      expect(r.openExpenseAdd, isTrue);
+      expect(r.focusWebSearch, isFalse);
+    });
+
+    test('non-"add" expense_action does not open the Add sheet', () {
+      final r = resolveShortcutRoute({
+        'tab': '0',
+        'expense_action': 'edit',
+      })!;
+      expect(r.openExpenseAdd, isFalse);
+    });
+  });
+
   group('resolveShortcutRoute — search widget (Web mode)', () {
     test('focuses online search on Tutor tab + Summarizer subtab', () {
       final r = resolveShortcutRoute({

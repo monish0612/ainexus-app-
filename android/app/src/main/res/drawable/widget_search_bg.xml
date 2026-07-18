@@ -1,15 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Outer AMOLED card: near-pure black with a whisper of vertical lift and a
-     hairline border so the widget reads as a floating glass panel on the
-     home screen. -->
+<!-- Outer AMOLED bar: near-pure black with a whisper of vertical lift and a
+     faint indigo-tinted hairline border so the single-row web search widget
+     reads as a floating, glowing glass pill on the home screen. -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android"
     android:shape="rectangle">
     <gradient
         android:angle="90"
-        android:startColor="#0A0A0F"
+        android:startColor="#0C0C14"
         android:endColor="#000000" />
-    <corners android:radius="30dp" />
+    <corners android:radius="26dp" />
     <stroke
         android:width="1dp"
-        android:color="#191926" />
+        android:color="#26263B" />
 </shape>

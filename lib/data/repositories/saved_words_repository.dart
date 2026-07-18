@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 
+import 'package:dio/dio.dart';
 import 'package:drift/drift.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -29,6 +30,11 @@ class SavedWordsRepository {
 
   static const _tag = 'SavedWordsRepo';
   static const _pendingClearKey = 'pending_clear_saved_words';
+
+  /// Cross-device delete-sync watermark: ISO-8601 timestamp of the most recent
+  /// saved-word tombstone applied locally. The next /tombstones GET only
+  /// returns deletions newer than this, so the server ships just the delta.
+  static const _tombstoneWatermarkKey = 'saved_words_tombstone_watermark';
 
   /// Cheap `COUNT(*)` of saved words — used by the nuke "what was cleared"
   /// window so it can report a real number.
@@ -90,6 +96,77 @@ class SavedWordsRepository {
       }
     }
     return false;
+  }
+
+  /// Pull the server-side tombstone log of deleted saved words (since the last
+  /// watermark) and hard-delete those rows locally, so a deletion performed on
+  /// the website or another device propagates to this phone. Returns the number
+  /// of local rows actually removed. Idempotent and safe to call repeatedly.
+  ///
+  /// Before this existed the Dictionary's pull was insert-only (it skipped ids
+  /// it already had), so a word deleted elsewhere never disappeared here.
+  Future<int> syncTombstones() async {
+    try {
+      final since = _prefs.getString(_tombstoneWatermarkKey);
+      final url = (since == null || since.isEmpty)
+          ? ApiEndpoints.savedWordTombstones
+          : '${ApiEndpoints.savedWordTombstones}'
+              '?since=${Uri.encodeQueryComponent(since)}';
+      final response = await _api.get<Object?>(url);
+      final data = response.data;
+      if (data is! List || data.isEmpty) return 0;
+
+      var maxDeletedAt = since ?? '';
+      var applied = 0;
+      for (final item in data) {
+        if (item is! Map) continue;
+        final id = item['id']?.toString() ?? '';
+        final deletedAt = item['deletedAt']?.toString() ??
+            item['deleted_at']?.toString() ??
+            '';
+        // A real tombstone always carries both an id and a deletedAt. Skip any
+        // malformed/foreign payload so we never delete on a non-tombstone row.
+        if (id.isEmpty || deletedAt.isEmpty) continue;
+
+        // Guard: if this word was (re-)saved locally strictly AFTER the remote
+        // delete, keep it — its own push will re-create the server row and clear
+        // the tombstone. Saved words are immutable, so savedAt is the only clock.
+        final local = await (_db.select(_db.savedWords)
+              ..where((t) => t.id.equals(id))
+              ..limit(1))
+            .getSingleOrNull();
+        if (local != null &&
+            local.savedAt.isNotEmpty &&
+            local.savedAt.compareTo(deletedAt) > 0) {
+          if (deletedAt.compareTo(maxDeletedAt) > 0) maxDeletedAt = deletedAt;
+          continue;
+        }
+
+        final removed = await (_db.delete(_db.savedWords)
+              ..where((t) => t.id.equals(id)))
+            .go();
+        if (removed > 0) applied++;
+        if (deletedAt.compareTo(maxDeletedAt) > 0) maxDeletedAt = deletedAt;
+      }
+
+      if (maxDeletedAt.isNotEmpty && maxDeletedAt != since) {
+        await _prefs.setString(_tombstoneWatermarkKey, maxDeletedAt);
+      }
+      if (applied > 0) {
+        TLog.i(_tag, '☁️ Applied $applied remote saved-word deletion(s)');
+      }
+      return applied;
+    } on DioException catch (e) {
+      if (e.response?.statusCode == 404) {
+        TLog.w(_tag, 'saved-word tombstones 404 — backend not deployed yet');
+        return 0;
+      }
+      TLog.w(_tag, 'saved-word tombstones pull failed', error: e);
+      return 0;
+    } catch (e) {
+      TLog.w(_tag, 'saved-word tombstones parse error', error: e);
+      return 0;
+    }
   }
 
   Future<bool> _verifyEmpty() async {

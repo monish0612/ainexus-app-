@@ -1,11 +1,13 @@
 import 'dart:math' as math;
 
+import 'package:dio/dio.dart' show DioException;
 import 'package:drift/drift.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../core/network/api_client.dart';
 import '../../core/network/api_endpoints.dart';
+import '../../core/services/credit_card_forecast_engine.dart' show CardExpense;
 import '../../core/services/telegram_logger.dart';
 import '../../domain/entities/expense_entities.dart' as domain;
 import '../local/database/app_database.dart' as db;
@@ -66,6 +68,12 @@ class ExpenseRepository {
   static const _pendingClearBudgetKey = 'pending_clear_budget';
   static const _pendingClearLearningsKey = 'pending_clear_learnings';
 
+  /// Cross-device delete-sync watermark: ISO-8601 timestamp of the most recent
+  /// expense tombstone applied locally. The next /tombstones GET only returns
+  /// the delta after this point.
+  static const _kExpenseTombstoneWatermarkKey =
+      'expenseRepo.lastTombstonePullAt';
+
   Stream<List<domain.Expense>> watchExpenses() {
     return (_db.select(_db.expenses)
           ..orderBy([
@@ -77,20 +85,39 @@ class ExpenseRepository {
 
   // ── Sync retry helpers ──────────────────────────────────────────────────
 
-  Future<void> _syncPostWithRetry(
+  /// POST with bounded retry. Returns the parsed response body (so callers can
+  /// read server-assigned fields like `updatedAt`); null when unavailable.
+  Future<Object?> _syncPostWithRetry(
     String endpoint, {
     required Map<String, dynamic> data,
     int maxAttempts = 3,
   }) async {
     for (var attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
-        await _api.post<Object?>(endpoint, data: data);
-        return;
+        final resp = await _api.post<Object?>(endpoint, data: data);
+        return resp.data;
       } catch (e) {
         if (attempt == maxAttempts) rethrow;
         TLog.d('ExpenseRepo', 'POST retry $attempt/$maxAttempts → $endpoint');
         await Future<void>.delayed(Duration(milliseconds: 400 * attempt));
       }
+    }
+    return null;
+  }
+
+  /// Persist the server-assigned `updatedAt` onto the local row so the
+  /// last-write-wins merge compares timestamps from a single (server) clock —
+  /// immune to phone↔server clock skew. Best-effort: a failure here never fails
+  /// the user-visible write (the row is already saved locally and on the server).
+  Future<void> _adoptServerUpdatedAt(String id, Object? responseBody) async {
+    try {
+      if (responseBody is! Map) return;
+      final ua = responseBody['updatedAt']?.toString();
+      if (ua == null || ua.isEmpty) return;
+      await (_db.update(_db.expenses)..where((t) => t.id.equals(id)))
+          .write(db.ExpensesCompanion(updatedAt: Value(ua)));
+    } catch (e) {
+      TLog.d('ExpenseRepo', 'adopt server updatedAt failed (non-fatal): $e');
     }
   }
 
@@ -112,8 +139,11 @@ class ExpenseRepository {
 
   /// Returns `true` if server sync succeeded, `false` if it failed.
   Future<bool> addExpense(domain.Expense expense) async {
+    final nowIso = DateTime.now().toUtc().toIso8601String();
     try {
-      await _db.into(_db.expenses).insert(_expenseToCompanion(expense));
+      await _db
+          .into(_db.expenses)
+          .insert(_expenseToCompanion(expense, updatedAt: nowIso));
       TLog.i('ExpenseRepo',
           '💰 Saved: ₹${expense.amount.toStringAsFixed(0)} | ${expense.description} | ${expense.category} | ${expense.bank}/${expense.cardType}');
     } catch (e) {
@@ -124,7 +154,9 @@ class ExpenseRepository {
     await _safeApplyMemory(newExpense: expense);
 
     try {
-      await _syncPostWithRetry(ApiEndpoints.expenses, data: expense.toJson());
+      final resp =
+          await _syncPostWithRetry(ApiEndpoints.expenses, data: expense.toJson());
+      await _adoptServerUpdatedAt(expense.id, resp);
       TLog.i('ExpenseRepo',
           '☁️ Synced add: ₹${expense.amount.toStringAsFixed(0)} | ${expense.description}');
       return true;
@@ -149,7 +181,10 @@ class ExpenseRepository {
 
     try {
       await (_db.update(_db.expenses)..where((t) => t.id.equals(expense.id)))
-          .write(_expenseToUpdateCompanion(expense));
+          .write(_expenseToUpdateCompanion(
+        expense,
+        updatedAt: DateTime.now().toUtc().toIso8601String(),
+      ));
       TLog.i('ExpenseRepo',
           '✏️ Updated: ₹${expense.amount.toStringAsFixed(0)} | ${expense.description} | ${expense.category}');
     } catch (e) {
@@ -160,7 +195,9 @@ class ExpenseRepository {
     await _safeApplyMemory(oldExpense: previous, newExpense: expense);
 
     try {
-      await _syncPostWithRetry(ApiEndpoints.expenses, data: expense.toJson());
+      final resp =
+          await _syncPostWithRetry(ApiEndpoints.expenses, data: expense.toJson());
+      await _adoptServerUpdatedAt(expense.id, resp);
       TLog.i('ExpenseRepo',
           '☁️ Synced update: ₹${expense.amount.toStringAsFixed(0)} | ${expense.description}');
       return true;
@@ -579,51 +616,185 @@ class ExpenseRepository {
     }
   }
 
-  /// Pull expenses from server and merge into local DB.
+  /// Pull expenses from the server and reconcile into the local DB using a
+  /// last-write-wins merge, then apply remote deletions via the tombstone log.
+  ///
+  /// Reconciliation rules (per server row, keyed by id):
+  ///   • Not present locally           → insert it.
+  ///   • Present, identical content    → skip (ignore clock jitter so a no-op
+  ///                                     pull never triggers a memory rebuild).
+  ///   • Present, content differs      → overwrite ONLY when the server's
+  ///                                     `updatedAt` is newer than the local
+  ///                                     row's (so a locally-made edit that the
+  ///                                     server hasn't received yet is never
+  ///                                     clobbered).
+  ///
+  /// This makes web→phone edits propagate while preserving offline-first
+  /// safety. Remote deletions are handled by [syncExpenseTombstones].
   Future<int> syncFromServer() async {
+    var changed = 0;
     try {
       final response = await _api.get<Object?>(ApiEndpoints.expenses);
       final data = response.data;
-      if (data is! List) return 0;
+      if (data is List) {
+        final localRows = await _db.select(_db.expenses).get();
+        final localById = {for (final r in localRows) r.id: r};
 
-      final localRows = await _db.select(_db.expenses).get();
-      final localIds = localRows.map((r) => r.id).toSet();
-      var inserted = 0;
+        for (final item in data) {
+          if (item is! Map) continue;
+          final id = item['id']?.toString() ?? '';
+          if (id.isEmpty) continue;
 
+          final serverUpdatedAt = item['updatedAt']?.toString() ??
+              item['updated_at']?.toString() ??
+              '';
+          final serverExpense = domain.Expense(
+            id: id,
+            amount:
+                (item['amount'] is num) ? (item['amount'] as num).toDouble() : 0,
+            description: item['description']?.toString() ?? '',
+            category: item['category']?.toString() ?? '',
+            bank: item['bank']?.toString() ?? '',
+            cardType: item['cardType']?.toString() ??
+                item['card_type']?.toString() ??
+                '',
+            date: item['date']?.toString() ?? '',
+            isManualCategory: item['isManualCategory'] == true ||
+                item['is_manual_category'] == true,
+            comments: item['comments']?.toString() ?? '',
+          );
+
+          final local = localById[id];
+          if (local != null) {
+            // Identical payload → nothing to apply (don't churn the rollup).
+            if (_rowToExpense(local) == serverExpense) continue;
+            // Content differs → only the newer side wins.
+            if (!_serverIsNewer(serverUpdatedAt, local.updatedAt)) continue;
+          }
+
+          await _db.into(_db.expenses).insertOnConflictUpdate(
+                _expenseToCompanion(
+                  serverExpense,
+                  updatedAt: serverUpdatedAt.isEmpty ? null : serverUpdatedAt,
+                ),
+              );
+          changed++;
+        }
+      }
+    } catch (e) {
+      TLog.w('ExpenseRepo', 'Expense pull sync failed: $e', error: e);
+    }
+
+    // Apply remote deletions regardless of the index-pull outcome so a
+    // web/other-device delete still reaches this phone.
+    var deleted = 0;
+    try {
+      deleted = await syncExpenseTombstones();
+    } catch (e) {
+      TLog.w('ExpenseRepo', 'Expense tombstone sync failed: $e', error: e);
+    }
+
+    if (changed > 0 || deleted > 0) {
+      TLog.i('ExpenseRepo',
+          'Sync merged $changed expense(s), applied $deleted deletion(s)');
+      // Bulk upserts/deletes bypass the per-write delta hooks; rebuild the
+      // rollup once so the memory layer reflects the reconciled rows.
+      await _safeRecomputeMemory();
+    }
+    return changed;
+  }
+
+  /// `true` when the server copy should overwrite the local row. Compares
+  /// ISO-8601 timestamps as real instants (robust to ms/µs precision diffs).
+  bool _serverIsNewer(String serverUpdatedAt, String? localUpdatedAt) {
+    // Older backend that doesn't report updatedAt → never overwrite an existing
+    // local row (falls back to the legacy add-only behaviour).
+    if (serverUpdatedAt.isEmpty) return false;
+    // Local row predates the v10 migration → let the server refresh it (it
+    // holds the same data this device originally pushed).
+    if (localUpdatedAt == null || localUpdatedAt.isEmpty) return true;
+    final s = DateTime.tryParse(serverUpdatedAt);
+    final l = DateTime.tryParse(localUpdatedAt);
+    if (s == null) return false;
+    if (l == null) return true;
+    return s.isAfter(l);
+  }
+
+  /// Pull the server-side tombstone log of deleted expenses (since the last
+  /// watermark) and hard-delete those rows locally, so a deletion performed on
+  /// the website or another device propagates to this phone. Returns the number
+  /// of local rows actually removed. Idempotent and safe to call repeatedly.
+  Future<int> syncExpenseTombstones() async {
+    try {
+      final since = _prefs.getString(_kExpenseTombstoneWatermarkKey);
+      final url = (since == null || since.isEmpty)
+          ? ApiEndpoints.expenseTombstones
+          : '${ApiEndpoints.expenseTombstones}'
+              '?since=${Uri.encodeQueryComponent(since)}';
+      final response = await _api.get<Object?>(url);
+      final data = response.data;
+      if (data is! List || data.isEmpty) return 0;
+
+      var maxDeletedAt = since ?? '';
+      var applied = 0;
       for (final item in data) {
         if (item is! Map) continue;
         final id = item['id']?.toString() ?? '';
-        if (id.isEmpty || localIds.contains(id)) continue;
+        final deletedAt = item['deletedAt']?.toString() ??
+            item['deleted_at']?.toString() ??
+            '';
+        // A real tombstone always carries both an id and a deletedAt. Skip any
+        // malformed/foreign payload (defensive — never delete on a row that
+        // isn't an actual tombstone).
+        if (id.isEmpty || deletedAt.isEmpty) continue;
 
-        final expense = domain.Expense(
-          id: id,
-          amount: (item['amount'] is num) ? (item['amount'] as num).toDouble() : 0,
-          description: item['description']?.toString() ?? '',
-          category: item['category']?.toString() ?? '',
-          bank: item['bank']?.toString() ?? '',
-          cardType: item['cardType']?.toString() ?? item['card_type']?.toString() ?? '',
-          date: item['date']?.toString() ?? '',
-          isManualCategory: item['isManualCategory'] == true || item['is_manual_category'] == true,
-          comments: item['comments']?.toString() ?? '',
-        );
+        // Guard: keep a local edit that is strictly newer than the remote
+        // delete (its own push will re-create the server row + clear the
+        // tombstone). Prevents losing a fresh offline edit to a stale delete.
+        final local = await (_db.select(_db.expenses)
+              ..where((t) => t.id.equals(id))
+              ..limit(1))
+            .getSingleOrNull();
+        if (local != null &&
+            _localIsStrictlyNewer(local.updatedAt, deletedAt)) {
+          if (deletedAt.compareTo(maxDeletedAt) > 0) maxDeletedAt = deletedAt;
+          continue;
+        }
 
-        await _db.into(_db.expenses).insertOnConflictUpdate(
-              _expenseToCompanion(expense),
-            );
-        inserted++;
+        final removed =
+            await (_db.delete(_db.expenses)..where((t) => t.id.equals(id))).go();
+        if (removed > 0) applied++;
+        if (deletedAt.compareTo(maxDeletedAt) > 0) maxDeletedAt = deletedAt;
       }
 
-      if (inserted > 0) {
-        TLog.i('ExpenseRepo', 'Synced $inserted expenses from server');
-        // Bulk inserts bypass the per-write delta hooks; rebuild the rollup
-        // once so the memory layer reflects the freshly-pulled rows.
-        await _safeRecomputeMemory();
+      if (maxDeletedAt.isNotEmpty && maxDeletedAt != since) {
+        await _prefs.setString(_kExpenseTombstoneWatermarkKey, maxDeletedAt);
       }
-      return inserted;
+      if (applied > 0) {
+        TLog.i('ExpenseRepo', '☁️ Applied $applied remote expense deletion(s)');
+      }
+      return applied;
+    } on DioException catch (e) {
+      if (e.response?.statusCode == 404) {
+        TLog.w('ExpenseRepo', 'expense tombstones 404 — backend not deployed');
+        return 0;
+      }
+      TLog.w('ExpenseRepo', 'expense tombstones pull failed', error: e);
+      return 0;
     } catch (e) {
-      TLog.w('ExpenseRepo', 'Expense pull sync failed: $e', error: e);
+      TLog.w('ExpenseRepo', 'expense tombstones parse error', error: e);
       return 0;
     }
+  }
+
+  bool _localIsStrictlyNewer(String? localUpdatedAt, String deletedAt) {
+    if (localUpdatedAt == null || localUpdatedAt.isEmpty || deletedAt.isEmpty) {
+      return false;
+    }
+    final l = DateTime.tryParse(localUpdatedAt);
+    final d = DateTime.tryParse(deletedAt);
+    if (l == null || d == null) return false;
+    return l.isAfter(d);
   }
 
   domain.Expense _rowToExpense(db.Expense row) {
@@ -640,7 +811,10 @@ class ExpenseRepository {
     );
   }
 
-  db.ExpensesCompanion _expenseToCompanion(domain.Expense e) {
+  db.ExpensesCompanion _expenseToCompanion(
+    domain.Expense e, {
+    String? updatedAt,
+  }) {
     return db.ExpensesCompanion.insert(
       id: e.id,
       amount: e.amount,
@@ -651,10 +825,14 @@ class ExpenseRepository {
       date: e.date,
       isManualCategory: Value(e.isManualCategory),
       comments: Value(e.comments),
+      updatedAt: Value(updatedAt),
     );
   }
 
-  db.ExpensesCompanion _expenseToUpdateCompanion(domain.Expense e) {
+  db.ExpensesCompanion _expenseToUpdateCompanion(
+    domain.Expense e, {
+    String? updatedAt,
+  }) {
     return db.ExpensesCompanion(
       id: Value(e.id),
       amount: Value(e.amount),
@@ -665,6 +843,7 @@ class ExpenseRepository {
       date: Value(e.date),
       isManualCategory: Value(e.isManualCategory),
       comments: Value(e.comments),
+      updatedAt: Value(updatedAt),
     );
   }
 
@@ -681,7 +860,7 @@ class ExpenseRepository {
     String? search,
     List<String> searchTerms = const [],
     ExpenseSort sort = ExpenseSort.dateDesc,
-    bool excludeInvestment = false,
+    bool excludeNonSpend = false,
     required int limit,
     required int offset,
   }) async {
@@ -690,7 +869,7 @@ class ExpenseRepository {
         ..orderBy(_orderingFor(sort))
         ..limit(limit, offset: offset);
       _applyRangeFilters(q, startIso, endIso, category, search, searchTerms,
-          excludeInvestment: excludeInvestment);
+          excludeNonSpend: excludeNonSpend);
       final rows = await q.get();
       return rows.map(_rowToExpense).toList();
     } catch (e) {
@@ -708,14 +887,14 @@ class ExpenseRepository {
     String? category,
     String? search,
     List<String> searchTerms = const [],
-    bool excludeInvestment = false,
+    bool excludeNonSpend = false,
   }) async {
     try {
       final countExp = _db.expenses.id.count();
       final totalExp = _db.expenses.amount.sum();
       final q = _db.selectOnly(_db.expenses)..addColumns([countExp, totalExp]);
       _applyRangeFiltersJoin(q, startIso, endIso, category, search, searchTerms,
-          excludeInvestment: excludeInvestment);
+          excludeNonSpend: excludeNonSpend);
       final row = await q.getSingle();
       return (
         count: row.read(countExp) ?? 0,
@@ -738,9 +917,11 @@ class ExpenseRepository {
     final q = _db.selectOnly(_db.expenses)..addColumns([totalExp]);
     q.where(_db.expenses.date.isBiggerOrEqualValue(start));
     q.where(_db.expenses.date.isSmallerThanValue(end));
-    // Investments are wealth, not consumption — they must never reduce the
-    // month's "spent" figure that drives the salary savings math.
+    // Investments (wealth) and loan repayments (debt) are not consumption —
+    // they must never reduce the month's "spent" figure that drives the salary
+    // savings math.
     q.where(_db.expenses.category.equals(domain.kInvestmentCategory).not());
+    q.where(_db.expenses.category.equals(domain.kLoanCategory).not());
     return q.watchSingle().map((row) => (row.read(totalExp) ?? 0).toDouble());
   }
 
@@ -755,10 +936,14 @@ class ExpenseRepository {
     final totalCol = _db.expenseMonthlyCategory.total.sum();
     final q = _db.selectOnly(_db.expenseMonthlyCategory)
       ..addColumns([monthCol, totalCol])
-      // Exclude the Investment rollup row — investments are savings, not spend,
-      // so they must not count against lifetime savings / runway stats.
+      // Exclude the Investment and Loan rollup rows — investments are savings
+      // and loan repayments are debt, not spend, so they must not count against
+      // lifetime savings / runway stats.
       ..where(_db.expenseMonthlyCategory.category
           .equals(domain.kInvestmentCategory)
+          .not())
+      ..where(_db.expenseMonthlyCategory.category
+          .equals(domain.kLoanCategory)
           .not())
       ..groupBy([monthCol]);
     return q.watch().map((rows) {
@@ -797,6 +982,38 @@ class ExpenseRepository {
     });
   }
 
+  /// Reactive list of individual expenses for a single card type (e.g. 'CC')
+  /// since [since], ordered oldest-first. Unlike [watchMonthlyCardSpendTotals],
+  /// this keeps each charge's bank + date so the credit-card forecast can bucket
+  /// them into per-bank statement windows. Bounded by [since] (a few months) so
+  /// it stays light even on large histories; re-emits on any matching change.
+  Stream<List<CardExpense>> watchRecentCardExpenses(
+    String cardType, {
+    required DateTime since,
+  }) {
+    final sincePrefix = since.toIso8601String().substring(0, 10);
+    final q = _db.select(_db.expenses)
+      ..where((t) =>
+          t.cardType.equals(cardType) &
+          t.date.isBiggerOrEqualValue(sincePrefix))
+      ..orderBy([(t) => OrderingTerm.asc(t.date)]);
+    return q.watch().map((rows) {
+      final out = <CardExpense>[];
+      for (final r in rows) {
+        final d = DateTime.tryParse(r.date);
+        if (d == null) continue;
+        out.add(CardExpense(
+          bank: r.bank,
+          amount: r.amount,
+          date: d,
+          category: r.category,
+          description: r.description,
+        ));
+      }
+      return out;
+    });
+  }
+
   /// Inclusive start ('YYYY-MM-01') and exclusive end (first day of next month)
   /// date-prefix bounds for a 'YYYY-MM' key. Lexicographic on the ISO date
   /// strings, which is correct because they share the fixed 'YYYY-MM-DD…' shape.
@@ -820,7 +1037,7 @@ class ExpenseRepository {
     String? endIso,
     String? search,
     List<String> searchTerms = const [],
-    bool excludeInvestment = false,
+    bool excludeNonSpend = false,
   }) async {
     try {
       final totalExp = _db.expenses.amount.sum();
@@ -830,7 +1047,7 @@ class ExpenseRepository {
         ..groupBy([_db.expenses.category])
         ..orderBy([OrderingTerm(expression: totalExp, mode: OrderingMode.desc)]);
       _applyRangeFiltersJoin(q, startIso, endIso, null, search, searchTerms,
-          excludeInvestment: excludeInvestment);
+          excludeNonSpend: excludeNonSpend);
       final rows = await q.get();
       return rows
           .map((r) => (
@@ -885,7 +1102,7 @@ class ExpenseRepository {
     String? category,
     String? search,
     List<String> searchTerms = const [],
-    bool excludeInvestment = false,
+    bool excludeNonSpend = false,
   }) async {
     try {
       // ISO dates are 'YYYY-MM-DDThh:mm:ss…' so substr(1,10)=day, (1,7)=month.
@@ -898,7 +1115,7 @@ class ExpenseRepository {
         ..groupBy([bucketExp])
         ..orderBy([OrderingTerm(expression: bucketExp, mode: OrderingMode.asc)]);
       _applyRangeFiltersJoin(q, startIso, endIso, category, search, searchTerms,
-          excludeInvestment: excludeInvestment);
+          excludeNonSpend: excludeNonSpend);
       final rows = await q.get();
       return rows
           .map((r) => (
@@ -921,7 +1138,7 @@ class ExpenseRepository {
     String? category,
     String? search,
     List<String> searchTerms, {
-    bool excludeInvestment = false,
+    bool excludeNonSpend = false,
   }) {
     if (startIso != null) {
       q.where((t) => t.date.isBiggerOrEqualValue(startIso));
@@ -932,8 +1149,9 @@ class ExpenseRepository {
     if (category != null && category.isNotEmpty) {
       q.where((t) => t.category.equals(category));
     }
-    if (excludeInvestment) {
+    if (excludeNonSpend) {
       q.where((t) => t.category.equals(domain.kInvestmentCategory).not());
+      q.where((t) => t.category.equals(domain.kLoanCategory).not());
     }
     // User's editable text (AND) — narrows within the result set.
     final searchExpr = _searchExpr(search);
@@ -950,7 +1168,7 @@ class ExpenseRepository {
     String? category,
     String? search,
     List<String> searchTerms, {
-    bool excludeInvestment = false,
+    bool excludeNonSpend = false,
   }) {
     final t = _db.expenses;
     if (startIso != null) q.where(t.date.isBiggerOrEqualValue(startIso));
@@ -958,8 +1176,9 @@ class ExpenseRepository {
     if (category != null && category.isNotEmpty) {
       q.where(t.category.equals(category));
     }
-    if (excludeInvestment) {
+    if (excludeNonSpend) {
       q.where(t.category.equals(domain.kInvestmentCategory).not());
+      q.where(t.category.equals(domain.kLoanCategory).not());
     }
     final searchExpr = _searchExpr(search);
     if (searchExpr != null) q.where(searchExpr);

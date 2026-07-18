@@ -22,6 +22,8 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:ai_nexus/core/network/api_client.dart';
 import 'package:ai_nexus/core/network/api_endpoints.dart';
+import 'package:ai_nexus/core/services/news_nuke_service.dart';
+import 'package:ai_nexus/core/services/nuke_report.dart';
 import 'package:ai_nexus/data/local/database/app_database.dart' as db;
 import 'package:ai_nexus/data/repositories/news_repository.dart';
 import 'package:ai_nexus/presentation/screens/news/article_followup_sheet.dart';
@@ -341,14 +343,135 @@ void main() {
     });
   });
 
-  group('Mark read — local-first + best-effort sync', () {
-    test('markRead persists locally even when backend is offline', () async {
+  group('Mark read / delete — keep only saved + unread', () {
+    test('reading an UNSAVED article deletes it locally even when offline',
+        () async {
       await seedArticles([_articleJson('news-1')]);
-      api.failMethods.add('POST');
+      // Both the legacy /read POST and the new DELETE are unreachable.
+      api.failMethods.addAll({'POST', 'DELETE'});
 
       await repo.markRead('news-1');
 
-      expect((await row('news-1'))!.isRead, isTrue);
+      expect(await row('news-1'), isNull,
+          reason:
+              'a read + unsaved article is consumed and removed from the DB');
+    });
+
+    test('reading a SAVED article keeps the row and just flags it read',
+        () async {
+      await seedArticles([_articleJson('news-1', isSaved: true)]);
+
+      await repo.markRead('news-1');
+
+      final r = await row('news-1');
+      expect(r, isNotNull,
+          reason: 'saved articles are never deleted by reading them');
+      expect(r!.isRead, isTrue);
+      expect(r.isSaved, isTrue);
+    });
+
+    test('deleteArticle removes the row + clears its chat (offline-safe)',
+        () async {
+      await seedArticles([_articleJson('news-1')]);
+      await insertChat('news-1', 'c1', 'q?');
+      expect(await chatCount('news-1'), 1);
+      api.failMethods.add('DELETE');
+
+      await repo.deleteArticle('news-1');
+
+      expect(await row('news-1'), isNull);
+      expect(await chatCount('news-1'), 0,
+          reason: 'deleting an article also wipes its follow-up chat');
+    });
+
+    test('deleteArticle hits the server DELETE for cross-device/web removal',
+        () async {
+      await seedArticles([_articleJson('news-1')]);
+
+      await repo.deleteArticle('news-1');
+
+      expect(
+        api.calls.any((c) => c == 'DELETE ${ApiEndpoints.article('news-1')}'),
+        isTrue,
+        reason: 'server is told to delete + tombstone the article',
+      );
+    });
+
+    test('markManyRead deletes the unsaved ids but preserves saved ones',
+        () async {
+      await seedArticles([
+        _articleJson('news-1'),
+        _articleJson('news-2', isSaved: true),
+        _articleJson('news-3'),
+      ]);
+
+      final deleted = await repo.markManyRead(['news-1', 'news-2', 'news-3']);
+
+      expect(deleted, 2, reason: 'only the two unsaved rows are removed');
+      expect(await row('news-1'), isNull);
+      expect(await row('news-3'), isNull);
+      expect(await row('news-2'), isNotNull,
+          reason: 'saved article survives a bulk clear');
+    });
+  });
+
+  group('News nuke — wipe EVERYTHING including saved', () {
+    test('clearAllNews deletes every row (saved + read + unread) + chats',
+        () async {
+      await seedArticles([
+        _articleJson('news-1'),
+        _articleJson('news-2', isSaved: true),
+        _articleJson('news-3', isRead: true),
+      ]);
+      await insertChat('news-2', 'c1', 'q?');
+      expect(await chatCount('news-2'), 1);
+
+      final result = await repo.clearAllNews();
+
+      expect(result.removed, 3);
+      expect(result.serverOk, isTrue);
+      expect(await row('news-1'), isNull);
+      expect(await row('news-2'), isNull,
+          reason: 'the saved article is ALSO nuked');
+      expect(await row('news-3'), isNull);
+      expect(await chatCount('news-2'), 0,
+          reason: 'follow-up chat of the saved article is wiped too');
+      expect(
+        api.calls.any((c) => c == 'POST ${ApiEndpoints.newsNuke}'),
+        isTrue,
+        reason: 'server is told to wipe all news',
+      );
+    });
+
+    test('clearAllNews keeps the local wipe even when the server is offline',
+        () async {
+      await seedArticles([_articleJson('news-1', isSaved: true)]);
+      api.failMethods.add('POST');
+
+      final result = await repo.clearAllNews();
+
+      expect(result.removed, 1);
+      expect(result.serverOk, isFalse,
+          reason: 'server failure is reported, but the local wipe stands');
+      expect(await row('news-1'), isNull);
+    });
+
+    test('NewsNukeService emits a news-scope report with the cleared count',
+        () async {
+      await seedArticles([
+        _articleJson('a'),
+        _articleJson('b', isSaved: true),
+      ]);
+      final service = NewsNukeService(repo);
+
+      final report = await service.nuke();
+
+      expect(report.scope, NukeScope.news);
+      expect(report.totalCleared, 2);
+      expect(report.fullySynced, isTrue);
+      expect(report.lines.single.label, 'News');
+      expect(await row('a'), isNull);
+      expect(await row('b'), isNull);
     });
   });
 }

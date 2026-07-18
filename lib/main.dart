@@ -9,6 +9,7 @@ import 'package:intl/date_symbol_data_local.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'app.dart';
+import 'core/auth/app_token_store.dart';
 import 'core/auth/auth_service.dart';
 import 'core/di/injection.dart';
 import 'core/platform/platform_capabilities.dart';
@@ -82,6 +83,12 @@ void main() async {
       }
 
       await AuthService.instance.init();
+      // Wire the server-token store: load any persisted JWT, let the network
+      // layer re-mint it on a 401, and back-fill a token for a session that
+      // predates token support. All best-effort — never blocks startup.
+      await AppTokenStore.instance.load();
+      AppTokenStore.instance.refresher = AuthService.instance.refreshAppToken;
+      unawaited(AuthService.instance.ensureAppToken());
       initializeRouter();
       // Initialise the shared AI-background foreground-task subsystem
       // early so any long-running AI feature (news summarize, online

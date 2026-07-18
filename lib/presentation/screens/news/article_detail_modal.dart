@@ -17,6 +17,7 @@ import '../../../core/services/telegram_logger.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../data/services/article_tts_service.dart';
 import '../../../domain/entities/news_entities.dart';
+import '../../widgets/image_zoom_viewer.dart';
 import '../../widgets/wave_visualizer.dart';
 import '../settings/settings_controller.dart';
 import 'article_followup_sheet.dart';
@@ -42,35 +43,67 @@ class _MarkdownArticleImage extends StatelessWidget {
     if (src.isEmpty || !(src.startsWith('http://') || src.startsWith('https://'))) {
       return const SizedBox.shrink();
     }
+    final heroTag = 'article-inline-image:$src';
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 12),
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: colors.border),
-        ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(16),
-          child: CachedNetworkImage(
-            imageUrl: src,
-            // fitWidth = fill the column width and let height follow the
-            // image's natural aspect ratio. No fixed height → no cropping
-            // and no overflow regardless of the source image dimensions.
-            fit: BoxFit.fitWidth,
-            width: double.infinity,
-            placeholder: (_, __) => Container(
-              height: 180,
-              color: colors.bg2,
-              child: Center(
-                child: Icon(
-                  LucideIcons.image,
-                  size: 28,
-                  color: colors.text5,
+      // Tap to open the immersive full-screen viewer (pinch / double-tap to
+      // zoom). Inline article images are often screenshots of dense text that
+      // are unreadable at column width, so this makes them legible.
+      child: GestureDetector(
+        onTap: () => showImageZoomViewer(context, imageUrl: src, heroTag: heroTag),
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: colors.border),
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(16),
+            child: Stack(
+              children: [
+                Hero(
+                  tag: heroTag,
+                  child: CachedNetworkImage(
+                    imageUrl: src,
+                    // fitWidth = fill the column width and let height follow the
+                    // image's natural aspect ratio. No fixed height → no cropping
+                    // and no overflow regardless of the source image dimensions.
+                    fit: BoxFit.fitWidth,
+                    width: double.infinity,
+                    placeholder: (_, __) => Container(
+                      height: 180,
+                      color: colors.bg2,
+                      child: Center(
+                        child: Icon(
+                          LucideIcons.image,
+                          size: 28,
+                          color: colors.text5,
+                        ),
+                      ),
+                    ),
+                    // A dead inline image should vanish, not show a
+                    // broken-image glyph.
+                    errorWidget: (_, __, ___) => const SizedBox.shrink(),
+                  ),
                 ),
-              ),
+                // Subtle "tap to zoom" affordance in the corner.
+                Positioned(
+                  right: 10,
+                  bottom: 10,
+                  child: Container(
+                    padding: const EdgeInsets.all(7),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.42),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Icon(
+                      LucideIcons.maximize2,
+                      size: 15,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+              ],
             ),
-            // A dead inline image should vanish, not show a broken-image glyph.
-            errorWidget: (_, __, ___) => const SizedBox.shrink(),
           ),
         ),
       ),
@@ -1856,6 +1889,10 @@ class _FullArticlePill extends StatelessWidget {
   }
 }
 
+/// Hero tag prefix for the article's lead image, so tapping it animates into
+/// the full-screen zoom viewer. Suffixed with the article id to stay unique.
+const String _heroImageTagPrefix = 'article-hero-image:';
+
 class _HeroImage extends StatelessWidget {
   const _HeroImage({required this.article, required this.cat});
 
@@ -1864,33 +1901,45 @@ class _HeroImage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final hasImage = article.imageUrl.isNotEmpty;
+    const heroTag = _heroImageTagPrefix;
     return SizedBox(
       height: 300,
       width: double.infinity,
       child: Stack(
         fit: StackFit.expand,
         children: [
-          if (article.imageUrl.isNotEmpty)
-            CachedNetworkImage(
-              imageUrl: article.imageUrl,
-              fit: BoxFit.cover,
-              placeholder: (_, __) => Container(
-                color: cat.withValues(alpha: 0.08),
+          if (hasImage)
+            GestureDetector(
+              onTap: () => showImageZoomViewer(
+                context,
+                imageUrl: article.imageUrl,
+                heroTag: '$heroTag${article.id}',
               ),
-              errorWidget: (_, __, ___) => Container(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [
-                      cat.withValues(alpha: 0.15),
-                      cat.withValues(alpha: 0.05),
-                    ],
+              child: Hero(
+                tag: '$heroTag${article.id}',
+                child: CachedNetworkImage(
+                  imageUrl: article.imageUrl,
+                  fit: BoxFit.cover,
+                  placeholder: (_, __) => Container(
+                    color: cat.withValues(alpha: 0.08),
                   ),
-                ),
-                child: Center(
-                  child: Icon(LucideIcons.newspaper,
-                      size: 48, color: cat.withValues(alpha: 0.3)),
+                  errorWidget: (_, __, ___) => Container(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: [
+                          cat.withValues(alpha: 0.15),
+                          cat.withValues(alpha: 0.05),
+                        ],
+                      ),
+                    ),
+                    child: Center(
+                      child: Icon(LucideIcons.newspaper,
+                          size: 48, color: cat.withValues(alpha: 0.3)),
+                    ),
+                  ),
                 ),
               ),
             )
@@ -2250,23 +2299,23 @@ class _BottomBar extends StatelessWidget {
               const SizedBox(width: 10),
               Expanded(
                 child: _BarPill(
-                  icon: saved ? LucideIcons.bookmarkMinus : LucideIcons.bookmark,
-                  label: saved ? 'Saved' : 'Save',
-                  accent: AppColors.accent,
-                  filled: saved,
-                  colors: colors,
-                  onTap: onToggleSave,
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: _BarPill(
                   icon: read ? LucideIcons.checkCircle : LucideIcons.circle,
                   label: read ? 'Done' : 'Mark read',
                   accent: const Color(0xFF34D399),
                   filled: read,
                   colors: colors,
                   onTap: onMarkRead,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _BarPill(
+                  icon: saved ? LucideIcons.bookmarkMinus : LucideIcons.bookmark,
+                  label: saved ? 'Saved' : 'Save',
+                  accent: AppColors.accent,
+                  filled: saved,
+                  colors: colors,
+                  onTap: onToggleSave,
                 ),
               ),
             ],

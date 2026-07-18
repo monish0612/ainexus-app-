@@ -35,6 +35,10 @@ final pendingSearchQueryProvider = StateProvider<String?>((ref) => null);
 /// Set by AppShell, consumed by ExpenseScreen to open the "Ask AI" search.
 final pendingExpenseSearchProvider = StateProvider<bool>((ref) => false);
 
+/// Set true when the home-screen Expense widget's "Add" pill is tapped.
+/// Set by AppShell, consumed by ExpenseScreen to open the Add-expense sheet.
+final pendingExpenseAddProvider = StateProvider<bool>((ref) => false);
+
 /// Bridges the Android PROCESS_TEXT intent to Flutter via a MethodChannel.
 ///
 /// Two communication paths:

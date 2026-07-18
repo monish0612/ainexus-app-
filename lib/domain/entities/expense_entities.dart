@@ -66,15 +66,47 @@ bool isInvestmentCategory(String? category) {
   return c.toLowerCase() == kInvestmentCategory.toLowerCase();
 }
 
-/// Convenience spend/investment partitioning for any [Expense] list.
+/// The category that represents debt repayment rather than consumption.
+///
+/// Like [kInvestmentCategory], money logged under this category is **not** an
+/// expense against the monthly budget: a large EMI/loan payment should not eat
+/// into the budget set for that month. It is excluded from every spend
+/// aggregation and surfaced separately as "Loan Repayments" in the Insights
+/// tab. Routed through [isLoanCategory].
+const String kLoanCategory = 'Loan';
+
+/// Whether [category] is the loan category. Whitespace/casing tolerant so it
+/// stays correct even if a synced/legacy row arrives slightly differently
+/// shaped (the category picker only ever emits the canonical 'Loan').
+bool isLoanCategory(String? category) {
+  final c = category?.trim();
+  if (c == null || c.isEmpty) return false;
+  return c.toLowerCase() == kLoanCategory.toLowerCase();
+}
+
+/// Categories that are NOT consumption and must never touch the budget/spend.
+///
+/// The single source of truth for "should this be counted against the budget?".
+/// Both investments (wealth) and loan repayments (debt) are excluded from every
+/// spend total, chart, breakdown and the home-screen widget, and each is
+/// surfaced in its own dedicated card.
+bool isNonSpendCategory(String? category) =>
+    isInvestmentCategory(category) || isLoanCategory(category);
+
+/// Convenience spend/non-spend partitioning for any [Expense] list.
 extension ExpenseInvestmentFilter on Iterable<Expense> {
-  /// Consumption only — drops investments. Use for every spend total/chart.
+  /// Consumption only — drops investments and loan repayments. Use for every
+  /// spend total/chart.
   Iterable<Expense> get spendOnly =>
-      where((e) => !isInvestmentCategory(e.category));
+      where((e) => !isNonSpendCategory(e.category));
 
   /// Investments only — the portfolio contributions.
   Iterable<Expense> get investmentsOnly =>
       where((e) => isInvestmentCategory(e.category));
+
+  /// Loan repayments only — the debt payments.
+  Iterable<Expense> get loansOnly =>
+      where((e) => isLoanCategory(e.category));
 }
 
 /// Mirrors `CategoryLearning` in `expense.ts` (`Record<string, string>`).

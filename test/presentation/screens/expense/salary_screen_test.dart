@@ -9,6 +9,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:ai_nexus/core/di/injection.dart';
+import 'package:ai_nexus/core/services/credit_card_forecast_engine.dart';
 import 'package:ai_nexus/core/services/salary_insight_engine.dart';
 import 'package:ai_nexus/core/theme/app_colors.dart';
 import 'package:ai_nexus/domain/entities/expense_insight.dart';
@@ -63,6 +64,7 @@ Future<void> _pump(
   required List<SalaryTrendItem> trend,
   String? aiAnswer,
   GroundedRecommendation? recommendation = _rec,
+  CreditCardForecast forecast = CreditCardForecast.empty,
   Size size = const Size(320, 3200),
 }) async {
   tester.view.physicalSize = size;
@@ -77,6 +79,7 @@ Future<void> _pump(
         salaryStatsProvider.overrideWithValue(stats),
         salaryTrendProvider.overrideWithValue(trend),
         userFirstNameProvider.overrideWithValue('Monish'),
+        creditCardForecastProvider.overrideWithValue(forecast),
         // Feed a ready recommendation so the AI card renders without network.
         salaryRecommendationProvider.overrideWith(
           (ref) async => recommendation ?? _rec,
@@ -156,39 +159,36 @@ void main() {
     expect(find.textContaining('1,35,000'), findsWidgets);
   });
 
-  const ccStats = SalaryStats(
-    month: '2026-06',
-    salary: 100000,
-    budget: 60000,
-    spent: 40000,
-    previousSalary: 90000,
-    totalRecorded: 280000,
-    monthsRecorded: 3,
-    highestSalary: 100000,
-    averageSalary: 93333,
-    cumulativeSaved: 135000,
-    avgSavingsRatePct: 48,
-    avgMonthlySpend: 52500,
-    dayOfMonth: 15,
-    daysInMonth: 30,
-    ccSpentThisMonth: 25000, // charged this month → due next month
-    ccDueThisMonth: 18000, // last month's bill being repaid now
-  );
+  // Per-bank forecast fixtures, built from the real engine so the widget test
+  // exercises the same data the app produces.
+  CreditCardForecast ccForecast({
+    double charge = 25000,
+    double salary = 100000,
+  }) {
+    return computeCreditCardForecast(
+      ccBanks: const [BankBillingConfig(name: 'HDFC', statementDay: 18, dueDay: 9)],
+      ccExpenses: [
+        CardExpense(bank: 'HDFC', amount: charge, date: DateTime(2026, 6, 10)),
+      ],
+      salaryByMonth: {'2026-07': salary},
+      now: DateTime(2026, 6, 15),
+    );
+  }
 
-  testWidgets('renders the credit-card forecast card with the reduced take-home',
+  testWidgets('renders the per-bank forecast: open statement + salary timeline',
       (tester) async {
-    await _pump(tester, stats: ccStats, trend: trend);
+    await _pump(tester, stats: filledStats, trend: trend, forecast: ccForecast());
     expect(tester.takeException(), isNull);
     expect(find.text('Credit card forecast'), findsOneWidget);
-    expect(find.text('Due next month'), findsOneWidget);
-    expect(find.text('Charged this month'), findsOneWidget);
-    expect(find.text('Repay next month'), findsOneWidget);
-    // Forecast = 100k - 25k = 75k take-home next month.
+    expect(find.text('OPEN STATEMENTS'), findsOneWidget);
+    expect(find.text('SALARY VS CARD BILLS'), findsOneWidget);
+    // Which salary repays the bill.
+    expect(find.textContaining('Repaid from your July 2026 salary'), findsWidgets);
+    // Projected in-hand for July = 100k - 25k = 75k.
+    expect(find.text('Projected in-hand'), findsWidgets);
     expect(find.textContaining('75,000'), findsWidgets);
-    // The "salary − card bill" breakdown line.
-    expect(find.textContaining('card bill'), findsWidgets);
-    // Last month's bill due-now note → real take-home 100k - 18k = 82k.
-    expect(find.textContaining('82,000'), findsWidgets);
+    // The bank name is shown.
+    expect(find.textContaining('HDFC'), findsWidgets);
   });
 
   testWidgets('credit-card card is hidden when there is no CC activity',
@@ -197,93 +197,127 @@ void main() {
     expect(find.text('Credit card forecast'), findsNothing);
   });
 
-  testWidgets('credit-card card scales on a 280px screen without overflow',
+  testWidgets('credit-card forecast scales on a 280px screen without overflow',
       (tester) async {
     await _pump(
       tester,
-      stats: ccStats,
+      stats: filledStats,
       trend: trend,
+      forecast: ccForecast(),
       size: const Size(280, 4000),
     );
     expect(tester.takeException(), isNull);
     expect(find.text('Credit card forecast'), findsOneWidget);
   });
 
-  testWidgets('credit-card card shows only the due-now note when nothing '
-      'charged this month', (tester) async {
-    const dueOnly = SalaryStats(
-      month: '2026-06',
-      salary: 100000,
-      budget: 0,
-      spent: 10000,
-      previousSalary: null,
-      totalRecorded: 100000,
-      monthsRecorded: 1,
-      highestSalary: 100000,
-      averageSalary: 100000,
-      dayOfMonth: 8,
-      daysInMonth: 30,
-      ccSpentThisMonth: 0, // no new charges → no forecast block
-      ccDueThisMonth: 22000, // last month's bill due now
-    );
-    await _pump(tester, stats: dueOnly, trend: const []);
-    expect(tester.takeException(), isNull);
-    expect(find.text('Credit card forecast'), findsOneWidget);
-    // No "forecast take-home" block (nothing charged this month).
-    expect(find.text('Charged this month'), findsNothing);
-    // Real take-home this month = 100k - 22k = 78k shown in the due-now note.
-    expect(find.textContaining('78,000'), findsWidgets);
-  });
-
-  testWidgets('credit-card card handles a crore-scale bill at 280px',
+  testWidgets('credit-card forecast handles a crore-scale bill at 280px',
       (tester) async {
-    const huge = SalaryStats(
-      month: '2026-06',
-      salary: 5000000, // ₹50 lakh
-      budget: 0,
-      spent: 100000,
-      previousSalary: null,
-      totalRecorded: 5000000,
-      monthsRecorded: 1,
-      highestSalary: 5000000,
-      averageSalary: 5000000,
-      avgMonthlySpend: 3000000,
-      dayOfMonth: 12,
-      daysInMonth: 31,
-      ccSpentThisMonth: 9999999, // ~₹1 crore charged
-      ccDueThisMonth: 8888888,
-    );
     await _pump(
       tester,
-      stats: huge,
-      trend: const [],
+      stats: filledStats,
+      trend: trend,
+      forecast: ccForecast(charge: 9999999, salary: 5000000),
       size: const Size(280, 4200),
     );
     expect(tester.takeException(), isNull);
     expect(find.text('Credit card forecast'), findsOneWidget);
   });
 
-  testWidgets('credit-card bill larger than salary renders a negative forecast',
+  testWidgets('bills larger than the salary render a negative, flagged in-hand',
       (tester) async {
-    const overCc = SalaryStats(
-      month: '2026-06',
-      salary: 50000,
-      budget: 0,
-      spent: 5000,
-      previousSalary: null,
-      totalRecorded: 50000,
-      monthsRecorded: 1,
-      highestSalary: 50000,
-      averageSalary: 50000,
-      dayOfMonth: 10,
-      daysInMonth: 30,
-      ccSpentThisMonth: 70000, // bill exceeds the whole salary
+    await _pump(
+      tester,
+      stats: filledStats,
+      trend: const [],
+      forecast: ccForecast(charge: 70000, salary: 50000),
     );
-    await _pump(tester, stats: overCc, trend: const []);
     expect(tester.takeException(), isNull);
     expect(find.text('Credit card forecast'), findsOneWidget);
-    // Forecast take-home = 50k - 70k = -20k, shown negative.
-    expect(find.textContaining('-'), findsWidgets);
+    // In-hand = 50k - 70k = -20k.
+    expect(find.textContaining('20,000'), findsWidgets);
+    expect(
+      find.textContaining('Card bills exceed this salary'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('credit-card forecast shows even without a recorded salary',
+      (tester) async {
+    // The forecast block is no longer gated behind having a salary entered.
+    await _pump(
+      tester,
+      stats: SalaryStats.empty,
+      trend: const [],
+      forecast: computeCreditCardForecast(
+        ccBanks: const [BankBillingConfig(name: 'HDFC', statementDay: 18, dueDay: 9)],
+        ccExpenses: [
+          CardExpense(bank: 'HDFC', amount: 5000, date: DateTime(2026, 6, 10)),
+        ],
+        salaryByMonth: const {},
+        now: DateTime(2026, 6, 15),
+      ),
+    );
+    expect(tester.takeException(), isNull);
+    expect(find.text('Credit card forecast'), findsOneWidget);
+  });
+
+  testWidgets(
+      'un-recorded salary month shows bills due + a nudge, not a misleading '
+      'negative in-hand', (tester) async {
+    await _pump(
+      tester,
+      stats: SalaryStats.empty,
+      trend: const [],
+      forecast: computeCreditCardForecast(
+        ccBanks: const [BankBillingConfig(name: 'HDFC', statementDay: 18, dueDay: 9)],
+        ccExpenses: [
+          CardExpense(bank: 'HDFC', amount: 5000, date: DateTime(2026, 6, 10)),
+        ],
+        salaryByMonth: const {},
+        now: DateTime(2026, 6, 15),
+      ),
+    );
+    expect(tester.takeException(), isNull);
+    // The July bill lands on a month with no recorded salary → surface the
+    // bill, not a "-₹5,000" projected in-hand.
+    expect(find.text('Card bills due'), findsOneWidget);
+    expect(
+      find.textContaining('Add this month\'s salary'),
+      findsOneWidget,
+    );
+    expect(find.text('Projected in-hand'), findsNothing);
+  });
+
+  testWidgets('tapping an open statement reveals its line items',
+      (tester) async {
+    await _pump(
+      tester,
+      stats: filledStats,
+      trend: trend,
+      forecast: computeCreditCardForecast(
+        ccBanks: const [BankBillingConfig(name: 'HDFC', statementDay: 18, dueDay: 9)],
+        ccExpenses: [
+          CardExpense(
+            bank: 'HDFC',
+            amount: 1234,
+            date: DateTime(2026, 6, 10),
+            description: 'Amazon order',
+            category: 'Shopping',
+          ),
+        ],
+        salaryByMonth: {'2026-07': 100000},
+        now: DateTime(2026, 6, 15),
+      ),
+    );
+    expect(tester.takeException(), isNull);
+    // Collapsed by default: the individual charge label is not in the tree.
+    expect(find.text('Amazon order'), findsNothing);
+    // Tap the open-statement card (its bank name is exactly 'HDFC').
+    await tester.tap(find.text('HDFC'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(tester.takeException(), isNull);
+    expect(find.text('Amazon order'), findsWidgets);
   });
 
   testWidgets('renders the personalized, grounded AI insight card',

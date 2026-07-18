@@ -16,12 +16,15 @@ import '../../../../core/platform/local_file_image.dart';
 import '../../../../core/platform/ocr_stub.dart';
 import '../../../../core/platform/platform_capabilities.dart';
 import '../../../../core/services/background_task_coordinator.dart';
+import '../../../../core/services/credit_card_forecast_engine.dart';
 import '../../../../core/services/hold_to_speak_service.dart';
 import '../../../../core/services/telegram_logger.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../../../data/services/ai_categorize_service.dart';
 import '../../../../domain/entities/expense_entities.dart';
+import '../../settings/settings_controller.dart' show Bank, kCardTypeCredit;
+import '../widgets/expense_date_picker.dart';
 import 'expense_success_modal.dart';
 
 const List<String> kDefaultExpenseModalBanks = [
@@ -181,16 +184,23 @@ Future<void> showAddExpenseModal(
   ) onAdd,
   required void Function(String description, String category) onTeachAI,
   List<String>? banks,
+  List<Bank>? bankConfigs,
   String? initialImagePath,
   String? initialText,
 }) {
+  // Derive the bank-name pills from the configured cards (distinct, in order)
+  // when available, falling back to the legacy static list.
+  final names = bankConfigs != null && bankConfigs.isNotEmpty
+      ? _distinctBankNames(bankConfigs)
+      : (banks ?? kDefaultExpenseModalBanks);
   return showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
     backgroundColor: Colors.transparent,
     builder: (ctx) => _AddExpenseSheet(
       learnings: learnings,
-      banks: banks ?? kDefaultExpenseModalBanks,
+      banks: names,
+      bankConfigs: bankConfigs ?? const [],
       categorize: categorize,
       smartParse: smartParse,
       onAdd: onAdd,
@@ -201,34 +211,15 @@ Future<void> showAddExpenseModal(
   );
 }
 
-// ─── Date option helper ──────────────────────────────────────────────────────
-
-enum _DateOption { today, yesterday, nextMonth }
-
-String _dateLabel(_DateOption opt) {
-  switch (opt) {
-    case _DateOption.today:
-      return 'Today';
-    case _DateOption.yesterday:
-      return 'Yesterday';
-    case _DateOption.nextMonth:
-      return 'NM 1st';
+/// Distinct bank names from the configured cards, preserving first-seen order.
+List<String> _distinctBankNames(List<Bank> configs) {
+  final seen = <String>{};
+  final out = <String>[];
+  for (final b in configs) {
+    if (seen.add(b.name)) out.add(b.name);
   }
+  return out;
 }
-
-DateTime _resolveDate(_DateOption opt) {
-  final now = DateTime.now();
-  switch (opt) {
-    case _DateOption.today:
-      return now;
-    case _DateOption.yesterday:
-      return now.subtract(const Duration(days: 1));
-    case _DateOption.nextMonth:
-      return DateTime(now.year, now.month + 1, 1);
-  }
-}
-
-String _formatDateShort(DateTime d) => DateFormat('dd MMM yyyy').format(d);
 
 // ─── Main sheet ──────────────────────────────────────────────────────────────
 
@@ -236,6 +227,7 @@ class _AddExpenseSheet extends StatefulWidget {
   const _AddExpenseSheet({
     required this.learnings,
     required this.banks,
+    this.bankConfigs = const [],
     this.categorize,
     this.smartParse,
     required this.onAdd,
@@ -246,6 +238,7 @@ class _AddExpenseSheet extends StatefulWidget {
 
   final CategoryLearning learnings;
   final List<String> banks;
+  final List<Bank> bankConfigs;
   final CategorizeFunction? categorize;
   final SmartParseFunction? smartParse;
   final void Function(
@@ -328,8 +321,9 @@ class _AddExpenseSheetState extends State<_AddExpenseSheet>
   bool _hasAttemptedSubmit = false;
   late final AnimationController _shakeCtrl;
 
-  // Date
-  _DateOption _dateOption = _DateOption.today;
+  // Date — any day the user picks (defaults to today). Drives what period the
+  // expense is logged into across the whole app.
+  DateTime _selectedDate = dateOnly(DateTime.now());
 
   // ── Voice (hold-to-record) ─────────────────────────────────────────────
   // All STT robustness (silence-recovery, restart accumulation, error
@@ -656,13 +650,10 @@ class _AddExpenseSheetState extends State<_AddExpenseSheet>
     final stayInVoiceFlow = _mode == 2 || _voiceParsing;
 
     if (result != null && result.amount > 0) {
-      final parsedBank = result.bank.isNotEmpty &&
-              widget.banks.contains(result.bank)
+      final parsedBank = result.bank.isNotEmpty && _isKnownBank(result.bank)
           ? result.bank
           : 'CASH';
-      final parsedCard = parsedBank == 'CASH'
-          ? 'Cash'
-          : (result.cardType.isNotEmpty ? result.cardType : 'DB');
+      final parsedCard = _resolveParsedCardType(parsedBank, result.cardType);
 
       TLog.i('AddExpense',
           '🎙️ Voice parsed ✓ ${sw.elapsedMilliseconds}ms → '
@@ -1305,13 +1296,10 @@ class _AddExpenseSheetState extends State<_AddExpenseSheet>
     if (!mounted) return;
 
     // Resolve bank/cardType: use LLM result if valid, else default to CASH
-    final finalBank = extractedBank.isNotEmpty &&
-            widget.banks.contains(extractedBank)
+    final finalBank = extractedBank.isNotEmpty && _isKnownBank(extractedBank)
         ? extractedBank
         : 'CASH';
-    final finalCardType = finalBank == 'CASH'
-        ? 'Cash'
-        : (extractedCardType.isNotEmpty ? extractedCardType : 'DB');
+    final finalCardType = _resolveParsedCardType(finalBank, extractedCardType);
 
     setState(() {
       if (extractedAmount.isNotEmpty) _amountCtrl.text = extractedAmount;
@@ -1398,7 +1386,7 @@ class _AddExpenseSheetState extends State<_AddExpenseSheet>
 
     final finalIsManual = _categoryIsManual && !_hasLearned;
     final conf = _categoryIsManual && !_hasLearned ? 'manual' : _confidence;
-    final resolvedDate = _resolveDate(_dateOption);
+    final resolvedDate = _resolvedExpenseDate();
 
     widget.onAdd(
       ExpenseSubmitPayload(
@@ -1557,60 +1545,25 @@ class _AddExpenseSheetState extends State<_AddExpenseSheet>
 
   // ── Date selector ──────────────────────────────────────────────────────────
 
+  /// The exact timestamp the expense is logged against. When the picked day is
+  /// *today* we keep the current time-of-day so it reads as "just now" in the
+  /// recent list; for any other day we anchor to local noon so the entry sits
+  /// squarely inside that calendar day regardless of timezone/DST.
+  DateTime _resolvedExpenseDate() {
+    final now = DateTime.now();
+    final picked = _selectedDate;
+    if (picked.year == now.year &&
+        picked.month == now.month &&
+        picked.day == now.day) {
+      return now;
+    }
+    return DateTime(picked.year, picked.month, picked.day, 12);
+  }
+
   Widget _buildDateSelector(AppColors colors, TextTheme textTheme) {
-    final resolvedDate = _resolveDate(_dateOption);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        _FormLabel('EXPENSE DATE', colors),
-        Row(
-          children: [
-            for (final opt in _DateOption.values) ...[
-              Expanded(
-                child: Padding(
-                  padding: EdgeInsets.only(
-                    right: opt == _DateOption.values.last ? 0 : 8,
-                  ),
-                  child: ChoiceChip(
-                    label: Text(
-                      _dateLabel(opt),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    selected: _dateOption == opt,
-                    onSelected: (_) => setState(() => _dateOption = opt),
-                    selectedColor: const Color(0x380D59F2),
-                    labelStyle: GoogleFonts.plusJakartaSans(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      color: _dateOption == opt
-                          ? AppColors.accent
-                          : colors.text3,
-                    ),
-                    side: BorderSide(
-                      color: _dateOption == opt
-                          ? AppColors.accent.withValues(alpha: 0.5)
-                          : colors.border,
-                    ),
-                    backgroundColor: colors.bg2,
-                  ),
-                ),
-              ),
-            ],
-          ],
-        ),
-        Padding(
-          padding: const EdgeInsets.only(top: 6),
-          child: Text(
-            '📅 ${_formatDateShort(resolvedDate)}',
-            style: GoogleFonts.plusJakartaSans(
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
-              color: AppColors.accent.withValues(alpha: 0.7),
-            ),
-          ),
-        ),
-      ],
+    return ExpenseDatePicker(
+      selectedDate: _selectedDate,
+      onChanged: (d) => setState(() => _selectedDate = d),
     );
   }
 
@@ -2335,6 +2288,64 @@ class _AddExpenseSheetState extends State<_AddExpenseSheet>
     );
   }
 
+  // ── Bank / payment helpers ───────────────────────────────────────────────
+
+  bool _isKnownBank(String name) =>
+      widget.banks.any((b) => b.toLowerCase() == name.toLowerCase());
+
+  /// Card types configured for [bank]. When the bank has explicit configs we
+  /// restrict to those; otherwise we fall back to the legacy rule (CASH ⇒ Cash
+  /// only; any other bank ⇒ DB or CC, never Cash).
+  Set<String> _allowedCardTypes(String bank) {
+    if (bank.isEmpty) return expenseCardTypes.toSet();
+    final configs = widget.bankConfigs
+        .where((b) => b.name.toLowerCase() == bank.toLowerCase())
+        .toList();
+    if (configs.isNotEmpty) {
+      return configs.map((b) => b.cardType).toSet();
+    }
+    if (bank.toUpperCase() == 'CASH') return {'Cash'};
+    return {'DB', 'CC'};
+  }
+
+  /// The configured credit-card entry for [bank] with a usable billing cycle,
+  /// or null when the bank isn't a configured CC.
+  Bank? _ccConfigFor(String bank) {
+    for (final b in widget.bankConfigs) {
+      if (b.name.toLowerCase() == bank.toLowerCase() && b.isCreditCard) {
+        return b;
+      }
+    }
+    return null;
+  }
+
+  /// Picks a sensible card type when the bank changes: auto-select when the
+  /// bank exposes exactly one type, else clear an now-invalid selection.
+  void _reconcileCardTypeForBank(String bank) {
+    final allowed = _allowedCardTypes(bank);
+    if (allowed.length == 1) {
+      _cardType = allowed.first;
+    } else if (!allowed.contains(_cardType)) {
+      _cardType = '';
+    }
+  }
+
+  /// Resolves the card type for a bank inferred by voice/scan parsing so the
+  /// result honors the bank's *configured* card types: keep the parsed type
+  /// when the bank allows it, otherwise collapse to the only allowed type (or a
+  /// sensible default). This keeps AI-parsed entries consistent with what the
+  /// user could pick manually for a newly added bank.
+  String _resolveParsedCardType(String bank, String parsedCardType) {
+    if (bank.toUpperCase() == 'CASH') return 'Cash';
+    final allowed = _allowedCardTypes(bank);
+    if (parsedCardType.isNotEmpty && allowed.contains(parsedCardType)) {
+      return parsedCardType;
+    }
+    if (allowed.length == 1) return allowed.first;
+    if (allowed.contains('DB')) return 'DB';
+    return allowed.isNotEmpty ? allowed.first : 'DB';
+  }
+
   // ── Bank / payment ─────────────────────────────────────────────────────────
 
   Widget _buildBankPayment(AppColors colors, TextTheme textTheme) {
@@ -2381,11 +2392,7 @@ class _AddExpenseSheetState extends State<_AddExpenseSheet>
                       selected: _bank == b,
                       onSelected: (_) => setState(() {
                         _bank = b;
-                        if (b == 'CASH') {
-                          _cardType = 'Cash';
-                        } else if (_cardType == 'Cash' || _cardType.isEmpty) {
-                          _cardType = '';
-                        }
+                        _reconcileCardTypeForBank(b);
                       }),
                       selectedColor: const Color(0x387C3AED),
                       labelStyle: GoogleFonts.plusJakartaSans(
@@ -2447,11 +2454,8 @@ class _AddExpenseSheetState extends State<_AddExpenseSheet>
                           : 0,
                     ),
                     child: Builder(builder: (context) {
-                      final isCashBank = _bank == 'CASH';
-                      final isCashType = ct == 'Cash';
-                      final isDisabled = isCashBank
-                          ? !isCashType
-                          : (_bank.isNotEmpty && isCashType);
+                      final isDisabled =
+                          _bank.isNotEmpty && !_allowedCardTypes(_bank).contains(ct);
                       return ChoiceChip(
                         label: Text(
                           '${_cardEmoji(ct)} $ct',
@@ -2489,6 +2493,7 @@ class _AddExpenseSheetState extends State<_AddExpenseSheet>
             ],
           ),
         ),
+        _buildCcRepaymentHint(colors),
         const SizedBox(height: 16),
         _CommentsField(
           controller: _commentsCtrl,
@@ -2523,6 +2528,67 @@ class _AddExpenseSheetState extends State<_AddExpenseSheet>
     if (ct == 'Cash') return '💵';
     if (ct == 'CC') return '💳';
     return '🏦';
+  }
+
+  /// At log time, tells the user exactly which salary will repay a credit-card
+  /// charge — the core nudge so they don't lose track of the billing cycle.
+  Widget _buildCcRepaymentHint(AppColors colors) {
+    if (_cardType != kCardTypeCredit) return const SizedBox.shrink();
+    final cfg = _ccConfigFor(_bank);
+    if (cfg == null) return const SizedBox.shrink();
+
+    final timing = cardBillTimingFor(
+      expenseDate: _resolvedExpenseDate(),
+      statementDay: cfg.statementDay!,
+      dueDay: cfg.dueDay!,
+    );
+    final dateFmt = DateFormat('d MMM');
+    const violet = Color(0xFFA78BFA);
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 12),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: const Color(0x14A78BFA),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: const Color(0x33A78BFA)),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Icon(LucideIcons.calendarClock, size: 18, color: violet),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Repaid from your ${timing.salaryMonthLabel} salary',
+                    style: GoogleFonts.plusJakartaSans(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w800,
+                      color: violet,
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    '$_bank statement closes ${dateFmt.format(timing.statementClose)}, '
+                    'bill due ${dateFmt.format(timing.dueDate)}.',
+                    style: GoogleFonts.plusJakartaSans(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w500,
+                      color: colors.text3,
+                      height: 1.4,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   InputDecoration _fieldDecoration(AppColors colors, {bool hasError = false}) {

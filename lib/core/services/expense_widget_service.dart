@@ -1,11 +1,39 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../domain/entities/expense_entities.dart';
 import '../platform/platform_capabilities.dart';
+import '../theme/app_colors.dart';
 import 'telegram_logger.dart';
+
+/// Pure, immutable snapshot of everything the native Expense widget renders.
+/// Computed by [ExpenseWidgetService.computeWidgetData] so the aggregation can
+/// be unit-tested without SharedPreferences or a MethodChannel.
+@immutable
+class ExpenseWidgetData {
+  const ExpenseWidgetData({
+    required this.todayTotal,
+    required this.todayCount,
+    required this.monthSpent,
+    required this.monthCount,
+    required this.topCatName,
+    required this.topCatEmoji,
+    required this.topCatAmount,
+    required this.topCatColor,
+  });
+
+  final double todayTotal;
+  final int todayCount;
+  final double monthSpent;
+  final int monthCount;
+  final String topCatName;
+  final String topCatEmoji;
+  final double topCatAmount;
+  final String topCatColor;
+}
 
 /// Writes today's expense summary to SharedPreferences so the native
 /// Android ExpenseWidgetProvider can read it, then triggers a widget refresh.
@@ -80,7 +108,15 @@ class ExpenseWidgetService {
       ];
 
       if (isMonthStale) {
-        writes.add(prefs.setString('expense_widget_month_spent', '0.00'));
+        // Month rolled over — clear every month-scoped metric so the widget
+        // never shows last month's spend/top-category before the stream reloads.
+        writes
+          ..add(prefs.setString('expense_widget_month_spent', '0.00'))
+          ..add(prefs.setInt('expense_widget_month_count', 0))
+          ..add(prefs.setString('expense_widget_top_cat_name', ''))
+          ..add(prefs.setString('expense_widget_top_cat_emoji', ''))
+          ..add(prefs.setString('expense_widget_top_cat_amount', '0.00'))
+          ..add(prefs.setString('expense_widget_top_cat_color', ''));
       }
 
       await Future.wait(writes);
@@ -98,48 +134,98 @@ class ExpenseWidgetService {
     }
   }
 
+  /// Pure aggregation of [expenses] into the widget snapshot, as of [now].
+  ///
+  /// Rules (mirror the in-app expense totals):
+  ///  - Investments are excluded from every total (wealth-building, not spend).
+  ///  - Rows with an unparseable [Expense.date] are skipped.
+  ///  - "Today" is `[todayStart, tomorrowStart)`; "month" is `>= monthStart`.
+  ///  - The top category is the single biggest month spend; ties keep the first
+  ///    seen at the winning amount (a later equal amount does not replace it).
+  ///  - A blank category is bucketed as `Others`.
+  @visibleForTesting
+  static ExpenseWidgetData computeWidgetData({
+    required List<Expense> expenses,
+    required DateTime now,
+  }) {
+    final todayStart = DateTime(now.year, now.month, now.day);
+    final tomorrowStart = todayStart.add(const Duration(days: 1));
+    final monthStart = DateTime(now.year, now.month, 1);
+
+    double todayTotal = 0;
+    int todayCount = 0;
+    double monthSpent = 0;
+    int monthCount = 0;
+    final monthByCategory = <String, double>{};
+
+    for (final e in expenses) {
+      if (isNonSpendCategory(e.category)) continue;
+      final d = DateTime.tryParse(e.date);
+      if (d == null) continue;
+
+      if (!d.isBefore(monthStart)) {
+        monthSpent += e.amount;
+        monthCount++;
+        final cat = e.category.trim().isEmpty ? 'Others' : e.category.trim();
+        monthByCategory[cat] = (monthByCategory[cat] ?? 0) + e.amount;
+      }
+      if (!d.isBefore(todayStart) && d.isBefore(tomorrowStart)) {
+        todayTotal += e.amount;
+        todayCount++;
+      }
+    }
+
+    String topCatName = '';
+    double topCatAmount = 0;
+    monthByCategory.forEach((cat, amount) {
+      if (amount > topCatAmount) {
+        topCatAmount = amount;
+        topCatName = cat;
+      }
+    });
+    final topCatEmoji = topCatName.isEmpty
+        ? ''
+        : (AppColors.categoryIcons[topCatName] ?? '📦');
+    final topCatColor = topCatName.isEmpty
+        ? ''
+        : _hex(AppColors.categoryColors[topCatName] ?? AppColors.categoryOthers);
+
+    return ExpenseWidgetData(
+      todayTotal: todayTotal,
+      todayCount: todayCount,
+      monthSpent: monthSpent,
+      monthCount: monthCount,
+      topCatName: topCatName,
+      topCatEmoji: topCatEmoji,
+      topCatAmount: topCatAmount,
+      topCatColor: topCatColor,
+    );
+  }
+
   Future<void> _doUpdate({
     required List<Expense> expenses,
     required double monthBudget,
   }) async {
     try {
-      final now = DateTime.now();
-      final todayStart = DateTime(now.year, now.month, now.day);
-      final tomorrowStart = todayStart.add(const Duration(days: 1));
-      final monthStart = DateTime(now.year, now.month, 1);
-
-      double todayTotal = 0;
-      int todayCount = 0;
-      double monthSpent = 0;
-
-      for (final e in expenses) {
-        // Investments are wealth-building, not spending — keep them out of the
-        // widget's today/month totals (mirrors the in-app expense totals).
-        if (isInvestmentCategory(e.category)) continue;
-        final d = DateTime.tryParse(e.date);
-        if (d == null) continue;
-
-        if (!d.isBefore(monthStart)) {
-          monthSpent += e.amount;
-        }
-        if (!d.isBefore(todayStart) && d.isBefore(tomorrowStart)) {
-          todayTotal += e.amount;
-          todayCount++;
-        }
-      }
+      final data = computeWidgetData(expenses: expenses, now: DateTime.now());
 
       final prefs = await SharedPreferences.getInstance();
       await Future.wait([
-        prefs.setString('expense_widget_today_total', todayTotal.toStringAsFixed(2)),
-        prefs.setInt('expense_widget_today_count', todayCount),
+        prefs.setString('expense_widget_today_total', data.todayTotal.toStringAsFixed(2)),
+        prefs.setInt('expense_widget_today_count', data.todayCount),
         prefs.setString('expense_widget_month_budget', monthBudget.toStringAsFixed(2)),
-        prefs.setString('expense_widget_month_spent', monthSpent.toStringAsFixed(2)),
+        prefs.setString('expense_widget_month_spent', data.monthSpent.toStringAsFixed(2)),
+        prefs.setInt('expense_widget_month_count', data.monthCount),
+        prefs.setString('expense_widget_top_cat_name', data.topCatName),
+        prefs.setString('expense_widget_top_cat_emoji', data.topCatEmoji),
+        prefs.setString('expense_widget_top_cat_amount', data.topCatAmount.toStringAsFixed(2)),
+        prefs.setString('expense_widget_top_cat_color', data.topCatColor),
         prefs.setString('expense_widget_update_date', _todayDateString()),
       ]);
 
       _triggerNativeRefreshWithRetry('update');
       TLog.i('ExpWidget',
-          'Widget synced: today=₹$todayTotal ($todayCount), budget=₹$monthBudget, month=₹$monthSpent');
+          'Widget synced: today=₹${data.todayTotal} (${data.todayCount}), budget=₹$monthBudget, month=₹${data.monthSpent} (${data.monthCount}), top=${data.topCatName} ₹${data.topCatAmount}');
     } catch (e, st) {
       TLog.e('ExpWidget', 'Failed to update expense widget data', error: e, st: st);
     }
@@ -172,4 +258,8 @@ class ExpenseWidgetService {
     final now = DateTime.now();
     return '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
   }
+
+  /// `#RRGGBB` for the native side to tint the top-category accent.
+  static String _hex(Color c) =>
+      '#${c.toARGB32().toRadixString(16).substring(2).toUpperCase()}';
 }

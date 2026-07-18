@@ -19,6 +19,7 @@ import '../auth/auth_service.dart';
 import '../network/api_client.dart';
 import '../services/app_nuke_service.dart';
 import '../services/expense_nuke_service.dart';
+import '../services/news_nuke_service.dart';
 import '../services/reset_sync_service.dart';
 import '../services/image_search_store.dart';
 import '../services/saved_search_store.dart';
@@ -84,7 +85,7 @@ final savedWordsRepositoryProvider = Provider<SavedWordsRepository>((ref) {
 
 /// Orchestrates the FULL "nuke" — wipes every local table (rows only, schema
 /// preserved) plus the cloud copy of every domain that would otherwise
-/// re-hydrate (financial data, saved words, learnings, saved searches).
+/// re-hydrate (financial data, saved words, learnings, saved searches, news).
 /// Triggered from the InsightAI search box for a complete from-scratch reset.
 final appNukeServiceProvider = Provider<AppNukeService>((ref) {
   return AppNukeService(
@@ -92,6 +93,7 @@ final appNukeServiceProvider = Provider<AppNukeService>((ref) {
     ref.watch(expenseRepositoryProvider),
     ref.watch(salaryRepositoryProvider),
     ref.watch(savedWordsRepositoryProvider),
+    ref.watch(newsRepositoryProvider),
     ref.watch(resetSyncServiceProvider),
     clearSavedSearches: () => SavedSearchStore.instance.clearAllRemote(),
   );
@@ -102,6 +104,12 @@ final newsRepositoryProvider = Provider<NewsRepository>((ref) {
     ref.watch(appDatabaseProvider),
     ref.watch(apiClientProvider),
   );
+});
+
+/// News-scope "nuke" — deletes EVERY article (including saved) locally + on the
+/// server. Triggered by the `nuke` command in the News saved-articles search.
+final newsNukeServiceProvider = Provider<NewsNukeService>((ref) {
+  return NewsNukeService(ref.watch(newsRepositoryProvider));
 });
 
 final aiCategorizeServiceProvider = Provider<AICategorizeService>((ref) {

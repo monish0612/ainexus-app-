@@ -11,33 +11,103 @@ import '../../../data/services/user_preferences_service.dart';
 
 // ── Data models ──────────────────────────────────────────────────────────────
 
+/// The card type a configured bank entry represents. Mirrors the expense
+/// `cardType` values ('DB' = debit, 'CC' = credit, 'Cash').
+const String kCardTypeDebit = 'DB';
+const String kCardTypeCredit = 'CC';
+const String kCardTypeCash = 'Cash';
+const List<String> kBankCardTypes = [
+  kCardTypeDebit,
+  kCardTypeCredit,
+  kCardTypeCash,
+];
+
+/// A configured payment instrument: a bank name paired with a single card type
+/// (DB / CC / Cash). Credit-card entries additionally carry their billing cycle
+/// — [statementDay] (the day the statement closes) and [dueDay] (the day the
+/// bill is due, in the month after it closes). Both are null for non-CC cards.
+///
+/// Stored as JSON inside the synced `app_banks` preference, so adding fields
+/// here automatically round-trips across devices and the web.
 @immutable
 class Bank {
   const Bank({
     required this.id,
     required this.name,
     required this.color,
+    this.cardType = kCardTypeDebit,
+    this.statementDay,
+    this.dueDay,
   });
 
   final String id;
   final String name;
   final String color;
 
-  Bank copyWith({String? id, String? name, String? color}) {
+  /// One of [kBankCardTypes]. Drives which payment options this bank exposes
+  /// in the expense entry form and whether it participates in CC forecasting.
+  final String cardType;
+
+  /// Day-of-month (1-31) the credit-card statement closes. CC only; null
+  /// otherwise.
+  final int? statementDay;
+
+  /// Day-of-month (1-31) the credit-card bill is due, in the month after the
+  /// statement closes. CC only; null otherwise.
+  final int? dueDay;
+
+  /// Whether this entry is a credit card with a usable billing cycle.
+  bool get isCreditCard =>
+      cardType == kCardTypeCredit && statementDay != null && dueDay != null;
+
+  Bank copyWith({
+    String? id,
+    String? name,
+    String? color,
+    String? cardType,
+    int? statementDay,
+    int? dueDay,
+    bool clearBillingCycle = false,
+  }) {
     return Bank(
       id: id ?? this.id,
       name: name ?? this.name,
       color: color ?? this.color,
+      cardType: cardType ?? this.cardType,
+      statementDay:
+          clearBillingCycle ? null : (statementDay ?? this.statementDay),
+      dueDay: clearBillingCycle ? null : (dueDay ?? this.dueDay),
     );
   }
 
-  Map<String, dynamic> toJson() => {'id': id, 'name': name, 'color': color};
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'name': name,
+        'color': color,
+        'cardType': cardType,
+        if (statementDay != null) 'statementDay': statementDay,
+        if (dueDay != null) 'dueDay': dueDay,
+      };
 
-  factory Bank.fromJson(Map<String, dynamic> json) => Bank(
-        id: json['id'] as String,
-        name: json['name'] as String,
-        color: json['color'] as String,
-      );
+  factory Bank.fromJson(Map<String, dynamic> json) {
+    final rawType = (json['cardType'] ?? kCardTypeDebit).toString();
+    final cardType =
+        kBankCardTypes.contains(rawType) ? rawType : kCardTypeDebit;
+    int? asDay(dynamic v) {
+      final n = v is num ? v.toInt() : int.tryParse(v?.toString() ?? '');
+      if (n == null || n < 1 || n > 31) return null;
+      return n;
+    }
+
+    return Bank(
+      id: json['id'] as String,
+      name: json['name'] as String,
+      color: json['color'] as String,
+      cardType: cardType,
+      statementDay: cardType == kCardTypeCredit ? asDay(json['statementDay']) : null,
+      dueDay: cardType == kCardTypeCredit ? asDay(json['dueDay']) : null,
+    );
+  }
 }
 
 // ── Defaults ─────────────────────────────────────────────────────────────────
@@ -134,19 +204,51 @@ abstract final class _PK {
   static const summarizeOverride = 'summarize_override';
   static const defaultFollowUp = 'default_followup_provider';
   static const onlineSearch = 'online_search_provider';
+  // Server preference key for the banks list (JSON-encoded). Also the legacy
+  // LOCAL key, where banks used to be stored as a `id|name|color` StringList.
   static const banks = 'app_banks';
+  // New LOCAL key: banks stored as a single JSON string so the richer model
+  // (cardType + billing cycle) round-trips losslessly. Reads fall back to the
+  // legacy [banks] StringList for one-time migration.
+  static const banksJson = 'app_banks_v2';
   // Outbox for unsynced setting changes (survives app kills).
   static const outbox = '_settings_outbox_v1';
 }
 
 // ── Default banks ────────────────────────────────────────────────────────────
 
+// Seeded to mirror the real payment instruments used in expense entry. Each
+// entry is a (bank, cardType) card; CC cards carry their billing cycle. All of
+// these are fully editable/removable from Settings.
 const _defaultBanks = <Bank>[
-  Bank(id: 'b1', name: 'HDFC Bank', color: '#0D59F2'),
-  Bank(id: 'b2', name: 'SBI', color: '#059669'),
-  Bank(id: 'b3', name: 'ICICI Bank', color: '#DC2626'),
-  Bank(id: 'b4', name: 'Axis Bank', color: '#7C3AED'),
-  Bank(id: 'b5', name: 'Kotak Mahindra', color: '#D97706'),
+  Bank(id: 'hdfc_db', name: 'HDFC', color: '#004C8F'),
+  Bank(
+    id: 'hdfc_cc',
+    name: 'HDFC',
+    color: '#004C8F',
+    cardType: kCardTypeCredit,
+    statementDay: 18,
+    dueDay: 9,
+  ),
+  Bank(id: 'icici_db', name: 'ICICI', color: '#B02A2A'),
+  Bank(id: 'axis_db', name: 'AXIS', color: '#97144D'),
+  Bank(
+    id: 'axis_cc',
+    name: 'AXIS',
+    color: '#97144D',
+    cardType: kCardTypeCredit,
+    statementDay: 24,
+    dueDay: 13,
+  ),
+  Bank(
+    id: 'scapia_cc',
+    name: 'SCAPIA',
+    color: '#6D28D9',
+    cardType: kCardTypeCredit,
+    statementDay: 26,
+    dueDay: 15,
+  ),
+  Bank(id: 'cash', name: 'CASH', color: '#868E96', cardType: kCardTypeCash),
 ];
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -208,19 +310,7 @@ class SettingsController extends StateNotifier<SettingsState> {
     final onlineSearch =
         _prefs.getString(_PK.onlineSearch) ?? 'gemini';
 
-    final banksRaw = _prefs.getStringList(_PK.banks);
-    List<Bank> banks;
-    if (banksRaw != null) {
-      banks = banksRaw.map((b) {
-        final parts = b.split('|');
-        if (parts.length == 3) {
-          return Bank(id: parts[0], name: parts[1], color: parts[2]);
-        }
-        return null;
-      }).whereType<Bank>().toList();
-    } else {
-      banks = _defaultBanks;
-    }
+    final banks = _readBanksFromPrefs() ?? _defaultBanks;
 
     state = SettingsState(
       theme: theme,
@@ -439,18 +529,62 @@ class SettingsController extends StateNotifier<SettingsState> {
     state = state.copyWith(settingsOpen: false);
   }
 
-  void addBank(String name) {
-    if (name.trim().isEmpty) return;
-    final colorIndex = state.banks.length % AppColors.bankPalette.length;
-    final color = AppColors.bankPalette[colorIndex];
-    final hexColor =
-        '#${color.toARGB32().toRadixString(16).substring(2).toUpperCase()}';
+  /// Adds a new bank card. [cardType] is one of [kBankCardTypes]; [statementDay]
+  /// and [dueDay] (1-31) are only meaningful for credit cards and are dropped
+  /// otherwise. [color] defaults to the next palette swatch when omitted.
+  void addBank(
+    String name, {
+    String cardType = kCardTypeDebit,
+    int? statementDay,
+    int? dueDay,
+    String? color,
+  }) {
+    final trimmed = name.trim();
+    if (trimmed.isEmpty) return;
+    final type = kBankCardTypes.contains(cardType) ? cardType : kCardTypeDebit;
+    final isCc = type == kCardTypeCredit;
+    final hexColor = color ?? _nextBankColor();
     final bank = Bank(
       id: 'b${DateTime.now().millisecondsSinceEpoch}',
-      name: name.trim(),
+      name: trimmed,
       color: hexColor,
+      cardType: type,
+      statementDay: isCc ? _clampDay(statementDay) : null,
+      dueDay: isCc ? _clampDay(dueDay) : null,
     );
     state = state.copyWith(banks: [...state.banks, bank]);
+    _saveBanks();
+  }
+
+  /// Updates an existing bank card in place (matched by [id]). Only non-null
+  /// fields are changed. Switching [cardType] away from CC clears the billing
+  /// cycle; switching to CC keeps/sets the provided days.
+  void updateBank(
+    String id, {
+    String? name,
+    String? cardType,
+    int? statementDay,
+    int? dueDay,
+    String? color,
+  }) {
+    final type = cardType != null && kBankCardTypes.contains(cardType)
+        ? cardType
+        : null;
+    state = state.copyWith(
+      banks: state.banks.map((b) {
+        if (b.id != id) return b;
+        final resolvedType = type ?? b.cardType;
+        final isCc = resolvedType == kCardTypeCredit;
+        return b.copyWith(
+          name: name?.trim().isNotEmpty == true ? name!.trim() : null,
+          color: color,
+          cardType: type,
+          clearBillingCycle: !isCc,
+          statementDay: isCc ? (_clampDay(statementDay) ?? b.statementDay) : null,
+          dueDay: isCc ? (_clampDay(dueDay) ?? b.dueDay) : null,
+        );
+      }).toList(),
+    );
     _saveBanks();
   }
 
@@ -459,6 +593,17 @@ class SettingsController extends StateNotifier<SettingsState> {
       banks: state.banks.where((b) => b.id != id).toList(),
     );
     _saveBanks();
+  }
+
+  String _nextBankColor() {
+    final colorIndex = state.banks.length % AppColors.bankPalette.length;
+    final color = AppColors.bankPalette[colorIndex];
+    return '#${color.toARGB32().toRadixString(16).substring(2).toUpperCase()}';
+  }
+
+  static int? _clampDay(int? day) {
+    if (day == null) return null;
+    return day.clamp(1, 31);
   }
 
   // ── Push queue (debounced batch + persistent outbox) ───────────────────
@@ -561,11 +706,36 @@ class SettingsController extends StateNotifier<SettingsState> {
   // ── Persistence helpers ────────────────────────────────────────────────
 
   void _saveBanks() {
-    _prefs.setStringList(
-      _PK.banks,
-      state.banks.map((b) => '${b.id}|${b.name}|${b.color}').toList(),
-    );
-    _queuePush(_PK.banks, _encodeBanksJson(state.banks));
+    final json = _encodeBanksJson(state.banks);
+    _prefs.setString(_PK.banksJson, json);
+    // Retire the legacy lossy StringList so a future read can't resurrect it.
+    _prefs.remove(_PK.banks);
+    _queuePush(_PK.banks, json);
+  }
+
+  /// Reads banks from local prefs, preferring the new JSON store and falling
+  /// back to the legacy `id|name|color` StringList for one-time migration.
+  /// Returns null only when neither has ever been written (first run).
+  List<Bank>? _readBanksFromPrefs() {
+    final json = _prefs.getString(_PK.banksJson);
+    if (json != null && json.isNotEmpty) {
+      final decoded = _decodeBanksJson(json);
+      if (decoded != null) return decoded;
+    }
+    final legacy = _prefs.getStringList(_PK.banks);
+    if (legacy != null) {
+      return legacy
+          .map((b) {
+            final parts = b.split('|');
+            if (parts.length >= 3) {
+              return Bank(id: parts[0], name: parts[1], color: parts[2]);
+            }
+            return null;
+          })
+          .whereType<Bank>()
+          .toList();
+    }
+    return null;
   }
 
   void _persistAllToPrefs() {
@@ -580,10 +750,8 @@ class SettingsController extends StateNotifier<SettingsState> {
     _prefs.setString(_PK.summarizeOverride, s.summarizeOverride);
     _prefs.setString(_PK.defaultFollowUp, s.defaultFollowUpProvider);
     _prefs.setString(_PK.onlineSearch, s.onlineSearchProvider);
-    _prefs.setStringList(
-      _PK.banks,
-      s.banks.map((b) => '${b.id}|${b.name}|${b.color}').toList(),
-    );
+    _prefs.setString(_PK.banksJson, _encodeBanksJson(s.banks));
+    _prefs.remove(_PK.banks);
   }
 
   Map<String, String> _buildFullSnapshot() {

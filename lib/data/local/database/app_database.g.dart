@@ -64,6 +64,12 @@ class $ExpensesTable extends Expenses with TableInfo<$ExpensesTable, Expense> {
       type: DriftSqlType.string,
       requiredDuringInsert: false,
       defaultValue: const Constant(''));
+  static const VerificationMeta _updatedAtMeta =
+      const VerificationMeta('updatedAt');
+  @override
+  late final GeneratedColumn<String> updatedAt = GeneratedColumn<String>(
+      'updated_at', aliasedName, true,
+      type: DriftSqlType.string, requiredDuringInsert: false);
   @override
   List<GeneratedColumn> get $columns => [
         id,
@@ -74,7 +80,8 @@ class $ExpensesTable extends Expenses with TableInfo<$ExpensesTable, Expense> {
         cardType,
         date,
         isManualCategory,
-        comments
+        comments,
+        updatedAt
       ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -139,6 +146,10 @@ class $ExpensesTable extends Expenses with TableInfo<$ExpensesTable, Expense> {
       context.handle(_commentsMeta,
           comments.isAcceptableOrUnknown(data['comments']!, _commentsMeta));
     }
+    if (data.containsKey('updated_at')) {
+      context.handle(_updatedAtMeta,
+          updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta));
+    }
     return context;
   }
 
@@ -166,6 +177,8 @@ class $ExpensesTable extends Expenses with TableInfo<$ExpensesTable, Expense> {
           DriftSqlType.bool, data['${effectivePrefix}is_manual_category'])!,
       comments: attachedDatabase.typeMapping
           .read(DriftSqlType.string, data['${effectivePrefix}comments'])!,
+      updatedAt: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}updated_at']),
     );
   }
 
@@ -189,6 +202,12 @@ class Expense extends DataClass implements Insertable<Expense> {
   /// PDF/scan flows). NULL/'' = no comment. Local-only-friendly: synced when the
   /// backend supports it, otherwise preserved locally.
   final String comments;
+
+  /// ISO-8601 UTC timestamp of the last local OR remote write to this row. Used
+  /// for last-write-wins cross-device merge in [ExpenseRepository.syncFromServer]
+  /// — a server row only overwrites the local copy when its [updatedAt] is newer.
+  /// NULL on rows created before the v10 migration (treated as "oldest").
+  final String? updatedAt;
   const Expense(
       {required this.id,
       required this.amount,
@@ -198,7 +217,8 @@ class Expense extends DataClass implements Insertable<Expense> {
       required this.cardType,
       required this.date,
       required this.isManualCategory,
-      required this.comments});
+      required this.comments,
+      this.updatedAt});
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
@@ -211,6 +231,9 @@ class Expense extends DataClass implements Insertable<Expense> {
     map['date'] = Variable<String>(date);
     map['is_manual_category'] = Variable<bool>(isManualCategory);
     map['comments'] = Variable<String>(comments);
+    if (!nullToAbsent || updatedAt != null) {
+      map['updated_at'] = Variable<String>(updatedAt);
+    }
     return map;
   }
 
@@ -225,6 +248,9 @@ class Expense extends DataClass implements Insertable<Expense> {
       date: Value(date),
       isManualCategory: Value(isManualCategory),
       comments: Value(comments),
+      updatedAt: updatedAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(updatedAt),
     );
   }
 
@@ -241,6 +267,7 @@ class Expense extends DataClass implements Insertable<Expense> {
       date: serializer.fromJson<String>(json['date']),
       isManualCategory: serializer.fromJson<bool>(json['isManualCategory']),
       comments: serializer.fromJson<String>(json['comments']),
+      updatedAt: serializer.fromJson<String?>(json['updatedAt']),
     );
   }
   @override
@@ -256,6 +283,7 @@ class Expense extends DataClass implements Insertable<Expense> {
       'date': serializer.toJson<String>(date),
       'isManualCategory': serializer.toJson<bool>(isManualCategory),
       'comments': serializer.toJson<String>(comments),
+      'updatedAt': serializer.toJson<String?>(updatedAt),
     };
   }
 
@@ -268,7 +296,8 @@ class Expense extends DataClass implements Insertable<Expense> {
           String? cardType,
           String? date,
           bool? isManualCategory,
-          String? comments}) =>
+          String? comments,
+          Value<String?> updatedAt = const Value.absent()}) =>
       Expense(
         id: id ?? this.id,
         amount: amount ?? this.amount,
@@ -279,6 +308,7 @@ class Expense extends DataClass implements Insertable<Expense> {
         date: date ?? this.date,
         isManualCategory: isManualCategory ?? this.isManualCategory,
         comments: comments ?? this.comments,
+        updatedAt: updatedAt.present ? updatedAt.value : this.updatedAt,
       );
   Expense copyWithCompanion(ExpensesCompanion data) {
     return Expense(
@@ -294,6 +324,7 @@ class Expense extends DataClass implements Insertable<Expense> {
           ? data.isManualCategory.value
           : this.isManualCategory,
       comments: data.comments.present ? data.comments.value : this.comments,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
     );
   }
 
@@ -308,14 +339,15 @@ class Expense extends DataClass implements Insertable<Expense> {
           ..write('cardType: $cardType, ')
           ..write('date: $date, ')
           ..write('isManualCategory: $isManualCategory, ')
-          ..write('comments: $comments')
+          ..write('comments: $comments, ')
+          ..write('updatedAt: $updatedAt')
           ..write(')'))
         .toString();
   }
 
   @override
   int get hashCode => Object.hash(id, amount, description, category, bank,
-      cardType, date, isManualCategory, comments);
+      cardType, date, isManualCategory, comments, updatedAt);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -328,7 +360,8 @@ class Expense extends DataClass implements Insertable<Expense> {
           other.cardType == this.cardType &&
           other.date == this.date &&
           other.isManualCategory == this.isManualCategory &&
-          other.comments == this.comments);
+          other.comments == this.comments &&
+          other.updatedAt == this.updatedAt);
 }
 
 class ExpensesCompanion extends UpdateCompanion<Expense> {
@@ -341,6 +374,7 @@ class ExpensesCompanion extends UpdateCompanion<Expense> {
   final Value<String> date;
   final Value<bool> isManualCategory;
   final Value<String> comments;
+  final Value<String?> updatedAt;
   final Value<int> rowid;
   const ExpensesCompanion({
     this.id = const Value.absent(),
@@ -352,6 +386,7 @@ class ExpensesCompanion extends UpdateCompanion<Expense> {
     this.date = const Value.absent(),
     this.isManualCategory = const Value.absent(),
     this.comments = const Value.absent(),
+    this.updatedAt = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   ExpensesCompanion.insert({
@@ -364,6 +399,7 @@ class ExpensesCompanion extends UpdateCompanion<Expense> {
     required String date,
     this.isManualCategory = const Value.absent(),
     this.comments = const Value.absent(),
+    this.updatedAt = const Value.absent(),
     this.rowid = const Value.absent(),
   })  : id = Value(id),
         amount = Value(amount),
@@ -382,6 +418,7 @@ class ExpensesCompanion extends UpdateCompanion<Expense> {
     Expression<String>? date,
     Expression<bool>? isManualCategory,
     Expression<String>? comments,
+    Expression<String>? updatedAt,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -394,6 +431,7 @@ class ExpensesCompanion extends UpdateCompanion<Expense> {
       if (date != null) 'date': date,
       if (isManualCategory != null) 'is_manual_category': isManualCategory,
       if (comments != null) 'comments': comments,
+      if (updatedAt != null) 'updated_at': updatedAt,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -408,6 +446,7 @@ class ExpensesCompanion extends UpdateCompanion<Expense> {
       Value<String>? date,
       Value<bool>? isManualCategory,
       Value<String>? comments,
+      Value<String?>? updatedAt,
       Value<int>? rowid}) {
     return ExpensesCompanion(
       id: id ?? this.id,
@@ -419,6 +458,7 @@ class ExpensesCompanion extends UpdateCompanion<Expense> {
       date: date ?? this.date,
       isManualCategory: isManualCategory ?? this.isManualCategory,
       comments: comments ?? this.comments,
+      updatedAt: updatedAt ?? this.updatedAt,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -453,6 +493,9 @@ class ExpensesCompanion extends UpdateCompanion<Expense> {
     if (comments.present) {
       map['comments'] = Variable<String>(comments.value);
     }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<String>(updatedAt.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -471,6 +514,7 @@ class ExpensesCompanion extends UpdateCompanion<Expense> {
           ..write('date: $date, ')
           ..write('isManualCategory: $isManualCategory, ')
           ..write('comments: $comments, ')
+          ..write('updatedAt: $updatedAt, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -5204,6 +5248,7 @@ typedef $$ExpensesTableCreateCompanionBuilder = ExpensesCompanion Function({
   required String date,
   Value<bool> isManualCategory,
   Value<String> comments,
+  Value<String?> updatedAt,
   Value<int> rowid,
 });
 typedef $$ExpensesTableUpdateCompanionBuilder = ExpensesCompanion Function({
@@ -5216,6 +5261,7 @@ typedef $$ExpensesTableUpdateCompanionBuilder = ExpensesCompanion Function({
   Value<String> date,
   Value<bool> isManualCategory,
   Value<String> comments,
+  Value<String?> updatedAt,
   Value<int> rowid,
 });
 
@@ -5255,6 +5301,9 @@ class $$ExpensesTableFilterComposer
 
   ColumnFilters<String> get comments => $composableBuilder(
       column: $table.comments, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get updatedAt => $composableBuilder(
+      column: $table.updatedAt, builder: (column) => ColumnFilters(column));
 }
 
 class $$ExpensesTableOrderingComposer
@@ -5293,6 +5342,9 @@ class $$ExpensesTableOrderingComposer
 
   ColumnOrderings<String> get comments => $composableBuilder(
       column: $table.comments, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get updatedAt => $composableBuilder(
+      column: $table.updatedAt, builder: (column) => ColumnOrderings(column));
 }
 
 class $$ExpensesTableAnnotationComposer
@@ -5330,6 +5382,9 @@ class $$ExpensesTableAnnotationComposer
 
   GeneratedColumn<String> get comments =>
       $composableBuilder(column: $table.comments, builder: (column) => column);
+
+  GeneratedColumn<String> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
 }
 
 class $$ExpensesTableTableManager extends RootTableManager<
@@ -5364,6 +5419,7 @@ class $$ExpensesTableTableManager extends RootTableManager<
             Value<String> date = const Value.absent(),
             Value<bool> isManualCategory = const Value.absent(),
             Value<String> comments = const Value.absent(),
+            Value<String?> updatedAt = const Value.absent(),
             Value<int> rowid = const Value.absent(),
           }) =>
               ExpensesCompanion(
@@ -5376,6 +5432,7 @@ class $$ExpensesTableTableManager extends RootTableManager<
             date: date,
             isManualCategory: isManualCategory,
             comments: comments,
+            updatedAt: updatedAt,
             rowid: rowid,
           ),
           createCompanionCallback: ({
@@ -5388,6 +5445,7 @@ class $$ExpensesTableTableManager extends RootTableManager<
             required String date,
             Value<bool> isManualCategory = const Value.absent(),
             Value<String> comments = const Value.absent(),
+            Value<String?> updatedAt = const Value.absent(),
             Value<int> rowid = const Value.absent(),
           }) =>
               ExpensesCompanion.insert(
@@ -5400,6 +5458,7 @@ class $$ExpensesTableTableManager extends RootTableManager<
             date: date,
             isManualCategory: isManualCategory,
             comments: comments,
+            updatedAt: updatedAt,
             rowid: rowid,
           ),
           withReferenceMapper: (p0) => p0

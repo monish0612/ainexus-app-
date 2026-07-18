@@ -277,11 +277,13 @@ class AICategorizeService {
   Future<SmartParseResult?> smartParse(
     String text, {
     String? liteModel,
+    List<String>? banks,
   }) async {
     TLog.d('AICategorize', 'SmartParse → "${text.length > 60 ? '${text.substring(0, 60)}…' : text}"');
     try {
       final body = <String, dynamic>{'text': text};
       _addLiteModel(body, liteModel);
+      _addBanks(body, banks);
       final response = await _apiClient.post<dynamic>(
         ApiEndpoints.aiSmartParse,
         data: body,
@@ -370,6 +372,21 @@ class AICategorizeService {
     final trimmed = model.trim();
     if (trimmed.isEmpty) return;
     body['liteModel'] = trimmed;
+  }
+
+  /// Forwards the user's configured bank names so the backend smart-parse
+  /// prompt recognises them (incl. cards added after release). Distinct,
+  /// trimmed, non-empty — order preserved.
+  void _addBanks(Map<String, dynamic> body, List<String>? banks) {
+    if (banks == null || banks.isEmpty) return;
+    final seen = <String>{};
+    final out = <String>[];
+    for (final b in banks) {
+      final name = b.trim();
+      if (name.isEmpty) continue;
+      if (seen.add(name.toUpperCase())) out.add(name);
+    }
+    if (out.isNotEmpty) body['banks'] = out;
   }
 
   Future<AICategoryResult?> _categorizeViaBackend(

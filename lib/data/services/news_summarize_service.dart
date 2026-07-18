@@ -51,6 +51,12 @@ class NewsSummarizeService {
             'source': a.source,
             'category': a.category,
             'content': _composeContent(a),
+            // Lets the backend deep-extract the real body when our local
+            // copy is thin (feed ingested without full content). Older
+            // backends simply strip the unknown key, so this is safe to
+            // send unconditionally.
+            if ((a.originalUrl ?? '').trim().isNotEmpty)
+              'url': a.originalUrl!.trim(),
           },
       ],
     };

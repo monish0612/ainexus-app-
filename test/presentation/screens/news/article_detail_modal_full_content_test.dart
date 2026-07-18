@@ -26,6 +26,7 @@
 import 'package:ai_nexus/core/theme/app_colors.dart';
 import 'package:ai_nexus/domain/entities/news_entities.dart';
 import 'package:ai_nexus/presentation/screens/news/article_detail_modal.dart';
+import 'package:ai_nexus/presentation/widgets/image_zoom_viewer.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -167,6 +168,33 @@ void main() {
       // Surrounding prose still renders.
       expect(find.textContaining('Opening paragraph of the report'),
           findsOneWidget);
+      await _drain(tester);
+    });
+
+    testWidgets('tapping an inline article image opens the zoom viewer',
+        (tester) async {
+      const imgUrl = 'https://cdn.example.com/inline-dense-text.png';
+      final article = _article(
+        category: 'General',
+        summaryMarkdown:
+            'Opening paragraph before the image.\n\n![A dense chart]($imgUrl)\n\nClosing paragraph.',
+      );
+      await _pumpDetail(tester, article: article);
+
+      // The hero has no image (imageUrl == ''), so the only CachedNetworkImage
+      // is the tappable inline body image.
+      final inlineImage = find.byType(CachedNetworkImage);
+      expect(inlineImage, findsOneWidget);
+
+      await tester.tap(inlineImage);
+      // Advance the viewer's route/fade transition without settling (its
+      // loading spinner is an infinite ticker).
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 320));
+
+      expect(find.byType(ImageZoomViewer), findsOneWidget,
+          reason: 'Tapping an inline article image must open the full-screen '
+              'zoom viewer so dense image text is readable.');
       await _drain(tester);
     });
 

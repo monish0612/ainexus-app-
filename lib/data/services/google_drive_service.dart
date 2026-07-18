@@ -3,31 +3,33 @@ import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:googleapis/drive/v3.dart' as drive;
-import 'package:googleapis_auth/auth_io.dart' as auth;
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 
+import '../../core/network/api_client.dart';
+import '../../core/network/api_endpoints.dart';
 import '../../core/platform/io_stub.dart';
 import '../../core/platform/platform_capabilities.dart';
 import '../../core/services/telegram_logger.dart';
 
 const _kFolderId = '1ybi-QMnDHDSFLXiRQjFacrJ7uLGmFX13';
 
-// Service account credentials are injected at build time and NEVER stored in
-// source control. Pass via:
-//   flutter build apk --dart-define=GOOGLE_DRIVE_SA_JSON="$(cat sa.json)"
-// On platforms where this is empty (e.g. web build with kIsWeb guards), the
-// Drive feature is disabled at the call sites in `cloud_screen.dart`.
-const _kServiceAccountJson = String.fromEnvironment(
-  'GOOGLE_DRIVE_SA_JSON',
-  defaultValue: '',
-);
-
 final googleDriveServiceProvider = Provider<GoogleDriveService>((ref) {
-  return GoogleDriveService();
+  // The service-account key lives ONLY on the backend. The app fetches a
+  // short-lived Drive access token via the auth-gated /cloud/token route, so we
+  // hand the service the shared ApiClient (which already attaches the app JWT).
+  return GoogleDriveService(apiClient: ref.read(apiClientProvider));
 });
+
+/// A short-lived Google Drive OAuth token brokered by the backend.
+class DriveTokenResponse {
+  const DriveTokenResponse({required this.accessToken, required this.expiresAt});
+  final String accessToken;
+  final DateTime expiresAt;
+}
 
 class DriveFileInfo {
   const DriveFileInfo({
@@ -83,8 +85,49 @@ class DriveStorageQuota {
 
 typedef DriveProgressCallback = void Function(int transferred, int total);
 
+/// High-level classification of a Google Drive failure, so the UI can show an
+/// accurate, actionable message instead of always blaming the internet.
+enum DriveErrorKind {
+  /// Cloud storage is not configured on the **server** (the backend has no
+  /// `GOOGLE_DRIVE_SA_JSON`), so the token broker returns 503.
+  notConfigured,
+
+  /// The device could not reach the backend / Google (offline / DNS / firewall).
+  network,
+
+  /// Auth failed — the app isn't logged in (no app token to call the broker),
+  /// the brokered Drive token was rejected, or the device clock is badly skewed.
+  auth,
+
+  /// Anything else.
+  unknown,
+}
+
+/// A typed Drive failure carrying a user-facing [message] plus the underlying
+/// technical [detail] for logs / the diagnostics line in the error view.
+class DriveException implements Exception {
+  const DriveException(this.kind, this.message, {this.detail});
+
+  final DriveErrorKind kind;
+  final String message;
+  final String? detail;
+
+  @override
+  String toString() => detail == null ? message : '$message ($detail)';
+}
+
 class GoogleDriveService {
-  GoogleDriveService();
+  /// [apiClient] is used to call the backend token broker (it already attaches
+  /// the app JWT + handles 401-refresh). [tokenFetcher] is a test seam that
+  /// bypasses the network entirely.
+  GoogleDriveService({
+    ApiClient? apiClient,
+    Future<DriveTokenResponse> Function()? tokenFetcher,
+  })  : _apiClient = apiClient,
+        _tokenFetcher = tokenFetcher;
+
+  final ApiClient? _apiClient;
+  final Future<DriveTokenResponse> Function()? _tokenFetcher;
 
   http.Client? _authClient;
   drive.DriveApi? _driveApi;
@@ -98,46 +141,175 @@ class GoogleDriveService {
 
   String get folderId => _kFolderId;
 
+  // ── Test seams ─────────────────────────────────────────────────────────────
+  @visibleForTesting
+  Future<void> ensureAuthForTest({bool force = false}) =>
+      _ensureAuth(force: force);
+  @visibleForTesting
+  String? get debugAccessToken => _accessToken;
+  @visibleForTesting
+  DateTime? get debugTokenExpiry => _tokenExpiry;
+
+  /// Convert any thrown object into a typed [DriveException] with an accurate,
+  /// user-facing message. Pure (no platform calls) so it is safe to call from
+  /// any layer, including widget code.
+  static DriveException classifyError(Object e) {
+    if (e is DriveException) return e;
+
+    final s = e.toString().toLowerCase();
+
+    // Server hasn't been given the service account (token broker → 503).
+    if (s.contains('not configured') ||
+        s.contains('service account is not')) {
+      return DriveException(
+        DriveErrorKind.notConfigured,
+        "Cloud storage isn't set up on the server.",
+        detail: e.toString(),
+      );
+    }
+
+    if (e is DioException) {
+      switch (e.type) {
+        case DioExceptionType.connectionTimeout:
+        case DioExceptionType.sendTimeout:
+        case DioExceptionType.receiveTimeout:
+        case DioExceptionType.connectionError:
+          return DriveException(
+            DriveErrorKind.network,
+            "Can't reach Google Drive. Check your internet connection.",
+            detail: e.message ?? e.toString(),
+          );
+        default:
+          final code = e.response?.statusCode;
+          final body = e.response?.data?.toString().toLowerCase() ?? '';
+          if (code == 503 || body.contains('not configured')) {
+            return DriveException(
+              DriveErrorKind.notConfigured,
+              "Cloud storage isn't set up on the server.",
+              detail: 'HTTP ${code ?? 503}',
+            );
+          }
+          if (code == 401 || code == 403) {
+            return DriveException(
+              DriveErrorKind.auth,
+              'Google Drive authentication failed.',
+              detail: 'HTTP $code',
+            );
+          }
+          if (_isRetryableNetworkError(e)) {
+            return DriveException(
+              DriveErrorKind.network,
+              "Can't reach Google Drive. Check your internet connection.",
+              detail: e.message ?? e.toString(),
+            );
+          }
+      }
+    }
+
+    if (e is SocketException || e is HttpException) {
+      return DriveException(
+        DriveErrorKind.network,
+        "Can't reach Google Drive. Check your internet connection.",
+        detail: e.toString(),
+      );
+    }
+
+    if (s.contains('invalid_grant') ||
+        s.contains('unauthorized') ||
+        s.contains('permission') ||
+        s.contains('401') ||
+        s.contains('403')) {
+      return DriveException(
+        DriveErrorKind.auth,
+        'Google Drive authentication failed.',
+        detail: e.toString(),
+      );
+    }
+
+    if (s.contains('socket') ||
+        s.contains('connection') ||
+        s.contains('network') ||
+        s.contains('timed out') ||
+        s.contains('timeout') ||
+        s.contains('failed host lookup') ||
+        s.contains('host')) {
+      return DriveException(
+        DriveErrorKind.network,
+        "Can't reach Google Drive. Check your internet connection.",
+        detail: e.toString(),
+      );
+    }
+
+    return DriveException(
+      DriveErrorKind.unknown,
+      'Something went wrong while talking to Google Drive.',
+      detail: e.toString(),
+    );
+  }
+
   Future<void> _ensureAuth({bool force = false}) async {
+    // Reuse the cached token until it's within the refresh buffer of expiry.
     if (!force &&
-        _authClient != null &&
+        _accessToken != null &&
+        _accessToken!.isNotEmpty &&
         _tokenExpiry != null &&
-        DateTime.now().isBefore(_tokenExpiry!)) {
+        DateTime.now().isBefore(_tokenExpiry!.subtract(_tokenRefreshBuffer))) {
       return;
     }
 
-    if (_kServiceAccountJson.isEmpty) {
-      throw StateError(
-        'Google Drive service account is not configured. '
-        'Build with --dart-define=GOOGLE_DRIVE_SA_JSON=...',
-      );
-    }
-
     try {
-      final credentials = auth.ServiceAccountCredentials.fromJson(
-        json.decode(_kServiceAccountJson) as Map<String, dynamic>,
+      final tok = await _fetchDriveToken();
+      _accessToken = tok.accessToken;
+      _tokenExpiry = tok.expiresAt;
+
+      // The auth client + DriveApi are built once and read the *current* token
+      // each request, so a refresh only needs to update `_accessToken`.
+      _authClient ??= _BearerAuthClient(() => _accessToken);
+      _driveApi ??= drive.DriveApi(_authClient!);
+
+      TLog.i(
+        'GDrive',
+        'Drive token brokered by backend${force ? ' (refresh)' : ''}, '
+            'expires ${tok.expiresAt.toIso8601String()}',
       );
-
-      final httpClient = http.Client();
-      final accessCreds =
-          await auth.obtainAccessCredentialsViaServiceAccount(
-        credentials,
-        [drive.DriveApi.driveScope],
-        httpClient,
-      );
-
-      _accessToken = accessCreds.accessToken.data;
-      _tokenExpiry = accessCreds.accessToken.expiry;
-
-      _authClient = auth.authenticatedClient(httpClient, accessCreds);
-      _driveApi = drive.DriveApi(_authClient!);
-
-      TLog.i('GDrive', 'Authenticated as service account'
-          '${force ? ' (force refresh)' : ''}');
     } catch (e, st) {
-      TLog.e('GDrive', 'Auth failed', error: e, st: st);
-      rethrow;
+      TLog.e('GDrive', 'Token broker failed', error: e, st: st);
+      // Surface a typed, classified error so the UI can explain *why*.
+      throw classifyError(e);
     }
+  }
+
+  /// Fetch a short-lived Drive token from the backend `/cloud/token` broker.
+  /// The [ApiClient] attaches the app JWT and transparently refreshes it on a
+  /// 401, so this call is authenticated end-to-end without the SA key.
+  Future<DriveTokenResponse> _fetchDriveToken() async {
+    final fetcher = _tokenFetcher;
+    if (fetcher != null) return fetcher();
+
+    final client = _apiClient;
+    if (client == null) {
+      throw const DriveException(
+        DriveErrorKind.notConfigured,
+        "Cloud storage isn't wired up.",
+        detail: 'No ApiClient available to reach the token broker.',
+      );
+    }
+
+    final resp =
+        await client.get<Map<String, dynamic>>(ApiEndpoints.cloudDriveToken);
+    final data = resp.data;
+    final token = data?['accessToken'] as String?;
+    if (token == null || token.isEmpty) {
+      throw const DriveException(
+        DriveErrorKind.auth,
+        'Google Drive token unavailable.',
+        detail: 'Token broker returned no accessToken.',
+      );
+    }
+    final expiresAt =
+        DateTime.tryParse(data?['expiresAt'] as String? ?? '')?.toLocal() ??
+            DateTime.now().add(const Duration(minutes: 50));
+    return DriveTokenResponse(accessToken: token, expiresAt: expiresAt);
   }
 
   /// Authorization header value, guarding against a null/empty token so we
@@ -236,6 +408,14 @@ class GoogleDriveService {
   }
 
   Future<DriveStorageQuota> getStorageQuota() async {
+    // Web has no service-account flow wired up yet; return a sane default so the
+    // Cloud tab renders an empty (not errored) state there, mirroring listFiles.
+    if (!PlatformCapabilities.canUseGoogleDrive) {
+      return const DriveStorageQuota(
+        usageBytes: 0,
+        limitBytes: 16106127360,
+      );
+    }
     await _ensureAuth();
     try {
       final about = await _driveApi!.about.get(
@@ -787,5 +967,31 @@ class GoogleDriveService {
     if (bytes >= 1048576) return '${(bytes / 1048576).toStringAsFixed(1)} MB';
     if (bytes >= 1024) return '${(bytes / 1024).toStringAsFixed(0)} KB';
     return '$bytes B';
+  }
+}
+
+/// Minimal [http.Client] that injects a `Bearer` token (read lazily via
+/// [_tokenProvider]) into every request. Used to back the googleapis
+/// `DriveApi`; reading the token lazily means a refresh only has to update the
+/// cached token, not rebuild the API client.
+class _BearerAuthClient extends http.BaseClient {
+  _BearerAuthClient(this._tokenProvider);
+
+  final String? Function() _tokenProvider;
+  final http.Client _inner = http.Client();
+
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) {
+    final token = _tokenProvider();
+    if (token != null && token.isNotEmpty) {
+      request.headers['Authorization'] = 'Bearer $token';
+    }
+    return _inner.send(request);
+  }
+
+  @override
+  void close() {
+    _inner.close();
+    super.close();
   }
 }

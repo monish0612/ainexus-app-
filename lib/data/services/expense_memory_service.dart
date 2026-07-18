@@ -84,9 +84,10 @@ class MemoryFacts {
     final byCategoryCurrent = <String, ({double total, int count})>{};
 
     for (final b in buckets) {
-      // Investments are wealth-building, not spending — keep them out of every
-      // derived spend fact (totals, trends, top categories) fed to the AI.
-      if (domain.isInvestmentCategory(b.category)) continue;
+      // Investments (wealth) and loan repayments (debt) are not spending — keep
+      // them out of every derived spend fact (totals, trends, top categories)
+      // fed to the AI.
+      if (domain.isNonSpendCategory(b.category)) continue;
       lifetimeTotal += b.total;
       lifetimeCount += b.count;
       byMonth.update(b.month, (v) => v + b.total, ifAbsent: () => b.total);

@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/di/injection.dart';
+import '../../core/services/credit_card_forecast_engine.dart';
 import '../../core/services/insight_grounding.dart';
 import '../../core/services/salary_insight_engine.dart';
 import '../../domain/entities/expense_insight.dart';
@@ -65,6 +66,50 @@ final monthlySpendTotalsProvider =
 final ccMonthlyTotalsProvider =
     StreamProvider<Map<String, double>>((ref) {
   return ref.watch(expenseRepositoryProvider).watchMonthlyCardSpendTotals('CC');
+});
+
+// ── Per-bank credit-card billing forecast ────────────────────────────────────
+
+/// The configured credit cards (banks with cardType 'CC' and a billing cycle),
+/// reduced to the engine's [BankBillingConfig]. Re-derives when the user edits
+/// banks in Settings.
+final ccBankConfigsProvider = Provider<List<BankBillingConfig>>((ref) {
+  final banks = ref.watch(settingsProvider).banks;
+  return banks
+      .where((b) => b.isCreditCard)
+      .map((b) => BankBillingConfig(
+            name: b.name,
+            color: b.color,
+            statementDay: b.statementDay!,
+            dueDay: b.dueDay!,
+          ))
+      .toList();
+});
+
+/// Recent individual CC charges (last ~4 months) for per-bank statement
+/// bucketing.
+final recentCardExpensesProvider = StreamProvider<List<CardExpense>>((ref) {
+  final now = DateTime.now();
+  final since = DateTime(now.year, now.month - 4, 1);
+  return ref
+      .watch(expenseRepositoryProvider)
+      .watchRecentCardExpenses('CC', since: since);
+});
+
+/// The fully-computed per-bank credit-card forecast: statement windows, a
+/// forward salary-vs-bills timeline, and each card's open statement.
+final creditCardForecastProvider = Provider<CreditCardForecast>((ref) {
+  final ccBanks = ref.watch(ccBankConfigsProvider);
+  final expenses = ref.watch(recentCardExpensesProvider).valueOrNull ?? const [];
+  final history =
+      ref.watch(salaryHistoryStreamProvider).valueOrNull ?? const [];
+  final salaryByMonth = {for (final e in history) e.month: e.amount};
+  return computeCreditCardForecast(
+    ccBanks: ccBanks,
+    ccExpenses: expenses,
+    salaryByMonth: salaryByMonth,
+    now: DateTime.now(),
+  );
 });
 
 /// Fully-computed [SalaryStats] for the current month, blending the in-hand

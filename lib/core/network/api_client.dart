@@ -3,6 +3,7 @@ import 'dart:math';
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../auth/app_token_store.dart';
 import '../constants/app_constants.dart';
 import '../services/telegram_logger.dart';
 
@@ -24,6 +25,7 @@ class ApiClient {
     );
 
     _dio.interceptors.addAll([
+      _AuthInterceptor(_dio),
       LoggingInterceptor(),
       _RetryInterceptor(_dio),
     ]);
@@ -55,6 +57,76 @@ class ApiClient {
       _dio.put<T>(path, data: data);
 
   Future<Response<T>> delete<T>(String path) => _dio.delete<T>(path);
+}
+
+/// Attaches the server-issued JWT to every request and transparently recovers
+/// from a 401 by re-minting the token (via [AppTokenStore.refresher]) and
+/// replaying the original request exactly once.
+///
+/// While backend auth enforcement is OFF this is a no-op for requests that
+/// carry no token, so it never changes behaviour for an un-upgraded backend.
+class _AuthInterceptor extends Interceptor {
+  _AuthInterceptor(this._dio);
+  final Dio _dio;
+
+  static const _authRetryFlag = '_authRetried';
+
+  @override
+  void onRequest(RequestOptions options, RequestInterceptorHandler handler) {
+    final token = AppTokenStore.instance.token;
+    if (token != null &&
+        token.isNotEmpty &&
+        !options.headers.containsKey('Authorization')) {
+      options.headers['Authorization'] = 'Bearer $token';
+    }
+    handler.next(options);
+  }
+
+  @override
+  void onError(DioException err, ErrorInterceptorHandler handler) async {
+    final status = err.response?.statusCode;
+    final req = err.requestOptions;
+    final alreadyRetried = req.extra[_authRetryFlag] == true;
+    final isLoginCall = req.path.contains('/auth/app-login');
+    final refresher = AppTokenStore.instance.refresher;
+
+    if (status != 401 || alreadyRetried || isLoginCall || refresher == null) {
+      handler.next(err);
+      return;
+    }
+
+    try {
+      final refreshed = await refresher();
+      if (!refreshed) {
+        handler.next(err);
+        return;
+      }
+      final token = AppTokenStore.instance.token;
+      TLog.i('HTTP', 'Re-minted token after 401, replaying ${req.uri}');
+      final options = Options(
+        method: req.method,
+        headers: {
+          ...req.headers,
+          if (token != null && token.isNotEmpty) 'Authorization': 'Bearer $token',
+        },
+        responseType: req.responseType,
+        contentType: req.contentType,
+        receiveTimeout: req.receiveTimeout,
+        sendTimeout: req.sendTimeout,
+        extra: {...req.extra, _authRetryFlag: true},
+      );
+      final resp = await _dio.request<dynamic>(
+        req.path,
+        data: req.data,
+        queryParameters: req.queryParameters,
+        cancelToken: req.cancelToken,
+        options: options,
+      );
+      handler.resolve(resp);
+    } catch (_) {
+      handler.next(err);
+    }
+  }
 }
 
 /// HTTP request/response logger that funnels everything through [TLog].

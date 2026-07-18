@@ -7,6 +7,7 @@ import 'dart:async';
 
 import '../../core/auth/auth_service.dart';
 import '../../core/platform/platform_capabilities.dart';
+import '../../core/services/expense_widget_service.dart';
 import '../../core/services/notification_service.dart';
 import '../../core/services/process_text_service.dart';
 import '../../core/services/telegram_logger.dart';
@@ -33,6 +34,7 @@ class ShortcutRoute {
     required this.tab,
     this.subtab,
     this.openExpenseSearch = false,
+    this.openExpenseAdd = false,
     this.focusWebSearch = false,
   });
 
@@ -44,6 +46,9 @@ class ShortcutRoute {
 
   /// Open the Expense Tracker "Ask AI" search (search widget, Expense mode).
   final bool openExpenseSearch;
+
+  /// Open the Expense Tracker "Add expense" sheet (Expense widget "Add" pill).
+  final bool openExpenseAdd;
 
   /// Focus the Tutor online-search field (search widget Web mode / legacy
   /// search widget).
@@ -67,12 +72,14 @@ ShortcutRoute? resolveShortcutRoute(Map<String, String> data) {
   final subtab = int.tryParse(data['subtab'] ?? '');
   final isWidgetLaunch = data['widget_launch'] == 'true';
   final openExpenseSearch = data['widget_search_mode'] == 'expense';
+  final openExpenseAdd = data['expense_action'] == 'add';
 
   return ShortcutRoute(
     tab: tab,
     subtab: subtab,
     openExpenseSearch: openExpenseSearch,
-    focusWebSearch: !openExpenseSearch && isWidgetLaunch,
+    openExpenseAdd: openExpenseAdd,
+    focusWebSearch: !openExpenseSearch && !openExpenseAdd && isWidgetLaunch,
   );
 }
 
@@ -189,7 +196,11 @@ class _AppShellState extends ConsumerState<AppShell>
         });
       }
 
-      if (route.openExpenseSearch) {
+      if (route.openExpenseAdd) {
+        // Expense widget "Add" pill → open the Add-expense sheet.
+        TLog.i('Widget', 'Expense widget (Add) tap → opening Add expense');
+        ref.read(pendingExpenseAddProvider.notifier).state = true;
+      } else if (route.openExpenseSearch) {
         // Search widget, Expense mode → open the Expense Tracker "Ask AI" search.
         TLog.i('Widget', 'Search widget (Expense) tap → opening Ask AI');
         ref.read(pendingExpenseSearchProvider.notifier).state = true;
@@ -358,6 +369,30 @@ class _AppShellState extends ConsumerState<AppShell>
   @override
   Widget build(BuildContext context) {
     final currentTab = ref.watch(currentTabProvider);
+
+    // Always-on bridge: keep the home-screen Expense widget in sync with the
+    // local DB from ANY tab — including changes pulled in by cross-device sync
+    // (an expense added/cleared on another phone or the web app). ExpenseScreen
+    // also pushes updates while it's mounted, but these listeners make the
+    // behaviour explicit and resilient to future navigation changes. Downstream
+    // scheduleUpdate is debounced + skips when the data hash is unchanged, so
+    // the duplicate path costs nothing. No-ops on platforms without the widget.
+    ref.listen(expensesStreamProvider, (_, next) {
+      final expenses = next.valueOrNull;
+      if (expenses == null) return;
+      ExpenseWidgetService.instance.scheduleUpdate(
+        expenses: expenses,
+        monthBudget: ref.read(currentBudgetProvider),
+      );
+    });
+    ref.listen(currentBudgetProvider, (_, budget) {
+      final expenses = ref.read(expensesStreamProvider).valueOrNull;
+      if (expenses == null) return;
+      ExpenseWidgetService.instance.scheduleUpdate(
+        expenses: expenses,
+        monthBudget: budget,
+      );
+    });
 
     return Scaffold(
       body: SafeArea(

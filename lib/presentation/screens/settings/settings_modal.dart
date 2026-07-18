@@ -171,6 +171,15 @@ class _SettingsSheet extends StatelessWidget {
                       const SizedBox(height: 24),
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 18),
+                        child: _BanksSection(
+                          colors: colors,
+                          banks: settings.banks,
+                          notifier: notifier,
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 18),
                         child: _SignOutButton(colors: colors),
                       ),
                       const SizedBox(height: 20),
@@ -1537,6 +1546,610 @@ class _OverrideSegment extends StatelessWidget {
               ],
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+// ── Banks & Cards ────────────────────────────────────────────────────────────
+
+const Map<String, String> _cardTypeLabels = {
+  kCardTypeDebit: 'Debit',
+  kCardTypeCredit: 'Credit',
+  kCardTypeCash: 'Cash',
+};
+
+Color _parseBankColor(String hex) {
+  var h = hex.replaceFirst('#', '').trim();
+  if (h.length == 6) h = 'FF$h';
+  final v = int.tryParse(h, radix: 16);
+  return v == null ? const Color(0xFF868E96) : Color(v);
+}
+
+class _BanksSection extends StatelessWidget {
+  const _BanksSection({
+    required this.colors,
+    required this.banks,
+    required this.notifier,
+  });
+
+  final AppColors colors;
+  final List<Bank> banks;
+  final SettingsController notifier;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          'BANKS & CARDS',
+          style: GoogleFonts.plusJakartaSans(
+            fontSize: 10,
+            fontWeight: FontWeight.w800,
+            color: colors.text3,
+            letterSpacing: 1.6,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          'Manage the cards you log expenses against. Set each credit card\'s '
+          'statement & due dates to power the repayment forecast. Syncs across '
+          'all your devices.',
+          style: GoogleFonts.plusJakartaSans(
+            fontSize: 11,
+            color: colors.text4,
+            height: 1.45,
+          ),
+        ),
+        const SizedBox(height: 12),
+        if (banks.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Text(
+              'No banks yet — add your first card below.',
+              style: GoogleFonts.plusJakartaSans(
+                fontSize: 12,
+                color: colors.text4,
+              ),
+            ),
+          )
+        else
+          ...banks.map(
+            (b) => Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: _BankRow(
+                colors: colors,
+                bank: b,
+                onEdit: () => _showBankEditor(
+                  context,
+                  colors: colors,
+                  notifier: notifier,
+                  existing: b,
+                ),
+                onDelete: () => notifier.deleteBank(b.id),
+              ),
+            ),
+          ),
+        const SizedBox(height: 4),
+        Material(
+          color: AppColors.accent.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(14),
+          child: InkWell(
+            onTap: () => _showBankEditor(
+              context,
+              colors: colors,
+              notifier: notifier,
+            ),
+            borderRadius: BorderRadius.circular(14),
+            child: Container(
+              padding: const EdgeInsets.symmetric(vertical: 13),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                  color: AppColors.accent.withValues(alpha: 0.25),
+                ),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(LucideIcons.plus, size: 16, color: AppColors.accent),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Add bank / card',
+                    style: GoogleFonts.plusJakartaSans(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.accent,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _BankRow extends StatelessWidget {
+  const _BankRow({
+    required this.colors,
+    required this.bank,
+    required this.onEdit,
+    required this.onDelete,
+  });
+
+  final AppColors colors;
+  final Bank bank;
+  final VoidCallback onEdit;
+  final VoidCallback onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = _parseBankColor(bank.color);
+    final typeLabel = _cardTypeLabels[bank.cardType] ?? bank.cardType;
+    final isCc = bank.cardType == kCardTypeCredit;
+    final cycle = isCc && bank.statementDay != null && bank.dueDay != null
+        ? 'Statement ${bank.statementDay} · Due ${bank.dueDay}'
+        : (isCc ? 'Set statement & due dates' : null);
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: colors.bg2,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: colors.border),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 10,
+            height: 10,
+            decoration: BoxDecoration(
+              color: accent,
+              shape: BoxShape.circle,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        bank.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.plusJakartaSans(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                          color: colors.text,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 7,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: isCc
+                            ? const Color(0x33F59E0B)
+                            : colors.bg3,
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        typeLabel,
+                        style: GoogleFonts.plusJakartaSans(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                          color: isCc
+                              ? const Color(0xFFF59E0B)
+                              : colors.text3,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                if (cycle != null) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    cycle,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.plusJakartaSans(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w500,
+                      color: colors.text4,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(width: 6),
+          IconButton(
+            onPressed: onEdit,
+            visualDensity: VisualDensity.compact,
+            icon: Icon(LucideIcons.pencil, size: 16, color: colors.text3),
+            tooltip: 'Edit',
+          ),
+          IconButton(
+            onPressed: onDelete,
+            visualDensity: VisualDensity.compact,
+            icon: const Icon(LucideIcons.trash2, size: 16, color: _signOutRed),
+            tooltip: 'Delete',
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Bottom-sheet editor for adding a new card or editing an existing one.
+void _showBankEditor(
+  BuildContext context, {
+  required AppColors colors,
+  required SettingsController notifier,
+  Bank? existing,
+}) {
+  final nameCtrl = TextEditingController(text: existing?.name ?? '');
+  String cardType = existing?.cardType ?? kCardTypeDebit;
+  int statementDay = existing?.statementDay ?? 1;
+  int dueDay = existing?.dueDay ?? 1;
+  bool attemptedSubmit = false;
+
+  showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: Colors.transparent,
+    builder: (sheetCtx) {
+      final bottomInset = MediaQuery.viewInsetsOf(sheetCtx).bottom;
+      return StatefulBuilder(
+        builder: (ctx, setSheet) {
+          final isCc = cardType == kCardTypeCredit;
+          final nameError = attemptedSubmit && nameCtrl.text.trim().isEmpty;
+
+          void submit() {
+            setSheet(() => attemptedSubmit = true);
+            if (nameCtrl.text.trim().isEmpty) return;
+            if (existing == null) {
+              notifier.addBank(
+                nameCtrl.text,
+                cardType: cardType,
+                statementDay: isCc ? statementDay : null,
+                dueDay: isCc ? dueDay : null,
+              );
+            } else {
+              notifier.updateBank(
+                existing.id,
+                name: nameCtrl.text,
+                cardType: cardType,
+                statementDay: isCc ? statementDay : null,
+                dueDay: isCc ? dueDay : null,
+              );
+            }
+            Navigator.of(ctx).pop();
+          }
+
+          return Padding(
+            padding: EdgeInsets.only(bottom: bottomInset),
+            child: Container(
+              decoration: BoxDecoration(
+                color: colors.bg1,
+                borderRadius:
+                    const BorderRadius.vertical(top: Radius.circular(20)),
+              ),
+              padding: const EdgeInsets.fromLTRB(18, 14, 18, 24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: colors.text5,
+                        borderRadius: BorderRadius.circular(99),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    existing == null ? 'Add bank / card' : 'Edit card',
+                    style: GoogleFonts.plusJakartaSans(
+                      fontSize: 17,
+                      fontWeight: FontWeight.w800,
+                      color: colors.text,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'BANK NAME',
+                    style: GoogleFonts.plusJakartaSans(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w800,
+                      color: colors.text3,
+                      letterSpacing: 1.4,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Container(
+                    decoration: BoxDecoration(
+                      color: colors.bg2,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: nameError
+                            ? _signOutRed.withValues(alpha: 0.5)
+                            : colors.border,
+                      ),
+                    ),
+                    child: TextField(
+                      controller: nameCtrl,
+                      textCapitalization: TextCapitalization.characters,
+                      onChanged: (_) {
+                        if (attemptedSubmit) setSheet(() {});
+                      },
+                      style: GoogleFonts.plusJakartaSans(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: colors.text,
+                      ),
+                      decoration: InputDecoration(
+                        border: InputBorder.none,
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 13,
+                        ),
+                        hintText: 'e.g. HDFC',
+                        hintStyle: GoogleFonts.plusJakartaSans(
+                          fontSize: 14,
+                          color: colors.text5,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'CARD TYPE',
+                    style: GoogleFonts.plusJakartaSans(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w800,
+                      color: colors.text3,
+                      letterSpacing: 1.4,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      for (final t in kBankCardTypes) ...[
+                        Expanded(
+                          child: _CardTypeChip(
+                            label: _cardTypeLabels[t] ?? t,
+                            selected: cardType == t,
+                            colors: colors,
+                            onTap: () => setSheet(() => cardType = t),
+                          ),
+                        ),
+                        if (t != kBankCardTypes.last) const SizedBox(width: 8),
+                      ],
+                    ],
+                  ),
+                  AnimatedCrossFade(
+                    duration: const Duration(milliseconds: 220),
+                    sizeCurve: Curves.easeOutCubic,
+                    crossFadeState: isCc
+                        ? CrossFadeState.showSecond
+                        : CrossFadeState.showFirst,
+                    firstChild: const SizedBox(width: double.infinity),
+                    secondChild: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        const SizedBox(height: 16),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: _DayStepper(
+                                label: 'Statement day',
+                                value: statementDay,
+                                colors: colors,
+                                onChanged: (v) =>
+                                    setSheet(() => statementDay = v),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: _DayStepper(
+                                label: 'Due day',
+                                value: dueDay,
+                                colors: colors,
+                                onChanged: (v) => setSheet(() => dueDay = v),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          'Statement closes on the statement day; the bill is '
+                          'due on the due day of the following month.',
+                          style: GoogleFonts.plusJakartaSans(
+                            fontSize: 11,
+                            color: colors.text4,
+                            height: 1.4,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  Material(
+                    color: AppColors.accent,
+                    borderRadius: BorderRadius.circular(14),
+                    child: InkWell(
+                      onTap: submit,
+                      borderRadius: BorderRadius.circular(14),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        alignment: Alignment.center,
+                        child: Text(
+                          existing == null ? 'Add card' : 'Save changes',
+                          style: GoogleFonts.plusJakartaSans(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      );
+    },
+  ).whenComplete(nameCtrl.dispose);
+}
+
+class _CardTypeChip extends StatelessWidget {
+  const _CardTypeChip({
+    required this.label,
+    required this.selected,
+    required this.colors,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool selected;
+  final AppColors colors;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: selected ? AppColors.accent.withValues(alpha: 0.14) : colors.bg2,
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 11),
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: selected
+                  ? AppColors.accent.withValues(alpha: 0.55)
+                  : colors.border,
+            ),
+          ),
+          child: Text(
+            label,
+            style: GoogleFonts.plusJakartaSans(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: selected ? AppColors.accent : colors.text2,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DayStepper extends StatelessWidget {
+  const _DayStepper({
+    required this.label,
+    required this.value,
+    required this.colors,
+    required this.onChanged,
+  });
+
+  final String label;
+  final int value;
+  final AppColors colors;
+  final void Function(int) onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: GoogleFonts.plusJakartaSans(
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
+            color: colors.text3,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Container(
+          decoration: BoxDecoration(
+            color: colors.bg2,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: colors.border),
+          ),
+          child: Row(
+            children: [
+              _StepBtn(
+                icon: LucideIcons.minus,
+                colors: colors,
+                onTap: () => onChanged(value <= 1 ? 31 : value - 1),
+              ),
+              Expanded(
+                child: Text(
+                  '$value',
+                  textAlign: TextAlign.center,
+                  style: GoogleFonts.plusJakartaSans(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                    color: colors.text,
+                  ),
+                ),
+              ),
+              _StepBtn(
+                icon: LucideIcons.plus,
+                colors: colors,
+                onTap: () => onChanged(value >= 31 ? 1 : value + 1),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _StepBtn extends StatelessWidget {
+  const _StepBtn({
+    required this.icon,
+    required this.colors,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final AppColors colors;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.all(11),
+          child: Icon(icon, size: 16, color: colors.text2),
         ),
       ),
     );

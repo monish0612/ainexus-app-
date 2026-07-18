@@ -252,17 +252,18 @@ class _ExpenseTimeframeScreenState
   Future<void> _loadSummary() async {
     final repo = ref.read(expenseRepositoryProvider);
     final tf = widget.timeframe;
-    // Investments are not spending, so the spending drill-down excludes them —
-    // UNLESS the view is explicitly scoped to the Investment category (the
-    // dedicated portfolio view), in which case we want to show them.
-    final excludeInvestment = !isInvestmentCategory(_categoryFilter);
+    // Investments (wealth) and loan repayments (debt) are not spending, so the
+    // spending drill-down excludes them — UNLESS the view is explicitly scoped
+    // to one of those categories (its dedicated card view), in which case we
+    // want to show them.
+    final excludeNonSpend = !isNonSpendCategory(_categoryFilter);
     final summary = await repo.rangeSummary(
       startIso: tf.startIso,
       endIso: tf.endIso,
       category: _categoryFilter,
       search: _search,
       searchTerms: tf.seedSearchTerms,
-      excludeInvestment: excludeInvestment,
+      excludeNonSpend: excludeNonSpend,
     );
     // Category chips reflect the unfiltered-by-category scope so the user can
     // always switch categories; search still narrows them.
@@ -271,7 +272,7 @@ class _ExpenseTimeframeScreenState
       endIso: tf.endIso,
       search: _search,
       searchTerms: tf.seedSearchTerms,
-      excludeInvestment: excludeInvestment,
+      excludeNonSpend: excludeNonSpend,
     );
     // Time-series buckets only when a daily/monthly chart was requested.
     final wantsTime =
@@ -284,7 +285,7 @@ class _ExpenseTimeframeScreenState
             category: _categoryFilter,
             search: _search,
             searchTerms: tf.seedSearchTerms,
-            excludeInvestment: excludeInvestment,
+            excludeNonSpend: excludeNonSpend,
           )
         : const <ExpenseBucket>[];
     if (!mounted) return;
@@ -309,7 +310,7 @@ class _ExpenseTimeframeScreenState
         search: _search,
         searchTerms: tf.seedSearchTerms,
         sort: tf.sort,
-        excludeInvestment: !isInvestmentCategory(_categoryFilter),
+        excludeNonSpend: !isNonSpendCategory(_categoryFilter),
         limit: _pageSize,
         offset: _offset,
       );
@@ -359,6 +360,7 @@ class _ExpenseTimeframeScreenState
     showEditExpenseModal(
       context,
       expense: e,
+      bankConfigs: ref.read(settingsProvider).banks,
       onUpdate: (updated) {
         // 1) Reflect the edit in the list IMMEDIATELY (zero perceived latency).
         if (mounted) {
@@ -486,113 +488,144 @@ class _ExpenseTimeframeScreenState
               timeframe: widget.timeframe,
               onClose: () => Navigator.of(context).maybePop(),
             ),
-            if (widget.timeframe.aiInsight)
-              AiRecommendationCard(
-                colors: colors,
-                loading: _insightLoading,
-                recommendation: _recommendation,
-                onChip: _onInsightChip,
-              )
-            else if ((widget.timeframe.aiAnswer ?? '').trim().isNotEmpty)
-              _AiAnswerBanner(
-                colors: colors,
-                answer: widget.timeframe.aiAnswer!.trim(),
+            // Everything below the header scrolls together, so the (often tall)
+            // AI insight card and summary hero scroll away to give the matched
+            // expenses the full screen instead of a cramped bottom strip.
+            Expanded(
+              child: RefreshIndicator(
+                onRefresh: () async {
+                  await ref.read(expenseRepositoryProvider).syncFromServer();
+                  await _reset();
+                },
+                color: AppColors.accent,
+                backgroundColor: colors.bg2,
+                child: CustomScrollView(
+                  controller: _scrollCtrl,
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  slivers: [
+                    if (widget.timeframe.aiInsight)
+                      SliverToBoxAdapter(
+                        child: AiRecommendationCard(
+                          colors: colors,
+                          loading: _insightLoading,
+                          recommendation: _recommendation,
+                          onChip: _onInsightChip,
+                        ),
+                      )
+                    else if ((widget.timeframe.aiAnswer ?? '').trim().isNotEmpty)
+                      SliverToBoxAdapter(
+                        child: _AiAnswerBanner(
+                          colors: colors,
+                          answer: widget.timeframe.aiAnswer!.trim(),
+                        ),
+                      ),
+                    if (widget.timeframe.seedSearchTerms.isNotEmpty)
+                      SliverToBoxAdapter(
+                        child: _SemanticTermsRow(
+                          colors: colors,
+                          terms: widget.timeframe.seedSearchTerms,
+                        ),
+                      ),
+                    SliverToBoxAdapter(
+                      child: _SummaryHero(
+                        colors: colors,
+                        total: _total,
+                        count: _count,
+                        startIso: widget.timeframe.startIso,
+                      ),
+                    ),
+                    SliverToBoxAdapter(
+                      child: _SearchBar(
+                        colors: colors,
+                        controller: _searchCtrl,
+                        onChanged: _onSearchChanged,
+                        onClear: () {
+                          _searchCtrl.clear();
+                          _onSearchChanged('');
+                        },
+                      ),
+                    ),
+                    if (_categories.isNotEmpty)
+                      SliverToBoxAdapter(
+                        child: _CategoryFilterRow(
+                          colors: colors,
+                          categories: _categories,
+                          selected: _categoryFilter,
+                          onTap: _toggleCategory,
+                        ),
+                      ),
+                    _buildBodySliver(colors),
+                  ],
+                ),
               ),
-            if (widget.timeframe.seedSearchTerms.isNotEmpty)
-              _SemanticTermsRow(
-                colors: colors,
-                terms: widget.timeframe.seedSearchTerms,
-              ),
-            _SummaryHero(
-              colors: colors,
-              total: _total,
-              count: _count,
-              startIso: widget.timeframe.startIso,
             ),
-            _SearchBar(
-              colors: colors,
-              controller: _searchCtrl,
-              onChanged: _onSearchChanged,
-              onClear: () {
-                _searchCtrl.clear();
-                _onSearchChanged('');
-              },
-            ),
-            if (_categories.isNotEmpty)
-              _CategoryFilterRow(
-                colors: colors,
-                categories: _categories,
-                selected: _categoryFilter,
-                onTap: _toggleCategory,
-              ),
-            Expanded(child: _buildBody(colors)),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildBody(AppColors colors) {
+  Widget _buildBodySliver(AppColors colors) {
     if (_initialLoading) {
-      return _ListSkeleton(colors: colors);
+      return SliverToBoxAdapter(child: _ListSkeleton(colors: colors));
     }
     if (_hasError && _items.isEmpty) {
-      return _ErrorState(colors: colors, onRetry: _reset);
+      return SliverFillRemaining(
+        hasScrollBody: false,
+        child: _ErrorState(colors: colors, onRetry: _reset),
+      );
     }
     if (_items.isEmpty) {
-      return _EmptyState(colors: colors, isFiltered: _isFiltered);
+      return SliverFillRemaining(
+        hasScrollBody: false,
+        child: _EmptyState(colors: colors, isFiltered: _isFiltered),
+      );
     }
 
-    return RefreshIndicator(
-      onRefresh: () async {
-        await ref.read(expenseRepositoryProvider).syncFromServer();
-        await _reset();
-      },
-      color: AppColors.accent,
-      backgroundColor: colors.bg2,
-      child: ListView.builder(
-        controller: _scrollCtrl,
-        physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 120),
-        // Optional leading chart item, then expense rows, then footer.
-        itemCount: _items.length + 1 + (_hasChart ? 1 : 0),
-        itemBuilder: (context, rawIndex) {
-          if (_hasChart && rawIndex == 0) {
-            return Padding(
+    return SliverPadding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 120),
+      sliver: SliverList(
+        delegate: SliverChildBuilderDelegate(
+          (context, rawIndex) {
+            if (_hasChart && rawIndex == 0) {
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: _ExpenseChartCard(
+                  colors: colors,
+                  chart: widget.timeframe.chart,
+                  categories: _categories,
+                  buckets: _timeBuckets,
+                  total: _total,
+                ),
+              );
+            }
+            final index = _hasChart ? rawIndex - 1 : rawIndex;
+            if (index == _items.length) return _buildFooter(colors);
+            final e = _items[index];
+            final showHeader = index == 0 ||
+                !_sameDay(_items[index - 1].date, e.date);
+            final child = Padding(
               padding: const EdgeInsets.only(bottom: 8),
-              child: _ExpenseChartCard(
-                colors: colors,
-                chart: widget.timeframe.chart,
-                categories: _categories,
-                buckets: _timeBuckets,
-                total: _total,
+              child: ExpenseItem(
+                key: ValueKey(e.id),
+                expense: _toData(e),
+                onEdit: () => _editExpense(e),
+                onDelete: () => _deleteExpense(e),
+                onTap: () => _showDetail(e),
               ),
             );
-          }
-          final index = _hasChart ? rawIndex - 1 : rawIndex;
-          if (index == _items.length) return _buildFooter(colors);
-          final e = _items[index];
-          final showHeader = index == 0 ||
-              !_sameDay(_items[index - 1].date, e.date);
-          final child = Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: ExpenseItem(
-              key: ValueKey(e.id),
-              expense: _toData(e),
-              onEdit: () => _editExpense(e),
-              onDelete: () => _deleteExpense(e),
-              onTap: () => _showDetail(e),
-            ),
-          );
-          if (!showHeader) return child;
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              _DayHeader(colors: colors, dateIso: e.date),
-              child,
-            ],
-          );
-        },
+            if (!showHeader) return child;
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _DayHeader(colors: colors, dateIso: e.date),
+                child,
+              ],
+            );
+          },
+          // Optional leading chart item, then expense rows, then footer.
+          childCount: _items.length + 1 + (_hasChart ? 1 : 0),
+        ),
       ),
     );
   }
@@ -1555,6 +1588,8 @@ class _ListSkeleton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
       itemCount: 7,
       itemBuilder: (_, __) => Container(

@@ -136,7 +136,50 @@ class NewsRepository {
     }
   }
 
+  /// Permanently removes an article everywhere: deletes the local Drift row,
+  /// clears its follow-up chat, and asks the server to delete + tombstone it.
+  ///
+  /// The backend records the article's RSS `guid` in `deleted_guids`, so the
+  /// feed sync never re-imports it and it disappears from the website (which
+  /// reads the server directly). Used by the Saved-tab remove button, the
+  /// Movies/General swipe-delete, and the unsaved branch of [markRead].
+  ///
+  /// Local delete is committed FIRST so the reactive Drift stream rebuilds the
+  /// feed within one frame; the server leg is best-effort (a transient failure
+  /// is logged, and the row is re-pruned on the next read once the delete
+  /// lands). The follow-up chat is cleared last so siblings are untouched.
+  Future<void> deleteArticle(String id) async {
+    await (_db.delete(_db.newsArticles)..where((t) => t.id.equals(id))).go();
+
+    try {
+      await _apiClient.delete<Object?>(ApiEndpoints.article(id));
+    } catch (e) {
+      TLog.w('NewsRepo', 'deleteArticle API failed (local delete kept): $e',
+          error: e);
+    }
+
+    await ArticleFollowUpStore.instance.clear(id);
+  }
+
+  /// Marks an article as read. Reading = consuming it, so an UNSAVED article is
+  /// permanently deleted (see [deleteArticle]) — only saved + still-unread
+  /// articles are kept in the DB, which is exactly the user's mental model
+  /// (the For You feed is a queue, not an archive).
+  ///
+  /// A SAVED article is NEVER deleted by reading it: we only record the read
+  /// flag (locally + server) so it stops surfacing as a "new article" alert
+  /// while remaining in the Saved tab.
   Future<void> markRead(String id) async {
+    final row = await (_db.select(_db.newsArticles)
+          ..where((t) => t.id.equals(id)))
+        .getSingleOrNull();
+    if (row == null) return;
+
+    if (!row.isSaved) {
+      await deleteArticle(id);
+      return;
+    }
+
     await (_db.update(_db.newsArticles)..where((t) => t.id.equals(id)))
         .write(const db.NewsArticlesCompanion(isRead: Value(true)));
 
@@ -153,39 +196,88 @@ class NewsRepository {
     }
   }
 
-  /// Bulk mark-as-read for the For You "Clear All" / summary "Done" flows.
+  /// Bulk delete for the For You "Clear All" / summary "Done" flows.
   ///
-  /// Local DB is updated first (single batched UPDATE) so the UI reacts
-  /// instantly. The server bulk endpoint is fire-and-forget — a transient
-  /// network failure must not block the user's catch-up flow because the
-  /// local state is already correct and will reconcile on the next
-  /// `syncNews()` round-trip. Saved articles are filtered server-side
-  /// (`saved=FALSE` guard) and we mirror that filter locally.
+  /// Every UNSAVED article in [ids] is permanently removed — locally (single
+  /// batched DELETE) so the UI reacts instantly, and on the server (which
+  /// tombstones each `guid` so the feed sync can't re-import them and they
+  /// vanish from the website). Saved articles are never touched: we mirror the
+  /// server's `saved=FALSE` guard locally and only delete the unsaved subset.
+  ///
+  /// The server bulk call is fire-and-forget — a transient network failure
+  /// must not block the user's catch-up flow; once it lands the tombstones
+  /// make the deletion permanent. Returns the number of local rows removed.
   Future<int> markManyRead(List<String> ids) async {
     if (ids.isEmpty) return 0;
 
-    final updated = await (_db.update(_db.newsArticles)
+    final unsavedRows = await (_db.select(_db.newsArticles)
           ..where((t) => t.id.isIn(ids) & t.isSaved.equals(false)))
-        .write(const db.NewsArticlesCompanion(isRead: Value(true)));
+        .get();
+    final unsavedIds = [for (final r in unsavedRows) r.id];
+    if (unsavedIds.isEmpty) return 0;
 
-    TLog.d('NewsRepo', 'markManyRead local ✓ requested=${ids.length} updated=$updated');
+    final deleted = await (_db.delete(_db.newsArticles)
+          ..where((t) => t.id.isIn(unsavedIds)))
+        .go();
+    for (final id in unsavedIds) {
+      ArticleFollowUpStore.instance.clear(id);
+    }
+
+    TLog.d('NewsRepo',
+        'markManyRead local delete ✓ requested=${ids.length} deleted=$deleted');
 
     unawaited(() async {
       try {
         await _apiClient.post<Object?>(
           ApiEndpoints.newsMarkAllRead,
-          data: <String, dynamic>{'ids': ids},
+          data: <String, dynamic>{'ids': unsavedIds},
           options: Options(receiveTimeout: const Duration(seconds: 30)),
         );
-        TLog.i('NewsRepo', 'markManyRead remote ✓ ${ids.length} ids');
+        TLog.i('NewsRepo', 'markManyRead remote delete ✓ ${unsavedIds.length} ids');
       } catch (e) {
         TLog.w('NewsRepo',
-            'markManyRead remote failed (local already updated): $e',
+            'markManyRead remote delete failed (local already removed): $e',
             error: e);
       }
     }());
 
-    return updated;
+    return deleted;
+  }
+
+  /// Easter-egg "nuke": permanently deletes EVERY article — **including saved
+  /// ones** — locally and on the server (all guids tombstoned server-side so
+  /// the feed sync can't immediately re-import them). Unlike [markRead] /
+  /// [markManyRead], this deliberately ignores the saved guard.
+  ///
+  /// Local-first: the local wipe + follow-up-chat clear commit even if the
+  /// server is unreachable; the server call is best-effort. Returns the number
+  /// of local rows removed (snapshotted before the wipe) and whether the server
+  /// delete confirmed, so the cinematic report can show SYNCED vs QUEUED.
+  Future<({int removed, bool serverOk})> clearAllNews() async {
+    final rows = await _db.select(_db.newsArticles).get();
+    final ids = [for (final r in rows) r.id];
+
+    await _db.delete(_db.newsArticles).go();
+    for (final id in ids) {
+      ArticleFollowUpStore.instance.clear(id);
+    }
+
+    TLog.w('NewsRepo',
+        '☢️ News nuke — removed ${ids.length} local article(s) incl. saved');
+
+    var serverOk = true;
+    try {
+      await _apiClient.post<Object?>(
+        ApiEndpoints.newsNuke,
+        options: Options(receiveTimeout: const Duration(seconds: 30)),
+      );
+      TLog.i('NewsRepo', 'News nuke remote ✓');
+    } catch (e) {
+      serverOk = false;
+      TLog.w('NewsRepo', 'News nuke API failed (local wipe kept): $e', error: e);
+    }
+
+    return (removed: ids.length, serverOk: serverOk);
   }
 
   /// Persists an AI-generated quick summary for the For You "Summarize"

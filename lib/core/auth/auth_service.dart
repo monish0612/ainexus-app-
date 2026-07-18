@@ -1,8 +1,13 @@
 import 'dart:convert';
 
 import 'package:crypto/crypto.dart';
+import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+
+import '../constants/app_constants.dart';
+import '../services/telegram_logger.dart';
+import 'app_token_store.dart';
 
 /// Singleton authentication service with HMAC-SHA256 credential verification
 /// and AES-256 encrypted session persistence via Android EncryptedSharedPreferences.
@@ -25,7 +30,7 @@ class AuthService {
   // Credential fragments — base64-encoded, split for obfuscation.
   // Assembled and immediately HMAC-hashed at runtime; plaintext never persists.
   static const _uf = ['bW9u', 'aXNo'];
-  static const _pf = ['Q2hlbm5h', 'aXN1cGVyLjIz'];
+  static const _pf = ['VHVuZHJhLUxhbnRl', 'cm4tWmVwaHlyLTIw'];
 
   /// Notifies GoRouter when auth state changes.
   final authState = ValueNotifier<bool>(false);
@@ -102,6 +107,10 @@ class AuthService {
     await _storage.write(key: _usernameKey, value: displayName);
     _username = displayName;
     authState.value = true;
+
+    // Best-effort: exchange the validated creds for a server JWT used to
+    // authorize data calls. Never blocks login if the backend is unreachable.
+    await _fetchAppToken(username.trim(), password);
     return true;
   }
 
@@ -109,8 +118,54 @@ class AuthService {
     await _storage.delete(key: _sessionKey);
     await _storage.delete(key: _sessionTsKey);
     await _storage.delete(key: _usernameKey);
+    await AppTokenStore.instance.clear();
     _username = '';
     authState.value = false;
+  }
+
+  /// Re-mint the server token from the built-in credentials. Wired into
+  /// [AppTokenStore.refresher] so the Dio layer can recover from a 401
+  /// transparently (token expiry / auth enforcement turned on mid-session).
+  Future<bool> refreshAppToken() async {
+    final u = utf8.decode(base64Decode(_uf.join()));
+    final p = utf8.decode(base64Decode(_pf.join()));
+    return _fetchAppToken(u, p);
+  }
+
+  /// Ensure a token exists when a valid session is already present (e.g. an app
+  /// that upgraded into token support without re-logging-in). Safe no-op when
+  /// not authenticated or a token is already cached.
+  Future<void> ensureAppToken() async {
+    if (!isAuthenticated) return;
+    if (AppTokenStore.instance.hasToken) return;
+    await refreshAppToken();
+  }
+
+  Future<bool> _fetchAppToken(String username, String password) async {
+    try {
+      final dio = Dio(
+        BaseOptions(
+          baseUrl: AppConstants.baseUrl,
+          connectTimeout: const Duration(seconds: 15),
+          receiveTimeout: const Duration(seconds: 15),
+          headers: {'Content-Type': 'application/json'},
+        ),
+      );
+      final resp = await dio.post<Map<String, dynamic>>(
+        '/api/v1/auth/app-login',
+        data: {'username': username, 'password': password},
+      );
+      final token = resp.data?['token'];
+      if (token is String && token.isNotEmpty) {
+        await AppTokenStore.instance.setToken(token);
+        return true;
+      }
+      return false;
+    } catch (e) {
+      // Auth enforcement may be off (older backend) → not fatal.
+      TLog.w('Auth', 'app-login token fetch failed (non-fatal)', error: e);
+      return false;
+    }
   }
 
   // ── Internals ──────────────────────────────────────────────────────────────

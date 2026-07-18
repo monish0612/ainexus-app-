@@ -3,11 +3,15 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:intl/intl.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
+import '../../../../core/services/credit_card_forecast_engine.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../../../domain/entities/expense_entities.dart';
+import '../../settings/settings_controller.dart' show Bank, kCardTypeCredit;
+import '../widgets/expense_date_picker.dart';
 
 import 'add_expense_modal.dart';
 
@@ -17,28 +21,44 @@ Future<void> showEditExpenseModal(
   required Expense expense,
   required void Function(Expense updated) onUpdate,
   List<String>? banks,
+  List<Bank>? bankConfigs,
 }) {
+  final names = bankConfigs != null && bankConfigs.isNotEmpty
+      ? _distinctEditBankNames(bankConfigs)
+      : (banks ?? kDefaultExpenseModalBanks);
   return showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
     backgroundColor: Colors.transparent,
     builder: (ctx) => _EditExpenseSheet(
       expense: expense,
-      banks: banks ?? kDefaultExpenseModalBanks,
+      banks: names,
+      bankConfigs: bankConfigs ?? const [],
       onUpdate: onUpdate,
     ),
   );
+}
+
+List<String> _distinctEditBankNames(List<Bank> configs) {
+  final seen = <String>{};
+  final out = <String>[];
+  for (final b in configs) {
+    if (seen.add(b.name)) out.add(b.name);
+  }
+  return out;
 }
 
 class _EditExpenseSheet extends StatefulWidget {
   const _EditExpenseSheet({
     required this.expense,
     required this.banks,
+    this.bankConfigs = const [],
     required this.onUpdate,
   });
 
   final Expense expense;
   final List<String> banks;
+  final List<Bank> bankConfigs;
   final void Function(Expense updated) onUpdate;
 
   @override
@@ -53,6 +73,7 @@ class _EditExpenseSheetState extends State<_EditExpenseSheet>
   late String _bank;
   late String _cardType;
   late String _category;
+  late DateTime _selectedDate;
   var _showCategoryPicker = false;
   bool _hasAttemptedSubmit = false;
   late final AnimationController _shakeCtrl;
@@ -68,13 +89,33 @@ class _EditExpenseSheetState extends State<_EditExpenseSheet>
     _amountCtrl = TextEditingController(text: e.amount.toStringAsFixed(0));
     _descCtrl = TextEditingController(text: e.description);
     _commentsCtrl = TextEditingController(text: e.comments);
-    _bank = widget.banks.contains(e.bank) ? e.bank : widget.banks.first;
+    _bank = widget.banks.any((b) => b.toLowerCase() == e.bank.toLowerCase())
+        ? e.bank
+        : (widget.banks.isNotEmpty ? widget.banks.first : e.bank);
     _cardType = expenseCardTypes.contains(e.cardType)
         ? e.cardType
         : expenseCardTypes.first;
     _category = expenseCategories.contains(e.category)
         ? e.category
         : expenseCategories.last;
+    _selectedDate = dateOnly(DateTime.tryParse(e.date) ?? DateTime.now());
+  }
+
+  /// Preserve the original time-of-day when the calendar day is unchanged;
+  /// otherwise anchor the new day to local noon so it lands inside that day.
+  String _resolvedDateIso() {
+    final original = DateTime.tryParse(widget.expense.date) ?? DateTime.now();
+    if (original.year == _selectedDate.year &&
+        original.month == _selectedDate.month &&
+        original.day == _selectedDate.day) {
+      return widget.expense.date;
+    }
+    return DateTime(
+      _selectedDate.year,
+      _selectedDate.month,
+      _selectedDate.day,
+      12,
+    ).toIso8601String();
   }
 
   @override
@@ -84,6 +125,93 @@ class _EditExpenseSheetState extends State<_EditExpenseSheet>
     _descCtrl.dispose();
     _commentsCtrl.dispose();
     super.dispose();
+  }
+
+  Set<String> _allowedCardTypes(String bank) {
+    if (bank.isEmpty) return expenseCardTypes.toSet();
+    final configs = widget.bankConfigs
+        .where((b) => b.name.toLowerCase() == bank.toLowerCase())
+        .toList();
+    if (configs.isNotEmpty) return configs.map((b) => b.cardType).toSet();
+    if (bank.toUpperCase() == 'CASH') return {'Cash'};
+    return {'DB', 'CC'};
+  }
+
+  Bank? _ccConfigFor(String bank) {
+    for (final b in widget.bankConfigs) {
+      if (b.name.toLowerCase() == bank.toLowerCase() && b.isCreditCard) return b;
+    }
+    return null;
+  }
+
+  void _reconcileCardTypeForBank(String bank) {
+    final allowed = _allowedCardTypes(bank);
+    if (allowed.length == 1) {
+      _cardType = allowed.first;
+    } else if (!allowed.contains(_cardType)) {
+      _cardType = allowed.contains(expenseCardTypes.first)
+          ? expenseCardTypes.first
+          : allowed.first;
+    }
+  }
+
+  /// Shows which salary repays this charge — same nudge as the add form, using
+  /// the expense's own date.
+  Widget _buildCcRepaymentHint(AppColors colors) {
+    if (_cardType != kCardTypeCredit) return const SizedBox.shrink();
+    final cfg = _ccConfigFor(_bank);
+    if (cfg == null) return const SizedBox.shrink();
+    final timing = cardBillTimingFor(
+      expenseDate: _selectedDate,
+      statementDay: cfg.statementDay!,
+      dueDay: cfg.dueDay!,
+    );
+    final dateFmt = DateFormat('d MMM');
+    const violet = Color(0xFFA78BFA);
+    return Padding(
+      padding: const EdgeInsets.only(top: 12),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: const Color(0x14A78BFA),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: const Color(0x33A78BFA)),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Icon(LucideIcons.calendarClock, size: 18, color: violet),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Repaid from your ${timing.salaryMonthLabel} salary',
+                    style: GoogleFonts.plusJakartaSans(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w800,
+                      color: violet,
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    '$_bank statement closes ${dateFmt.format(timing.statementClose)}, '
+                    'bill due ${dateFmt.format(timing.dueDate)}.',
+                    style: GoogleFonts.plusJakartaSans(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w500,
+                      color: colors.text3,
+                      height: 1.4,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   double get _shakeOffset {
@@ -115,6 +243,7 @@ class _EditExpenseSheetState extends State<_EditExpenseSheet>
         category: _category,
         bank: _bank,
         cardType: _cardType,
+        date: _resolvedDateIso(),
         isManualCategory: true,
         comments: _commentsCtrl.text.trim(),
       ),
@@ -454,6 +583,11 @@ class _EditExpenseSheetState extends State<_EditExpenseSheet>
                       ),
                     ],
                     const SizedBox(height: 16),
+                    ExpenseDatePicker(
+                      selectedDate: _selectedDate,
+                      onChanged: (d) => setState(() => _selectedDate = d),
+                    ),
+                    const SizedBox(height: 16),
                     Text(
                       'BANK',
                       style: GoogleFonts.plusJakartaSans(
@@ -476,11 +610,7 @@ class _EditExpenseSheetState extends State<_EditExpenseSheet>
                                 selected: _bank == b,
                                 onSelected: (_) => setState(() {
                                   _bank = b;
-                                  if (b == 'CASH') {
-                                    _cardType = 'Cash';
-                                  } else if (_cardType == 'Cash') {
-                                    _cardType = expenseCardTypes.first;
-                                  }
+                                  _reconcileCardTypeForBank(b);
                                 }),
                                 selectedColor: const Color(0x337C63E2),
                                 labelStyle: GoogleFonts.plusJakartaSans(
@@ -522,11 +652,8 @@ class _EditExpenseSheetState extends State<_EditExpenseSheet>
                                 right: ct == expenseCardTypes.last ? 0 : 8,
                               ),
                               child: Builder(builder: (context) {
-                                final isCashBank = _bank == 'CASH';
-                                final isCashType = ct == 'Cash';
-                                final isDisabled = isCashBank
-                                    ? !isCashType
-                                    : isCashType;
+                                final isDisabled = _bank.isNotEmpty &&
+                                    !_allowedCardTypes(_bank).contains(ct);
                                 return ChoiceChip(
                                   label: Text(
                                     '${_lead(ct)} $ct',
@@ -562,6 +689,7 @@ class _EditExpenseSheetState extends State<_EditExpenseSheet>
                         ],
                       ],
                     ),
+                    _buildCcRepaymentHint(colors),
                     const SizedBox(height: 16),
                     Row(
                       children: [

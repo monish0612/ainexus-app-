@@ -131,10 +131,11 @@ List<Expense> _filter(
   DateTime start,
   DateTime end,
 ) {
-  // Investments are not spending — exclude them from every trend figure.
+  // Investments (wealth) and loan repayments (debt) are not spending — exclude
+  // them from every trend figure.
   return expenses
       .where((e) =>
-          !isInvestmentCategory(e.category) &&
+          !isNonSpendCategory(e.category) &&
           _inclusiveInRange(safeParseDate(e.date), start, end))
       .toList();
 }

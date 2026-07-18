@@ -666,12 +666,21 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
       // wipe FIRST — otherwise the fetch below would re-hydrate them right back.
       await ref.read(savedWordsRepositoryProvider).retryPendingClear();
 
+      // Apply remote deletions (web/other-device deletes) via the tombstone log
+      // so a word removed elsewhere disappears here too — the index pull below
+      // is insert-only and would otherwise keep stale rows forever.
+      final deleted =
+          await ref.read(savedWordsRepositoryProvider).syncTombstones();
+
       final service = ref.read(tutorAiServiceProvider);
       final remote = await service.fetchSavedWords();
-      if (remote.isEmpty || !mounted) return;
+      if (!mounted) return;
 
       final db = ref.read(appDatabaseProvider);
-      final localIds = _savedWords.map((w) => w.id).toSet();
+      // Re-read local ids AFTER tombstone deletions so we don't treat a
+      // just-deleted id as "already present" and skip a legitimate re-add.
+      final localRows = await db.select(db.savedWords).get();
+      final localIds = localRows.map((w) => w.id).toSet();
 
       var inserted = 0;
       for (final r in remote) {
@@ -692,7 +701,7 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
         inserted++;
       }
 
-      if (inserted > 0 && mounted) {
+      if ((inserted > 0 || deleted > 0) && mounted) {
         final updated = await (db.select(db.savedWords)
               ..orderBy([(t) => drift.OrderingTerm.desc(t.savedAt)]))
             .get();

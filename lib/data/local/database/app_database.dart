@@ -21,6 +21,12 @@ class Expenses extends Table {
   /// backend supports it, otherwise preserved locally.
   TextColumn get comments => text().withDefault(const Constant(''))();
 
+  /// ISO-8601 UTC timestamp of the last local OR remote write to this row. Used
+  /// for last-write-wins cross-device merge in [ExpenseRepository.syncFromServer]
+  /// — a server row only overwrites the local copy when its [updatedAt] is newer.
+  /// NULL on rows created before the v10 migration (treated as "oldest").
+  TextColumn get updatedAt => text().nullable()();
+
   @override
   Set<Column> get primaryKey => {id};
 }
@@ -261,7 +267,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.executor);
 
   @override
-  int get schemaVersion => 9;
+  int get schemaVersion => 10;
 
   /// Atomically deletes **every row from every table** while leaving the
   /// schema (tables, columns, indexes) fully intact. Powers the "nuke" easter
@@ -389,6 +395,13 @@ class AppDatabase extends _$AppDatabase {
           'WHERE date IS NOT NULL AND length(date) >= 7 '
           'GROUP BY substr(date, 1, 7), category',
         );
+      }
+      if (from < 10) {
+        // Cross-device last-write-wins merge needs a per-row updatedAt. Pre-
+        // existing rows get NULL (treated as "oldest"); since every local
+        // expense was already pushed to the server when created, the first
+        // post-upgrade pull simply re-applies identical server data — no loss.
+        await migrator.addColumn(expenses, expenses.updatedAt);
       }
     },
     beforeOpen: (details) async {

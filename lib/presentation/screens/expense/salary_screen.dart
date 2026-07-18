@@ -3,8 +3,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:intl/intl.dart';
 
 import '../../../core/di/injection.dart';
+import '../../../core/services/credit_card_forecast_engine.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/utils/currency_formatter.dart';
 import '../../../domain/entities/salary_entities.dart';
@@ -83,10 +85,10 @@ class SalaryScreen extends ConsumerWidget {
                   const SizedBox(height: 14),
                   _ProjectionCard(stats: stats, colors: colors),
                   const SizedBox(height: 14),
-                  if (stats.hasCreditCardActivity) ...[
-                    _CreditCardForecastCard(stats: stats, colors: colors),
-                    const SizedBox(height: 14),
-                  ],
+                ],
+                if (ref.watch(creditCardForecastProvider).hasActivity) ...[
+                  _CreditCardForecastCard(colors: colors),
+                  const SizedBox(height: 14),
                 ],
                 if (stats.monthsRecorded > 0) ...[
                   _LifetimeCard(stats: stats, colors: colors),
@@ -883,40 +885,41 @@ class _LifetimeCard extends StatelessWidget {
 
 // ── Credit-card repayment forecast ───────────────────────────────────────────
 
-/// Surfaces the timing gap of credit-card spending: money charged this month is
-/// a bill that lands next month and is drawn from next month's salary. Shows the
-/// forecasted next-month take-home (current salary − this month's CC charges) so
-/// swiping the card *feels* like spending real future income.
-class _CreditCardForecastCard extends StatelessWidget {
-  const _CreditCardForecastCard({required this.stats, required this.colors});
-  final SalaryStats stats;
+const _violet = Color(0xFFA78BFA);
+
+/// Per-bank credit-card forecast: each card's open (still-accumulating)
+/// statement with its close/due dates and the salary that repays it, plus a
+/// forward salary-vs-bills timeline showing the projected in-hand balance for
+/// the current spending month and the next two. Driven by each bank's real
+/// billing cycle so the user sees exactly which paycheck a swipe eats into.
+class _CreditCardForecastCard extends ConsumerWidget {
+  const _CreditCardForecastCard({required this.colors});
   final AppColors colors;
 
   @override
-  Widget build(BuildContext context) {
-    final chargedThisMonth = stats.ccSpentThisMonth;
-    final dueNow = stats.ccDueThisMonth;
-    final forecast = stats.forecastNextMonthTakeHome;
+  Widget build(BuildContext context, WidgetRef ref) {
+    final forecast = ref.watch(creditCardForecastProvider);
+    if (!forecast.hasActivity) return const SizedBox.shrink();
 
-    // Severity: red when the bill would leave next month short or negative,
-    // amber as a standing caution whenever there's a card bill building up.
-    final bool severe =
-        stats.ccLeavesNextMonthShort || forecast < 0;
-    final accent = severe ? _red : _amber;
+    // Only show timeline months that actually carry a bill (keeps the card
+    // focused) but always include the current spending month for context.
+    final timeline = forecast.timeline
+        .where((m) => m.cardBills > 0 || m == forecast.timeline.first)
+        .toList();
 
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
         color: colors.bg2,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: accent.withValues(alpha: 0.4)),
+        border: Border.all(color: _violet.withValues(alpha: 0.4)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Icon(Icons.credit_card_outlined, size: 16, color: accent),
+              const Icon(Icons.credit_card_outlined, size: 16, color: _violet),
               const SizedBox(width: 7),
               Expanded(
                 child: Text(
@@ -930,142 +933,45 @@ class _CreditCardForecastCard extends StatelessWidget {
                   ),
                 ),
               ),
-              const SizedBox(width: 8),
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                decoration: BoxDecoration(
-                  color: accent.withValues(alpha: 0.14),
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Text(
-                  'Due next month',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: GoogleFonts.plusJakartaSans(
-                    fontSize: 10.5,
-                    fontWeight: FontWeight.w700,
-                    color: accent,
-                  ),
-                ),
-              ),
             ],
           ),
-          const SizedBox(height: 14),
-          if (chargedThisMonth > 0) ...[
-            Text(
-              'Forecasted take-home next month',
-              style: GoogleFonts.plusJakartaSans(
-                fontSize: 11.5,
-                fontWeight: FontWeight.w500,
-                color: colors.text3,
-              ),
+          const SizedBox(height: 4),
+          Text(
+            'Each card\'s bill mapped to the salary that repays it.',
+            style: GoogleFonts.plusJakartaSans(
+              fontSize: 11.5,
+              fontWeight: FontWeight.w500,
+              color: colors.text3,
             ),
-            const SizedBox(height: 4),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.baseline,
-              textBaseline: TextBaseline.alphabetic,
-              children: [
-                Flexible(
-                  child: Text(
-                    forecast < 0
-                        ? '-${formatCurrency(forecast.abs())}'
-                        : formatCurrency(forecast),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: GoogleFonts.plusJakartaSans(
-                      fontSize: 28,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: -0.5,
-                      color: accent,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 2),
-            Text(
-              '${formatCurrency(stats.salary)} salary − '
-              '${formatCurrency(chargedThisMonth)} card bill',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: GoogleFonts.plusJakartaSans(
-                fontSize: 11.5,
-                fontWeight: FontWeight.w600,
-                color: colors.text4,
-              ),
-            ),
+          ),
+          if (forecast.openStatements.isNotEmpty) ...[
             const SizedBox(height: 16),
-            Row(
-              children: [
-                Expanded(
-                  child: _MiniStat(
-                    label: 'Charged this month',
-                    value: formatCurrency(chargedThisMonth),
-                    colors: colors,
-                  ),
-                ),
-                Expanded(
-                  child: _MiniStat(
-                    label: 'Repay next month',
-                    value: formatCurrency(chargedThisMonth),
-                    colors: colors,
-                  ),
-                ),
-                Expanded(
-                  child: _MiniStat(
-                    label: 'Of salary',
-                    value:
-                        '${stats.ccPctOfSalary.clamp(0, 999).toStringAsFixed(0)}%',
-                    colors: colors,
-                  ),
-                ),
-              ],
-            ),
+            _SectionLabel('OPEN STATEMENTS', colors: colors),
+            const SizedBox(height: 8),
+            for (final s in forecast.openStatements) ...[
+              _OpenStatementTile(statement: s, colors: colors),
+              const SizedBox(height: 8),
+            ],
           ],
-          if (dueNow > 0) ...[
-            if (chargedThisMonth > 0) const SizedBox(height: 14),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: colors.bg3,
-                borderRadius: BorderRadius.circular(14),
-              ),
-              child: Row(
-                children: [
-                  Icon(Icons.event_repeat_outlined,
-                      size: 15, color: colors.text3),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'Last month\'s ${formatCurrency(dueNow)} card bill is due '
-                      'now — real take-home this month is '
-                      '${formatCurrency(stats.effectiveTakeHomeThisMonth)}.',
-                      style: GoogleFonts.plusJakartaSans(
-                        fontSize: 11.5,
-                        height: 1.35,
-                        fontWeight: FontWeight.w500,
-                        color: colors.text2,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
+          if (timeline.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            _SectionLabel('SALARY VS CARD BILLS', colors: colors),
+            const SizedBox(height: 8),
+            for (final m in timeline) ...[
+              _SalaryMonthTile(month: m, colors: colors),
+              const SizedBox(height: 8),
+            ],
           ],
-          if (chargedThisMonth > 0) ...[
-            const SizedBox(height: 10),
+          if (forecast.unconfiguredBanks.isNotEmpty) ...[
+            const SizedBox(height: 4),
             Text(
-              forecast < 0
-                  ? 'This bill alone outweighs a full month\'s salary — pause '
-                      'card spending before it snowballs.'
-                  : 'Every card swipe shrinks next month\'s pay. Spend like '
-                      'it\'s already gone.',
+              'No billing cycle set for ${forecast.unconfiguredBanks.join(', ')} — '
+              'add it in Settings ▸ Banks & Cards to include it here.',
               style: GoogleFonts.plusJakartaSans(
                 fontSize: 11,
                 height: 1.3,
                 fontWeight: FontWeight.w500,
-                color: colors.text4,
+                color: _amber,
               ),
             ),
           ],
@@ -1073,6 +979,520 @@ class _CreditCardForecastCard extends StatelessWidget {
       ),
     );
   }
+}
+
+class _SectionLabel extends StatelessWidget {
+  const _SectionLabel(this.text, {required this.colors});
+  final String text;
+  final AppColors colors;
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      text,
+      style: GoogleFonts.plusJakartaSans(
+        fontSize: 10,
+        fontWeight: FontWeight.w800,
+        color: colors.text3,
+        letterSpacing: 1.4,
+      ),
+    );
+  }
+}
+
+/// A single card's currently-open statement: how much has piled up, when it
+/// closes & is due, and which salary settles it. Tap to expand the individual
+/// charges that make up the total.
+class _OpenStatementTile extends StatefulWidget {
+  const _OpenStatementTile({required this.statement, required this.colors});
+  final CardStatement statement;
+  final AppColors colors;
+
+  @override
+  State<_OpenStatementTile> createState() => _OpenStatementTileState();
+}
+
+class _OpenStatementTileState extends State<_OpenStatementTile> {
+  bool _expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final statement = widget.statement;
+    final colors = widget.colors;
+    final dateFmt = DateFormat('d MMM');
+    final canExpand = statement.items.isNotEmpty;
+    return Container(
+      decoration: BoxDecoration(
+        color: colors.bg3,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: canExpand
+              ? () => setState(() => _expanded = !_expanded)
+              : null,
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      width: 8,
+                      height: 8,
+                      decoration: BoxDecoration(
+                        color: _parseSalaryHex(statement.color),
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        statement.bankName,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.plusJakartaSans(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: colors.text,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Flexible(
+                      child: Text(
+                        formatCurrency(statement.total),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.right,
+                        style: GoogleFonts.plusJakartaSans(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w800,
+                          color: colors.text,
+                        ),
+                      ),
+                    ),
+                    if (canExpand) ...[
+                      const SizedBox(width: 4),
+                      AnimatedRotation(
+                        turns: _expanded ? 0.5 : 0,
+                        duration: const Duration(milliseconds: 200),
+                        child: Icon(Icons.expand_more,
+                            size: 18, color: colors.text3),
+                      ),
+                    ],
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Closes ${dateFmt.format(statement.closeDate)} · '
+                  'due ${dateFmt.format(statement.dueDate)}',
+                  style: GoogleFonts.plusJakartaSans(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w500,
+                    color: colors.text3,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  'Repaid from your ${monthKeyLabel(statement.salaryMonthKey)} salary',
+                  style: GoogleFonts.plusJakartaSans(
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w700,
+                    color: _violet,
+                  ),
+                ),
+                _ExpandableItems(
+                  expanded: _expanded,
+                  child: Padding(
+                    padding: const EdgeInsets.only(top: 10),
+                    child: _StatementLineItems(
+                        items: statement.items, colors: colors),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// A vertically-collapsing container used to reveal a statement's line items
+/// with a fluid height animation.
+class _ExpandableItems extends StatelessWidget {
+  const _ExpandableItems({required this.expanded, required this.child});
+  final bool expanded;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedSize(
+      duration: const Duration(milliseconds: 200),
+      curve: Curves.easeOutCubic,
+      alignment: Alignment.topCenter,
+      child: expanded
+          ? SizedBox(width: double.infinity, child: child)
+          : const SizedBox(width: double.infinity, height: 0),
+    );
+  }
+}
+
+/// The individual charges behind a statement total: date · merchant/category ·
+/// amount. Built to stay within very narrow widths (no overflow at 280px).
+class _StatementLineItems extends StatelessWidget {
+  const _StatementLineItems({required this.items, required this.colors});
+  final List<CardExpense> items;
+  final AppColors colors;
+
+  static String _label(CardExpense it) {
+    final desc = it.description.trim();
+    if (desc.isNotEmpty) return desc;
+    final cat = it.category.trim();
+    return cat.isNotEmpty ? cat : 'Charge';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final dateFmt = DateFormat('d MMM');
+    if (items.isEmpty) {
+      return Text(
+        'No itemised charges',
+        style: GoogleFonts.plusJakartaSans(
+          fontSize: 11,
+          fontWeight: FontWeight.w500,
+          color: colors.text4,
+        ),
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Divider(height: 1, thickness: 1, color: colors.border),
+        for (final it in items)
+          Padding(
+            padding: const EdgeInsets.only(top: 7),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SizedBox(
+                  width: 42,
+                  child: Text(
+                    dateFmt.format(it.date),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.plusJakartaSans(
+                      fontSize: 10.5,
+                      fontWeight: FontWeight.w600,
+                      color: colors.text4,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    _label(it),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.plusJakartaSans(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w500,
+                      color: colors.text2,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Flexible(
+                  child: Text(
+                    formatCurrency(it.amount),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.right,
+                    style: GoogleFonts.plusJakartaSans(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w600,
+                      color: colors.text2,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+/// One salary month with the card bills it must absorb and the resulting
+/// projected in-hand balance.
+class _SalaryMonthTile extends StatelessWidget {
+  const _SalaryMonthTile({required this.month, required this.colors});
+  final SalaryMonthForecast month;
+  final AppColors colors;
+
+  @override
+  Widget build(BuildContext context) {
+    final inHand = month.projectedInHand;
+    final bool known = month.hasSalary;
+    // When the salary for this month isn't recorded yet we don't have an
+    // in-hand to project — surface the bills instead of a misleading negative.
+    final Color tone = !known
+        ? colors.text3
+        : month.isShort
+            ? _red
+            : (month.cardBills > 0 && inHand < month.salary * 0.5)
+                ? _amber
+                : _green;
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: colors.bg3,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: tone.withValues(alpha: 0.28)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  '${month.monthLabel} salary',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.plusJakartaSans(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: colors.text,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Flexible(
+                child: Text(
+                  known ? formatCurrency(month.salary) : 'Not recorded',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.right,
+                  style: GoogleFonts.plusJakartaSans(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: known ? colors.text2 : colors.text4,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          if (month.bills.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            for (final b in month.bills) _BillRow(bill: b, colors: colors),
+          ],
+          const SizedBox(height: 8),
+          Divider(height: 1, thickness: 1, color: colors.border),
+          const SizedBox(height: 8),
+          if (known)
+            _InHandRow(
+              label: month.cardBills > 0
+                  ? 'Projected in-hand'
+                  : 'No card bills this month',
+              value: inHand < 0
+                  ? '-${formatCurrency(inHand.abs())}'
+                  : formatCurrency(inHand),
+              tone: tone,
+              colors: colors,
+            )
+          else if (month.cardBills > 0)
+            _InHandRow(
+              label: 'Card bills due',
+              value: formatCurrency(month.cardBills),
+              tone: colors.text,
+              colors: colors,
+            )
+          else
+            Text(
+              'No card bills this month',
+              style: GoogleFonts.plusJakartaSans(
+                fontSize: 11.5,
+                fontWeight: FontWeight.w600,
+                color: colors.text3,
+              ),
+            ),
+          if (!known && month.cardBills > 0) ...[
+            const SizedBox(height: 4),
+            Text(
+              'Add this month\'s salary to see your in-hand.',
+              style: GoogleFonts.plusJakartaSans(
+                fontSize: 10.5,
+                fontWeight: FontWeight.w600,
+                color: colors.text3,
+              ),
+            ),
+          ],
+          if (month.isShort) ...[
+            const SizedBox(height: 4),
+            Text(
+              'Card bills exceed this salary — pause card spending.',
+              style: GoogleFonts.plusJakartaSans(
+                fontSize: 10.5,
+                fontWeight: FontWeight.w600,
+                color: _red,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// The bottom "in-hand"/"bills due" summary line of a salary-month tile.
+class _InHandRow extends StatelessWidget {
+  const _InHandRow({
+    required this.label,
+    required this.value,
+    required this.tone,
+    required this.colors,
+  });
+  final String label;
+  final String value;
+  final Color tone;
+  final AppColors colors;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Expanded(
+          child: Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: GoogleFonts.plusJakartaSans(
+              fontSize: 11.5,
+              fontWeight: FontWeight.w600,
+              color: colors.text3,
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Flexible(
+          child: Text(
+            value,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.right,
+            style: GoogleFonts.plusJakartaSans(
+              fontSize: 17,
+              fontWeight: FontWeight.w800,
+              letterSpacing: -0.3,
+              color: tone,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// A single bank's bill within a salary month. Tap to expand the individual
+/// charges that make up the bill.
+class _BillRow extends StatefulWidget {
+  const _BillRow({required this.bill, required this.colors});
+  final CardStatement bill;
+  final AppColors colors;
+
+  @override
+  State<_BillRow> createState() => _BillRowState();
+}
+
+class _BillRowState extends State<_BillRow> {
+  bool _expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final b = widget.bill;
+    final colors = widget.colors;
+    final dateFmt = DateFormat('d MMM');
+    final canExpand = b.items.isNotEmpty;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          InkWell(
+            onTap: canExpand
+                ? () => setState(() => _expanded = !_expanded)
+                : null,
+            borderRadius: BorderRadius.circular(8),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 2),
+              child: Row(
+                children: [
+                  Icon(Icons.credit_card_outlined,
+                      size: 13, color: colors.text4),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      '${b.bankName} · due ${dateFmt.format(b.dueDate)}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.plusJakartaSans(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w500,
+                        color: colors.text3,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Flexible(
+                    child: Text(
+                      '-${formatCurrency(b.total)}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.right,
+                      style: GoogleFonts.plusJakartaSans(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w700,
+                        color: colors.text2,
+                      ),
+                    ),
+                  ),
+                  if (canExpand) ...[
+                    const SizedBox(width: 2),
+                    AnimatedRotation(
+                      turns: _expanded ? 0.5 : 0,
+                      duration: const Duration(milliseconds: 200),
+                      child: Icon(Icons.expand_more,
+                          size: 16, color: colors.text4),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+          _ExpandableItems(
+            expanded: _expanded,
+            child: Padding(
+              padding: const EdgeInsets.only(left: 19, top: 4, bottom: 2),
+              child: _StatementLineItems(items: b.items, colors: colors),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+Color _parseSalaryHex(String hex) {
+  var h = hex.replaceFirst('#', '').trim();
+  if (h.length == 6) h = 'FF$h';
+  final v = int.tryParse(h, radix: 16);
+  return v == null ? _violet : Color(v);
 }
 
 // ── Trend chart ──────────────────────────────────────────────────────────────

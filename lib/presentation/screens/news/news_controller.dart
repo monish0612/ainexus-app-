@@ -73,6 +73,18 @@ class NewsController extends StateNotifier<AsyncValue<List<Article>>> {
     return _repository.markRead(id);
   }
 
+  /// Permanently removes an article (local row + server delete + tombstone).
+  /// Used by the Saved-tab trash button and the Movies/General swipe-delete.
+  Future<void> deleteArticle(String id) {
+    return _repository.deleteArticle(id);
+  }
+
+  /// Easter-egg "nuke": deletes EVERY article including saved ones, locally
+  /// and on the server. Returns the local count removed + server confirmation.
+  Future<({int removed, bool serverOk})> clearAllNews() {
+    return _repository.clearAllNews();
+  }
+
   /// Bulk mark-as-read for the For You "Clear All" / summary "Done" flows.
   /// The repository updates local DB synchronously and fires a best-effort
   /// remote bulk request in the background — this future resolves once the
