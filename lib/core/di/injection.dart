@@ -12,6 +12,7 @@ import '../../data/services/ai_categorize_service.dart';
 import '../../data/services/expense_ai_search_service.dart';
 import '../../data/services/expense_insight_service.dart';
 import '../../data/services/news_summarize_service.dart';
+import '../../data/services/stt_gateway_service.dart';
 import '../../data/services/tutor_ai_service.dart';
 import '../../data/services/user_preferences_service.dart';
 import '../../domain/entities/saved_search.dart';
@@ -134,6 +135,12 @@ final userFirstNameProvider = Provider<String>((ref) {
 
 final tutorAiServiceProvider = Provider<TutorAiService>((ref) {
   return TutorAiService(ref.watch(apiClientProvider));
+});
+
+/// Server-side speech-to-text gateway (Groq Whisper + Gemini correction).
+/// Owns its own Dio — different host + X-Client-Key auth, not the app JWT.
+final sttGatewayServiceProvider = Provider<SttGatewayService>((ref) {
+  return SttGatewayService();
 });
 
 final newsSummarizeServiceProvider = Provider<NewsSummarizeService>((ref) {

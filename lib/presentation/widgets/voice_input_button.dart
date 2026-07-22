@@ -1,9 +1,16 @@
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
+import '../../core/constants/app_constants.dart';
+import '../../core/di/injection.dart';
 import '../../core/services/hold_to_speak_service.dart';
 import '../../core/theme/app_colors.dart';
+import '../../data/services/stt_gateway_service.dart';
 
 /// Self-contained hold-to-speak mic button for follow-up chat inputs.
 ///
@@ -19,8 +26,13 @@ import '../../core/theme/app_colors.dart';
 ///   * scales the icon based on incoming audio level so the user can see
 ///     that the mic is actually listening (the previous version gave no
 ///     such feedback, leaving users to guess whether their words were
-///     being captured during pauses).
-class VoiceInputButton extends StatefulWidget {
+///     being captured during pauses);
+///   * records a parallel m4a clip and uploads it to the server-side STT
+///     gateway after release — the on-device transcript shows instantly and
+///     is silently replaced by the gateway's higher-accuracy corrected text
+///     when it arrives (unless the user already edited the field). Gateway
+///     failures leave the on-device transcript untouched.
+class VoiceInputButton extends ConsumerStatefulWidget {
   const VoiceInputButton({
     super.key,
     required this.controller,
@@ -43,10 +55,10 @@ class VoiceInputButton extends StatefulWidget {
   final String tag;
 
   @override
-  State<VoiceInputButton> createState() => _VoiceInputButtonState();
+  ConsumerState<VoiceInputButton> createState() => _VoiceInputButtonState();
 }
 
-class _VoiceInputButtonState extends State<VoiceInputButton>
+class _VoiceInputButtonState extends ConsumerState<VoiceInputButton>
     with SingleTickerProviderStateMixin {
   late final HoldToSpeakController _voice;
   late final AnimationController _pulseCtrl;
@@ -117,7 +129,12 @@ class _VoiceInputButtonState extends State<VoiceInputButton>
     if (widget.disabled || _voice.isListening) return;
     widget.controller.clear();
     _lastShownText = '';
-    await _voice.start();
+    // Parallel m4a capture feeds the server-side STT gateway. Recording is
+    // Android/iOS-only (temp dir is unavailable on web) and failures inside
+    // HoldToSpeakController are non-fatal — on-device STT works regardless.
+    await _voice.start(
+      recordAudio: !kIsWeb && AppConstants.sttGatewayEnabled,
+    );
   }
 
   Future<void> _onPointerUp() async {
@@ -128,12 +145,34 @@ class _VoiceInputButtonState extends State<VoiceInputButton>
     }
     final result = await _voice.stop();
     if (!mounted) return;
+    // Instant path: show the on-device transcript immediately.
     final text = result.transcript;
     _lastShownText = text;
     widget.controller.value = TextEditingValue(
       text: text,
       selection: TextSelection.collapsed(offset: text.length),
     );
+    // Accuracy path: upload the parallel recording to the STT gateway and
+    // silently swap in the corrected transcript when it arrives.
+    final audioPath = result.audioPath;
+    if (audioPath != null) {
+      unawaited(_enhanceWithGateway(audioPath, text));
+    }
+  }
+
+  Future<void> _enhanceWithGateway(String audioPath, String nativeText) async {
+    final gateway = ref.read(sttGatewayServiceProvider);
+    final corrected = await gateway.transcribeFile(audioPath);
+    if (!mounted || corrected == null) return;
+    // Only swap while the field still shows exactly the on-device
+    // transcript — if the user edited or sent it, leave their text alone.
+    if (SttGatewayService.applyCorrectedText(
+      widget.controller,
+      nativeText,
+      corrected,
+    )) {
+      _lastShownText = corrected;
+    }
   }
 
   Future<void> _onPointerCancel() => _onPointerUp();

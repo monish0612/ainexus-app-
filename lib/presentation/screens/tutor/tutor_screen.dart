@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:drift/drift.dart' as drift;
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -11,6 +12,7 @@ import 'package:shimmer/shimmer.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../../core/constants/app_constants.dart';
 import '../../../core/di/injection.dart';
 import '../../../core/llm/model_name_format.dart';
 import '../../../core/network/ai_error.dart';
@@ -24,6 +26,7 @@ import '../../../core/services/summarize_store.dart';
 import '../../../core/services/telegram_logger.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../data/local/database/app_database.dart';
+import '../../../data/services/stt_gateway_service.dart';
 import '../../../domain/entities/saved_search.dart';
 import '../../../domain/entities/tutor_entities.dart';
 import '../../widgets/app_shell.dart';
@@ -800,7 +803,11 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
     _voiceTarget!.clear();
     _voiceLastShown = '';
 
-    final ok = await _voice.start();
+    // Parallel m4a capture feeds the server-side STT gateway; on-device
+    // STT still provides the instant transcript (and the offline fallback).
+    final ok = await _voice.start(
+      recordAudio: !kIsWeb && AppConstants.sttGatewayEnabled,
+    );
     // Only surface the "unavailable" toast for genuine engine/permission
     // failures — NOT for super-fast taps where the user already released
     // before init finished (status would be idle/stopping in that case).
@@ -821,11 +828,19 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
     final result = await _voice.stop();
     if (!mounted) return;
     if (ctrl != null) {
+      // Instant path: on-device transcript straight into the field.
       final text = result.transcript;
       ctrl.value = TextEditingValue(
         text: text,
         selection: TextSelection.collapsed(offset: text.length),
       );
+      // Accuracy path: upload the parallel recording to the STT gateway
+      // and silently swap in the corrected transcript when it arrives
+      // (only if the user hasn't edited the field meanwhile).
+      final audioPath = result.audioPath;
+      if (audioPath != null) {
+        unawaited(_enhanceVoiceWithGateway(ctrl, audioPath, text));
+      }
     }
     // Only clear the target if the user hasn't already started a new hold
     // on a different field — otherwise we'd strand the new session with
@@ -836,6 +851,17 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
         _voiceLastShown = '';
       });
     }
+  }
+
+  Future<void> _enhanceVoiceWithGateway(
+    TextEditingController ctrl,
+    String audioPath,
+    String nativeText,
+  ) async {
+    final corrected =
+        await ref.read(sttGatewayServiceProvider).transcribeFile(audioPath);
+    if (!mounted || corrected == null) return;
+    SttGatewayService.applyCorrectedText(ctrl, nativeText, corrected);
   }
 
   // ── Summarizer & Tavily ──────────────────────────────────────────────────

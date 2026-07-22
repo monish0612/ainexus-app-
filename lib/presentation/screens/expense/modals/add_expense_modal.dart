@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math';
 
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -11,6 +12,7 @@ import 'package:lucide_icons/lucide_icons.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:pdfx/pdfx.dart' as pdfx;
 
+import '../../../../core/constants/app_constants.dart';
 import '../../../../core/platform/io_stub.dart';
 import '../../../../core/platform/local_file_image.dart';
 import '../../../../core/platform/ocr_stub.dart';
@@ -22,6 +24,7 @@ import '../../../../core/services/telegram_logger.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../../../data/services/ai_categorize_service.dart';
+import '../../../../data/services/stt_gateway_service.dart';
 import '../../../../domain/entities/expense_entities.dart';
 import '../../settings/settings_controller.dart' show Bank, kCardTypeCredit;
 import '../widgets/expense_date_picker.dart';
@@ -572,11 +575,20 @@ class _AddExpenseSheetState extends State<_AddExpenseSheet>
 
   // ── Voice (hold-to-record) ─────────────────────────────────────────────────
 
+  /// Server-side STT gateway (Groq Whisper + Gemini correction). Owns its own
+  /// tiny Dio client, so it's safe to construct directly here — this modal is
+  /// a plain StatefulWidget without Riverpod access.
+  final SttGatewayService _sttGateway = SttGatewayService();
+
   Future<void> _startListening() async {
     if (_voice.isListening) return;
     _voiceText = '';
     _voiceTextNotifier.value = '';
-    final ok = await _voice.start();
+    // Parallel m4a capture feeds the STT gateway on release; on-device STT
+    // still provides the live partials and the offline fallback.
+    final ok = await _voice.start(
+      recordAudio: !kIsWeb && AppConstants.sttGatewayEnabled,
+    );
     // Only log "unavailable" for genuine engine/permission failures, not
     // fast-tap aborts where the user released before init finished.
     if (!ok && mounted && _voice.status == HoldToSpeakStatus.unsupported) {
@@ -594,7 +606,7 @@ class _AddExpenseSheetState extends State<_AddExpenseSheet>
     final voiceResult = await _voice.stop();
     if (!mounted) return;
 
-    final finalText = voiceResult.transcript;
+    var finalText = voiceResult.transcript;
     _voiceText = finalText;
     _voiceTextNotifier.value = finalText;
 
@@ -611,17 +623,52 @@ class _AddExpenseSheetState extends State<_AddExpenseSheet>
       _voiceParsing = true;
     });
 
-    if (finalText.isEmpty) {
+    final audioPath = voiceResult.audioPath;
+    if (finalText.isEmpty && audioPath == null) {
       TLog.d('AddExpense', '🎙️ Voice empty — skipping parse');
       if (mounted) setState(() => _voiceParsing = false);
       return;
     }
 
-    // Voice smart-parse fires an LLM call (potentially up to 20 s on
-    // slow networks). Promote it to a foreground service so the request
-    // survives screen-off / app minimisation if the user pockets the
-    // phone right after release.
+    // Voice transcription + smart-parse fire network calls (potentially up
+    // to 20 s on slow networks). Promote to a foreground service so the
+    // requests survive screen-off / app minimisation if the user pockets
+    // the phone right after release.
     _acquireVoiceSlot('\uD83C\uDF99\uFE0F Parsing voice expense\u2026');
+
+    // High-accuracy pass: this flow already shows a "Parsing…" state, so
+    // (unlike the chat composers) we can afford to wait briefly for the STT
+    // gateway before running smart-parse — a cleaner transcript directly
+    // improves amount/merchant extraction. Bounded to ~6s; any failure
+    // falls back to the on-device transcript. Bank + category names are
+    // passed as vocabulary so the correction pass prefers their spellings.
+    // This can also rescue a hold where on-device STT produced nothing.
+    if (audioPath != null) {
+      final corrected = await _sttGateway
+          .transcribeFile(
+            audioPath,
+            vocabulary: [...widget.banks, ...AppConstants.categories],
+          )
+          .timeout(const Duration(seconds: 6), onTimeout: () => null);
+      if (!mounted) {
+        _releaseVoiceSlot();
+        return;
+      }
+      if (corrected != null && corrected.trim().isNotEmpty) {
+        TLog.i('AddExpense',
+            '🎙️ Gateway transcript used (${corrected.length} chars)');
+        finalText = corrected.trim();
+        _voiceText = finalText;
+        _voiceTextNotifier.value = finalText;
+      }
+    }
+
+    if (finalText.isEmpty) {
+      TLog.d('AddExpense', '🎙️ Voice empty — skipping parse');
+      _releaseVoiceSlot();
+      if (mounted) setState(() => _voiceParsing = false);
+      return;
+    }
 
     final sw = Stopwatch()..start();
     SmartParseResult? result;

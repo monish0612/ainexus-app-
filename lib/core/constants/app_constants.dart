@@ -45,6 +45,45 @@ abstract final class AppConstants {
     return useLocalDev ? _localLiteLlmUrl : _prodLiteLlmUrl;
   }
 
+  // ── STT gateway (server-side speech-to-text) ─────────────────────────
+  //
+  // The stt-gateway is a separate FastAPI service (Groq Whisper + Gemini
+  // correction) deployed on the same VPS. Voice input records a parallel
+  // m4a while on-device STT runs; the clip is uploaded here and the
+  // corrected transcript silently replaces the on-device one.
+  //
+  // Overrides:
+  //   flutter build apk --dart-define=STT_GATEWAY_URL=http://host:8080
+  //   flutter build apk --dart-define=STT_CLIENT_KEY=<android key>
+  //
+  // Setting STT_GATEWAY_URL to the literal value "off" (or pointing it at
+  // an unreachable host) disables the gateway — the app then behaves
+  // exactly as before, using only on-device speech recognition.
+
+  static const _localSttGatewayUrl = 'http://localhost:8080';
+  static const _prodSttGatewayUrl = 'http://72.60.219.97:8080';
+
+  static const _envSttGatewayUrl =
+      String.fromEnvironment('STT_GATEWAY_URL', defaultValue: '');
+  static const _envSttClientKey =
+      String.fromEnvironment('STT_CLIENT_KEY', defaultValue: '');
+
+  /// Baked default client key — must match an `android:<key>` entry in the
+  /// gateway's CLIENT_KEYS env var. Override per-build with STT_CLIENT_KEY.
+  static const _defaultSttClientKey = 'nexus-android-2026';
+
+  static String get sttGatewayUrl {
+    if (_envSttGatewayUrl == 'off') return '';
+    if (_envSttGatewayUrl.isNotEmpty) return _envSttGatewayUrl;
+    return useLocalDev ? _localSttGatewayUrl : _prodSttGatewayUrl;
+  }
+
+  static String get sttClientKey =>
+      _envSttClientKey.isNotEmpty ? _envSttClientKey : _defaultSttClientKey;
+
+  /// Gateway is enabled whenever a URL is configured.
+  static bool get sttGatewayEnabled => sttGatewayUrl.isNotEmpty;
+
   static const animDuration = Duration(milliseconds: 220);
   static const animDurationSlow = Duration(milliseconds: 380);
   static const animationCurve = Curves.easeOutCubic;
