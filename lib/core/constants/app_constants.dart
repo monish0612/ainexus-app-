@@ -60,8 +60,9 @@ abstract final class AppConstants {
   // an unreachable host) disables the gateway — the app then behaves
   // exactly as before, using only on-device speech recognition.
 
-  static const _localSttGatewayUrl = 'http://localhost:8080';
-  static const _prodSttGatewayUrl = 'http://72.60.219.97:8080';
+  // Port 8090 on the VPS — 8080 was already allocated by another container.
+  static const _localSttGatewayUrl = 'http://localhost:8090';
+  static const _prodSttGatewayUrl = 'http://72.60.219.97:8090';
 
   static const _envSttGatewayUrl =
       String.fromEnvironment('STT_GATEWAY_URL', defaultValue: '');
