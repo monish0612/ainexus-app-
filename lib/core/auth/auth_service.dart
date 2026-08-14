@@ -7,7 +7,9 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../constants/app_constants.dart';
 import '../services/telegram_logger.dart';
+import 'app_credentials.dart';
 import 'app_token_store.dart';
+import 'session_policy.dart';
 
 /// Singleton authentication service with HMAC-SHA256 credential verification
 /// and AES-256 encrypted session persistence via Android EncryptedSharedPreferences.
@@ -22,15 +24,8 @@ class AuthService {
   static const _sessionKey = 'nxs_session_v2';
   static const _sessionTsKey = 'nxs_session_ts';
   static const _usernameKey = 'nxs_username';
+  static const _expiredKey = 'nxs_session_expired';
   static const _hmacKey = 'nxAi\$7kR2_mP9xL4q8W';
-
-  /// Session lifetime — after this the user must re-authenticate.
-  static const _maxSessionDays = 45;
-
-  // Credential fragments — base64-encoded, split for obfuscation.
-  // Assembled and immediately HMAC-hashed at runtime; plaintext never persists.
-  static const _uf = ['bW9u', 'aXNo'];
-  static const _pf = ['VHVuZHJhLUxhbnRl', 'cm4tWmVwaHlyLTIw'];
 
   /// Notifies GoRouter when auth state changes.
   final authState = ValueNotifier<bool>(false);
@@ -39,7 +34,14 @@ class AuthService {
 
   String _username = '';
 
-  /// The display name of the logged-in user (title-cased).
+  /// True when the last sign-out was a 45-day session expiry (not a manual
+  /// logout). The login screen uses this to ask for a re-entry of the same
+  /// password and to pre-fill the username.
+  bool _didSessionExpire = false;
+  bool get didSessionExpire => _didSessionExpire;
+
+  /// The display name of the logged-in user (title-cased). After a session
+  /// expiry this is still the last username so the login field can be prefilled.
   String get username => _username;
 
   /// Just the first token of the display name — the canonical handle to use for
@@ -50,22 +52,26 @@ class AuthService {
     return parts.isEmpty ? '' : parts.first;
   }
 
-  /// Read stored session on cold start; auto-expire after [_maxSessionDays].
+  /// Read stored session on cold start; auto-expire after [SessionPolicy.maxDays].
   Future<void> init() async {
     final token = await _storage.read(key: _sessionKey);
     if (token == null || token.isEmpty) {
+      _didSessionExpire = await _storage.read(key: _expiredKey) == '1';
+      _username = await _storage.read(key: _usernameKey) ?? '';
       authState.value = false;
       return;
     }
 
     if (await _isSessionExpired()) {
-      await logout();
+      await logout(expired: true);
       return;
     }
 
+    _didSessionExpire = false;
+    await _storage.delete(key: _expiredKey);
     _username = await _storage.read(key: _usernameKey) ?? '';
     if (_username.isEmpty) {
-      _username = _titleCase(utf8.decode(base64Decode(_uf.join())));
+      _username = _titleCase(AppCredentials.username);
       await _storage.write(key: _usernameKey, value: _username);
     }
     authState.value = true;
@@ -74,7 +80,7 @@ class AuthService {
   /// Re-validate on app resume so a stale session is caught even while running.
   Future<void> checkSessionValidity() async {
     if (!isAuthenticated) return;
-    if (await _isSessionExpired()) await logout();
+    if (await _isSessionExpired()) await logout(expired: true);
   }
 
   Future<bool> _isSessionExpired() async {
@@ -82,14 +88,17 @@ class AuthService {
     if (tsStr == null) return true;
     final loginTime = DateTime.tryParse(tsStr);
     if (loginTime == null) return true;
-    return DateTime.now().difference(loginTime).inDays >= _maxSessionDays;
+    return SessionPolicy.isExpired(loginTime, DateTime.now());
   }
 
   /// Verify [username] / [password] against stored HMAC digests.
   /// Returns `true` on match and creates an encrypted session token.
+  ///
+  /// A successful login always mints a **fresh** 45-day window — this is how
+  /// the 45-day expiry "resets" without ever changing the password.
   Future<bool> authenticate(String username, String password) async {
-    final expectedU = _hmac(utf8.decode(base64Decode(_uf.join())));
-    final expectedP = _hmac(utf8.decode(base64Decode(_pf.join())));
+    final expectedU = _hmac(AppCredentials.username);
+    final expectedP = _hmac(AppCredentials.password);
 
     final inputU = _hmac(username.trim().toLowerCase());
     final inputP = _hmac(password);
@@ -105,7 +114,9 @@ class AuthService {
     await _storage.write(key: _sessionKey, value: session);
     await _storage.write(key: _sessionTsKey, value: now.toIso8601String());
     await _storage.write(key: _usernameKey, value: displayName);
+    await _storage.delete(key: _expiredKey);
     _username = displayName;
+    _didSessionExpire = false;
     authState.value = true;
 
     // Best-effort: exchange the validated creds for a server JWT used to
@@ -114,12 +125,24 @@ class AuthService {
     return true;
   }
 
-  Future<void> logout() async {
+  /// Sign out. When [expired] is true the username is kept and the login
+  /// screen shows the 45-day re-entry copy; a manual logout wipes everything.
+  Future<void> logout({bool expired = false}) async {
     await _storage.delete(key: _sessionKey);
     await _storage.delete(key: _sessionTsKey);
-    await _storage.delete(key: _usernameKey);
     await AppTokenStore.instance.clear();
-    _username = '';
+    if (expired) {
+      _didSessionExpire = true;
+      await _storage.write(key: _expiredKey, value: '1');
+      if (_username.isEmpty) {
+        _username = await _storage.read(key: _usernameKey) ?? '';
+      }
+    } else {
+      _didSessionExpire = false;
+      _username = '';
+      await _storage.delete(key: _usernameKey);
+      await _storage.delete(key: _expiredKey);
+    }
     authState.value = false;
   }
 
@@ -127,9 +150,7 @@ class AuthService {
   /// [AppTokenStore.refresher] so the Dio layer can recover from a 401
   /// transparently (token expiry / auth enforcement turned on mid-session).
   Future<bool> refreshAppToken() async {
-    final u = utf8.decode(base64Decode(_uf.join()));
-    final p = utf8.decode(base64Decode(_pf.join()));
-    return _fetchAppToken(u, p);
+    return _fetchAppToken(AppCredentials.username, AppCredentials.password);
   }
 
   /// Ensure a token exists when a valid session is already present (e.g. an app
@@ -141,7 +162,13 @@ class AuthService {
     await refreshAppToken();
   }
 
+  /// Test hook so unit tests never hit the network from [authenticate].
+  @visibleForTesting
+  static Future<bool> Function(String username, String password)? debugTokenExchange;
+
   Future<bool> _fetchAppToken(String username, String password) async {
+    final hook = debugTokenExchange;
+    if (hook != null) return hook(username, password);
     try {
       final dio = Dio(
         BaseOptions(

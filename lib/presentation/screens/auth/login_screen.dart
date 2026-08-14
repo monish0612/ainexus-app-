@@ -7,6 +7,7 @@ import 'package:lucide_icons/lucide_icons.dart';
 
 import '../../../core/auth/auth_service.dart';
 import '../../../core/theme/app_colors.dart';
+import 'login_copy.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -43,10 +44,14 @@ class _LoginScreenState extends State<LoginScreen>
   bool _obscure = true;
   bool _loading = false;
   String? _error;
+  late final bool _sessionExpired = AuthService.instance.didSessionExpire;
 
   @override
   void initState() {
     super.initState();
+    if (_sessionExpired && AuthService.instance.username.isNotEmpty) {
+      _usernameCtl.text = AuthService.instance.username;
+    }
 
     _pulse = AnimationController(
       vsync: this,
@@ -265,7 +270,8 @@ class _LoginScreenState extends State<LoginScreen>
                           FadeTransition(
                             opacity: _subtitleFade,
                             child: Text(
-                              'Sign in to continue',
+                              LoginCopy.subtitle(sessionExpired: _sessionExpired),
+                              textAlign: TextAlign.center,
                               style: GoogleFonts.plusJakartaSans(
                                 fontSize: 14,
                                 fontWeight: FontWeight.w500,
@@ -373,6 +379,9 @@ class _LoginScreenState extends State<LoginScreen>
                               opacity: _btnFade,
                               child: _SignInButton(
                                 loading: _loading,
+                                label: LoginCopy.actionLabel(
+                                  sessionExpired: _sessionExpired,
+                                ),
                                 onTap: _handleLogin,
                               ),
                             ),
@@ -544,8 +553,13 @@ class _LoginFieldState extends State<_LoginField> {
 // ── Sign-in button with press animation ─────────────────────────────────────
 
 class _SignInButton extends StatefulWidget {
-  const _SignInButton({required this.loading, required this.onTap});
+  const _SignInButton({
+    required this.loading,
+    required this.onTap,
+    this.label = LoginCopy.signInLabel,
+  });
   final bool loading;
+  final String label;
   final VoidCallback onTap;
 
   @override
@@ -628,7 +642,7 @@ class _SignInButtonState extends State<_SignInButton>
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Text(
-                          'Sign In',
+                          widget.label,
                           style: GoogleFonts.plusJakartaSans(
                             fontSize: 16,
                             fontWeight: FontWeight.w600,
