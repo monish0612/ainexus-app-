@@ -78,6 +78,9 @@ abstract final class ApiEndpoints {
   // Auth
   static String get login => '$_base/api/v1/auth/login';
   static String get register => '$_base/api/v1/auth/register';
+  /// App JWT mint. Must be a full URL (not `/api/...`) so Dio does not
+  /// drop the `/nexusai` path prefix via URI resolve.
+  static String get appLogin => '$_base/api/v1/auth/app-login';
 
   // Saved Words
   static String get savedWords => '$_base/api/v1/saved-words';

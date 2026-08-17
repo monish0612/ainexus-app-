@@ -5,7 +5,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
-import '../constants/app_constants.dart';
+import '../network/api_endpoints.dart';
 import '../services/telegram_logger.dart';
 import 'app_credentials.dart';
 import 'app_token_store.dart';
@@ -172,14 +172,16 @@ class AuthService {
     try {
       final dio = Dio(
         BaseOptions(
-          baseUrl: AppConstants.baseUrl,
           connectTimeout: const Duration(seconds: 15),
           receiveTimeout: const Duration(seconds: 15),
           headers: {'Content-Type': 'application/json'},
         ),
       );
+      // Full URL via ApiEndpoints — a path starting with `/api` would
+      // URI-resolve against `https://monishlabs.com/nexusai` and miss
+      // the prefix (live `/api/v1/auth/app-login` is 404 HTML).
       final resp = await dio.post<Map<String, dynamic>>(
-        '/api/v1/auth/app-login',
+        ApiEndpoints.appLogin,
         data: {'username': username, 'password': password},
       );
       final token = resp.data?['token'];

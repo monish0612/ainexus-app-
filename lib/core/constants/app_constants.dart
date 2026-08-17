@@ -16,7 +16,10 @@ abstract final class AppConstants {
   static const useLocalDev = kDebugMode && !kIsWeb;
 
   static const _localBaseUrl = 'http://localhost:3000';
-  static const _prodBaseUrl = 'http://72.60.219.97:3000';
+  // Public HTTPS path through Coolify/Traefik + the web nginx proxy.
+  // Raw http://<vps-ip>:3000 is dropped by the Hostinger VPS firewall
+  // (default-deny except 22/80/443) and times out after 30s.
+  static const _prodBaseUrl = 'https://monishlabs.com/nexusai';
 
   static const _localLiteLlmUrl = 'http://localhost:4000';
   // Note: pre-existing constant retained as-is (Flutter never calls LiteLLM
