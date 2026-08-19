@@ -46,6 +46,16 @@ class File {
 
   Stream<List<int>> openRead([int? start, int? end]) =>
       Stream.error(UnsupportedError(_kErr));
+
+  IOSink openWrite({FileMode mode = FileMode.write}) {
+    throw UnsupportedError(_kErr);
+  }
+}
+
+class IOSink {
+  void add(List<int> data) => throw UnsupportedError(_kErr);
+  Future<void> flush() async => throw UnsupportedError(_kErr);
+  Future<void> close() async => throw UnsupportedError(_kErr);
 }
 
 class RandomAccessFile {

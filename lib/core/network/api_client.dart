@@ -199,6 +199,10 @@ class LoggingInterceptor extends Interceptor {
   }
 }
 
+/// Public alias for [_RetryInterceptor.noRetry] so callers can opt out without
+/// reaching into a private class.
+const String kNoRetry = _RetryInterceptor.noRetry;
+
 class _RetryInterceptor extends Interceptor {
   _RetryInterceptor(this._dio);
   final Dio _dio;
@@ -212,11 +216,26 @@ class _RetryInterceptor extends Interceptor {
   /// error is instead passed straight back to the awaiting outer loop.
   static const _retryFlag = '_retryInFlight';
 
+  /// Opt a single request out of retrying, via `Options(extra: {noRetry: true})`.
+  ///
+  /// For requests where a retry cannot help and can actively hurt. A file upload
+  /// is both: its body has already been streamed off disk by the time the failure
+  /// is known, so a replay sends nothing, and the failures worth retrying here
+  /// (503 from an endpoint reporting that the NAS is switched off) are not going
+  /// to resolve themselves 500ms later — they just delay an honest error message
+  /// by the length of the backoff.
+  static const noRetry = '_noRetry';
+
   @override
   void onError(DioException err, ErrorInterceptorHandler handler) async {
     // Re-entrancy guard: errors from a retry attempt bubble up to the
     // original request's loop instead of starting a new (nested) one.
     if (err.requestOptions.extra[_retryFlag] == true) {
+      handler.next(err);
+      return;
+    }
+
+    if (err.requestOptions.extra[noRetry] == true) {
       handler.next(err);
       return;
     }

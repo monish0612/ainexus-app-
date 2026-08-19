@@ -87,6 +87,27 @@ abstract final class ApiEndpoints {
   /// could not reach the API, which is a different message to the user.
   static String get cloudStats => '$_base/api/v1/cloud/stats';
 
+  // ── The Cloud tab's other destination: the home NAS ──
+  //
+  // Same shape as the Drive routes above, aimed at a `Cloud Storage` folder on
+  // the NAS instead. The API reaches it over WireGuard; the phone holds no NAS
+  // credential and does not need to be on the home network.
+
+  /// Whether the server can talk to the NAS at all, and why not if it cannot.
+  /// Always 200 — "no password configured" is a state, not a failure.
+  static String get cloudNasStatus => '$_base/api/v1/cloud/nas/status';
+
+  /// Contents of the NAS `Cloud Storage` folder. Also always 200.
+  static String get cloudNasFiles => '$_base/api/v1/cloud/nas/files';
+
+  static String get cloudNasUpload => '$_base/api/v1/cloud/nas/upload';
+
+  static String cloudNasDownload(String name) =>
+      '$_base/api/v1/cloud/nas/files/${Uri.encodeComponent(name)}/download';
+
+  static String cloudNasDelete(String name) =>
+      '$_base/api/v1/cloud/nas/files/${Uri.encodeComponent(name)}';
+
   // Auth
   static String get login => '$_base/api/v1/auth/login';
   static String get register => '$_base/api/v1/auth/register';

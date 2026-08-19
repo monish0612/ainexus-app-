@@ -26,12 +26,23 @@ class StatsLauncher extends StatefulWidget {
 
 class _StatsLauncherState extends State<StatsLauncher>
     with SingleTickerProviderStateMixin {
-  late final AnimationController _controller = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 360),
-  );
+  // Built in initState, not lazily at first use. A `late final` initialiser
+  // would not have run at all for someone who opened the Cloud tab and left
+  // without tapping Stats — and dispose() touching it then *creates* the
+  // controller, which asks a deactivated element for its TickerMode ancestor
+  // and throws on the way out of a screen that did nothing wrong.
+  late final AnimationController _controller;
 
   bool _open = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 360),
+    );
+  }
 
   @override
   void dispose() {

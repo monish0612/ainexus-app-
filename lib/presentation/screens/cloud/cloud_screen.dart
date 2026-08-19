@@ -15,9 +15,13 @@ import '../../../core/services/telegram_logger.dart';
 import '../../../core/services/transfer_notification.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../data/services/google_drive_service.dart';
+import '../../../data/services/nas_files_service.dart';
+import '../../../domain/entities/nas_file.dart';
+import '../../providers/cloud_destination_provider.dart';
 import '../../widgets/compact_header.dart';
 import '../settings/settings_modal.dart';
 import 'stats/widgets/stats_launcher.dart';
+import 'widgets/destination_switch.dart';
 
 // ── UI Models ────────────────────────────────────────────────────────────────
 
@@ -51,6 +55,36 @@ class CloudFileItem {
       kind: _kindFromExt(ext),
       thumbnailLink: info.thumbnailLink,
       isImage: info.isImage,
+    );
+  }
+
+  /// A file on the NAS, in the shape the file list already understands.
+  ///
+  /// The id is the name, because on a WebDAV share that is genuinely what
+  /// identifies a file — there is no opaque handle to carry around. It also
+  /// means a file renamed on the share from a laptop is a different file to
+  /// this list, which is the truth rather than a bug.
+  ///
+  /// `starred` is always false: the NAS has nowhere to record a star, and a
+  /// star that silently forgot itself on the next refresh would be worse than
+  /// no star at all. The UI hides the control for NAS files rather than
+  /// offering one that does nothing.
+  factory CloudFileItem.fromNasFile(NasFile info) {
+    final ext = info.ext;
+    return CloudFileItem(
+      id: info.name,
+      name: info.name,
+      sizeBytes: info.sizeBytes,
+      ext: ext,
+      // A NAS listing can omit the timestamp; say so rather than dating the
+      // file to now, which would sort and read as a fresh upload.
+      dateLabel: info.modified == null
+          ? 'Date unknown'
+          : _formatDateLabel(info.modified!),
+      starred: false,
+      kind: _kindFromExt(ext),
+      isImage: const {'jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'bmp'}
+          .contains(ext),
     );
   }
 
@@ -366,6 +400,14 @@ class _CloudScreenState extends ConsumerState<CloudScreen>
   }
 
   Future<void> _performSearch(String query) async {
+    // The NAS folder is already fully in memory — a PROPFIND returns all of it
+    // — so searching it is a filter, not a round trip. The filter is applied at
+    // render time from `_searchQuery`; there is nothing to fetch.
+    if (_destination == CloudDestination.nas) {
+      setState(() => _isSearching = false);
+      return;
+    }
+
     setState(() {
       _isSearching = true;
       _error = null;
@@ -413,7 +455,73 @@ class _CloudScreenState extends ConsumerState<CloudScreen>
     }
   }
 
+  /// Where this screen is currently pointed. Read rather than watched in the
+  /// async paths so a switch mid-flight cannot make a reply land in the wrong
+  /// list — each load captures the destination it was started for and drops its
+  /// result if that is no longer the destination on screen.
+  CloudDestination get _destination => ref.read(cloudDestinationProvider);
+
   Future<void> _loadFiles() async {
+    if (_destination == CloudDestination.nas) return _loadNasFiles();
+    return _loadDriveFiles();
+  }
+
+  /// Everything in the NAS `Cloud Storage` folder.
+  ///
+  /// No pagination and no server-side search: a WebDAV PROPFIND returns the
+  /// folder in one reply, and this folder holds what a phone has put in it, not
+  /// a Drive-sized archive. Paginating it would be machinery with nothing to do.
+  Future<void> _loadNasFiles() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+      _nextPageToken = null;
+    });
+
+    // Refreshing the list is also the cheapest moment to re-check whether the
+    // NAS came back, which keeps the switch honest without a second poll.
+    unawaited(ref.read(nasAvailabilityProvider.notifier).refresh());
+
+    try {
+      final files = await ref.read(nasFilesServiceProvider).listFiles();
+      if (!mounted || _destination != CloudDestination.nas) return;
+      setState(() {
+        _files = files.map(CloudFileItem.fromNasFile).toList();
+        _loading = false;
+        _addHistory(HistoryActionKind.sync, 'Synced with NAS',
+            '${files.length} file${files.length == 1 ? '' : 's'} loaded');
+      });
+    } on NasUnavailable catch (e) {
+      if (!mounted || _destination != CloudDestination.nas) return;
+      setState(() {
+        _loading = false;
+        _files = [];
+        _error = e.message;
+        _errorDetail = e.isNotConfigured
+            ? 'Set NAS_WEBDAV_PASSWORD on the server to a Nextcloud app '
+                'password. Google Drive is unaffected.'
+            : 'Switch the NAS on and pull down to refresh. You can also '
+                'switch back to Google Drive above.';
+        _errorTitle =
+            e.isNotConfigured ? 'NAS Not Set Up' : 'NAS Not Reachable';
+        _errorIcon =
+            e.isNotConfigured ? LucideIcons.lock : LucideIcons.powerOff;
+      });
+    } catch (e) {
+      TLog.e('Cloud/NAS', 'Load NAS files failed', error: e);
+      if (!mounted || _destination != CloudDestination.nas) return;
+      setState(() {
+        _loading = false;
+        _files = [];
+        _error = 'Could not read the NAS folder.';
+        _errorDetail = null;
+        _errorTitle = 'Something Went Wrong';
+        _errorIcon = LucideIcons.alertTriangle;
+      });
+    }
+  }
+
+  Future<void> _loadDriveFiles() async {
     setState(() {
       _loading = true;
       _error = null;
@@ -430,7 +538,7 @@ class _CloudScreenState extends ConsumerState<CloudScreen>
       final fileResult = results[0] as DriveFileListResult;
       final quota = results[1] as DriveStorageQuota;
 
-      if (!mounted) return;
+      if (!mounted || _destination != CloudDestination.drive) return;
       setState(() {
         _files = fileResult.files
             .map((f) => CloudFileItem.fromDriveInfo(f))
@@ -493,11 +601,13 @@ class _CloudScreenState extends ConsumerState<CloudScreen>
   }
 
   Future<void> _openUploadFlow() async {
+    final destination = _destination;
+
     if (!PlatformCapabilities.canUseGoogleDrive) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
-            'Google Drive sync is coming soon on the web. Use the Android app for now.',
+            'Uploading is coming soon on the web. Use the Android app for now.',
           ),
         ),
       );
@@ -506,6 +616,23 @@ class _CloudScreenState extends ConsumerState<CloudScreen>
     if (_hasActiveTransfer) {
       _showTransferBusySnack();
       return;
+    }
+
+    // Refuse before the file picker rather than after, so he is not asked to
+    // choose a file that has nowhere to go.
+    if (destination == CloudDestination.nas) {
+      final nas = ref.read(nasAvailabilityProvider);
+      if (!nas.isReady && nas.state != NasStorageState.unknown) {
+        ScaffoldMessenger.of(context)
+          ..clearSnackBars()
+          ..showSnackBar(SnackBar(
+            content: Text(
+              'Cannot upload to the NAS: ${nas.explanation.toLowerCase()}',
+              style: GoogleFonts.plusJakartaSans(fontSize: 13),
+            ),
+          ));
+        return;
+      }
     }
 
     final result = await FilePicker.platform.pickFiles(allowMultiple: true);
@@ -518,15 +645,21 @@ class _CloudScreenState extends ConsumerState<CloudScreen>
     final totalBytes =
         validPicks.fold<int>(0, (sum, f) => sum + f.size);
 
-    if (totalBytes > GoogleDriveService.maxUploadBytes) {
-      _showSizeExceededError(totalBytes, validPicks.length);
-      return;
-    }
-
-    for (final picked in validPicks) {
-      if (picked.size > GoogleDriveService.maxUploadBytes) {
-        _showSizeExceededError(picked.size, 1, fileName: picked.name);
+    // The 10 GB ceiling is Google's, so it is only enforced for Google. The NAS
+    // is bounded by the free space in its own pool, and the server answers 507
+    // with a real explanation when that runs out — a better answer than an
+    // invented app-side limit that would be wrong the moment a disk is added.
+    if (destination == CloudDestination.drive) {
+      if (totalBytes > GoogleDriveService.maxUploadBytes) {
+        _showSizeExceededError(totalBytes, validPicks.length);
         return;
+      }
+
+      for (final picked in validPicks) {
+        if (picked.size > GoogleDriveService.maxUploadBytes) {
+          _showSizeExceededError(picked.size, 1, fileName: picked.name);
+          return;
+        }
       }
     }
 
@@ -732,6 +865,33 @@ class _CloudScreenState extends ConsumerState<CloudScreen>
     );
   }
 
+  /// Send one file to whichever destination is selected.
+  ///
+  /// The single place the two upload paths diverge. Both report progress the
+  /// same way and both return the finished row, so everything around them —
+  /// the sheet, the notification, the cancel handling, the history entry — is
+  /// shared rather than written twice and drifting apart.
+  Future<CloudFileItem> _uploadOne(
+    File file,
+    CloudDestination destination, {
+    required void Function(int sent, int total) onProgress,
+  }) async {
+    if (destination == CloudDestination.nas) {
+      final uploaded = await ref.read(nasFilesServiceProvider).uploadFile(
+            file,
+            cancelToken: _activeCancelToken,
+            onProgress: onProgress,
+          );
+      return CloudFileItem.fromNasFile(uploaded);
+    }
+    final uploaded = await ref.read(googleDriveServiceProvider).uploadFile(
+          file,
+          cancelToken: _activeCancelToken,
+          onProgress: onProgress,
+        );
+    return CloudFileItem.fromDriveInfo(uploaded);
+  }
+
   Future<void> _doUpload(
     File realFile,
     CloudFileItem tempItem,
@@ -742,11 +902,11 @@ class _CloudScreenState extends ConsumerState<CloudScreen>
       title: 'Uploading ${tempItem.name}',
       body: 'Preparing upload…',
     );
+    final destination = _destination;
     try {
-      final driveService = ref.read(googleDriveServiceProvider);
-      final uploaded = await driveService.uploadFile(
+      final newItem = await _uploadOne(
         realFile,
-        cancelToken: _activeCancelToken,
+        destination,
         onProgress: (sent, total) {
           notifier.value = _TransferProgress(
             fraction: total > 0 ? sent / total : 0,
@@ -764,11 +924,10 @@ class _CloudScreenState extends ConsumerState<CloudScreen>
 
       if (!mounted) return;
 
-      final newItem = CloudFileItem.fromDriveInfo(uploaded);
       setState(() {
         _files = _files.map((f) => f.id == tempItem.id ? newItem : f).toList();
-        _addHistory(
-            HistoryActionKind.upload, 'Uploaded to Drive', newItem.name);
+        _addHistory(HistoryActionKind.upload,
+            'Uploaded to ${destination.label}', newItem.name);
       });
 
       notifier.value = _TransferProgress(
@@ -780,7 +939,7 @@ class _CloudScreenState extends ConsumerState<CloudScreen>
       _finishTransfer();
       tn.complete(
         title: 'Upload complete',
-        body: '${newItem.name} uploaded to Drive',
+        body: '${newItem.name} uploaded to ${destination.label}',
       );
     } on DioException catch (e) {
       if (e.type == DioExceptionType.cancel) {
@@ -880,6 +1039,9 @@ class _CloudScreenState extends ConsumerState<CloudScreen>
     var completedBytes = 0;
     var successCount = 0;
     var failCount = 0;
+    // Captured once, before the loop: a batch of twenty files must all land in
+    // the same place even if the switch is tapped while it is running.
+    final destination = _destination;
 
     for (var i = 0; i < pairs.length; i++) {
       if (_activeCancelToken?.isCancelled == true) break;
@@ -897,10 +1059,9 @@ class _CloudScreenState extends ConsumerState<CloudScreen>
       );
 
       try {
-        final driveService = ref.read(googleDriveServiceProvider);
-        final uploaded = await driveService.uploadFile(
+        final newItem = await _uploadOne(
           realFile,
-          cancelToken: _activeCancelToken,
+          destination,
           onProgress: (sent, total) {
             final overallSent = completedBytes + sent;
             notifier.value = _TransferProgress(
@@ -924,12 +1085,11 @@ class _CloudScreenState extends ConsumerState<CloudScreen>
 
         if (!mounted) return;
 
-        final newItem = CloudFileItem.fromDriveInfo(uploaded);
         setState(() {
           _files =
               _files.map((f) => f.id == tempItem.id ? newItem : f).toList();
-          _addHistory(
-              HistoryActionKind.upload, 'Uploaded to Drive', newItem.name);
+          _addHistory(HistoryActionKind.upload,
+              'Uploaded to ${destination.label}', newItem.name);
         });
 
         completedBytes += fileBytes;
@@ -1035,27 +1195,37 @@ class _CloudScreenState extends ConsumerState<CloudScreen>
       title: 'Downloading ${file.name}',
       body: 'Preparing download…',
     );
+    final destination = _destination;
     try {
-      final driveService = ref.read(googleDriveServiceProvider);
-      await driveService.downloadFile(
-        file.id,
-        file.name,
-        cancelToken: _activeCancelToken,
-        onProgress: (received, total) {
-          final t = total > 0 ? total : file.sizeBytes;
-          notifier.value = _TransferProgress(
-            fraction: t > 0 ? received / t : 0,
-            transferred: received,
-            total: t,
-          );
-          final pct = t > 0 ? (received * 100 / t).round() : 0;
-          tn.show(
-            title: 'Downloading ${file.name}',
-            body: '${_fmtBytes(received)} / ${_fmtBytes(t)} · $pct%',
-            pct: pct,
-          );
-        },
-      );
+      void report(int received, int total) {
+        final t = total > 0 ? total : file.sizeBytes;
+        notifier.value = _TransferProgress(
+          fraction: t > 0 ? received / t : 0,
+          transferred: received,
+          total: t,
+        );
+        final pct = t > 0 ? (received * 100 / t).round() : 0;
+        tn.show(
+          title: 'Downloading ${file.name}',
+          body: '${_fmtBytes(received)} / ${_fmtBytes(t)} · $pct%',
+          pct: pct,
+        );
+      }
+
+      if (destination == CloudDestination.nas) {
+        await ref.read(nasFilesServiceProvider).downloadFile(
+              file.name,
+              cancelToken: _activeCancelToken,
+              onProgress: report,
+            );
+      } else {
+        await ref.read(googleDriveServiceProvider).downloadFile(
+              file.id,
+              file.name,
+              cancelToken: _activeCancelToken,
+              onProgress: report,
+            );
+      }
 
       if (!mounted) return;
       setState(() {
@@ -1120,7 +1290,7 @@ class _CloudScreenState extends ConsumerState<CloudScreen>
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
-            'Google Drive sync is coming soon on the web. Use the Android app for now.',
+            'Downloading is coming soon on the web. Use the Android app for now.',
           ),
         ),
       );
@@ -1149,6 +1319,11 @@ class _CloudScreenState extends ConsumerState<CloudScreen>
   }
 
   Future<void> _toggleStar(String id) async {
+    // A WebDAV share has nowhere to record a star. The control is hidden for
+    // NAS files, so this is only reachable via a stale callback — refusing is
+    // better than lighting a star that the next refresh silently puts out.
+    if (_destination == CloudDestination.nas) return;
+
     final idx = _files.indexWhere((f) => f.id == id);
     if (idx < 0) return;
     final file = _files[idx];
@@ -1176,16 +1351,24 @@ class _CloudScreenState extends ConsumerState<CloudScreen>
     final idx = _files.indexWhere((f) => f.id == id);
     if (idx < 0) return;
     final file = _files[idx];
+    final destination = _destination;
     setState(() {
       _files = _files.where((f) => f.id != id).toList();
-      _addHistory(HistoryActionKind.delete, 'Removed from cloud', file.name);
+      _addHistory(HistoryActionKind.delete,
+          'Removed from ${destination.label}', file.name);
     });
     try {
-      final driveService = ref.read(googleDriveServiceProvider);
-      await driveService.deleteFile(id);
+      if (destination == CloudDestination.nas) {
+        await ref.read(nasFilesServiceProvider).deleteFile(file.name);
+      } else {
+        await ref.read(googleDriveServiceProvider).deleteFile(id);
+      }
     } catch (e) {
       TLog.e('Cloud', 'Delete file failed for $id', error: e);
       if (!mounted) return;
+      // The row was removed optimistically; reloading puts it back if the
+      // delete did not actually happen, rather than leaving the list claiming
+      // a file is gone when it is still on the share.
       _loadFiles();
     }
   }
@@ -1271,7 +1454,18 @@ class _CloudScreenState extends ConsumerState<CloudScreen>
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).extension<AppColors>()!;
-    final filtered = _files.where((f) => _matchesFilter(f, _filter)).toList();
+    final view = ref.watch(cloudDestinationViewProvider);
+    final isNas = view.isNas;
+
+    var filtered = _files.where((f) => _matchesFilter(f, _filter)).toList();
+    // Drive filters server-side via a query; the NAS folder arrives whole, so
+    // its search is applied here.
+    if (isNas && _searchQuery.isNotEmpty) {
+      final needle = _searchQuery.toLowerCase();
+      filtered = filtered
+          .where((f) => f.name.toLowerCase().contains(needle))
+          .toList();
+    }
     final pctUsed = _totalGb > 0 ? (_usedGb / _totalGb * 100).round() : 0;
 
     return Column(
@@ -1283,6 +1477,10 @@ class _CloudScreenState extends ConsumerState<CloudScreen>
         // Above the TabBar rather than inside a tab, so it stays reachable from
         // both Files and History instead of scrolling away with the file list.
         const StatsLauncher(),
+        // Pinned above the tabs, never in a menu. The whole point is that the
+        // answer to "where is this about to go?" is on screen at the instant
+        // the upload button is tapped, without having to remember it.
+        DestinationSwitch(onChanged: (_) => _loadFiles()),
         Container(
           decoration: BoxDecoration(
             color: colors.headerBg,
@@ -1324,6 +1522,8 @@ class _CloudScreenState extends ConsumerState<CloudScreen>
                         )
                       : _FilesTab(
                           colors: colors,
+                          destination: view.selected,
+                          nasRoot: view.nas.root,
                           usedFraction: _totalGb > 0 ? _usedGb / _totalGb : 0,
                           usedGb: _usedGb,
                           totalGb: _totalGb,
@@ -1575,6 +1775,8 @@ class _ActiveTransferBanner extends StatelessWidget {
 class _FilesTab extends StatelessWidget {
   const _FilesTab({
     required this.colors,
+    required this.destination,
+    required this.nasRoot,
     required this.usedFraction,
     required this.usedGb,
     required this.totalGb,
@@ -1597,6 +1799,8 @@ class _FilesTab extends StatelessWidget {
   });
 
   final AppColors colors;
+  final CloudDestination destination;
+  final String nasRoot;
   final double usedFraction;
   final double usedGb;
   final double totalGb;
@@ -1616,6 +1820,8 @@ class _FilesTab extends StatelessWidget {
   final bool hasMore;
   final bool loadingMore;
   final VoidCallback onLoadMore;
+
+  bool get _isNas => destination == CloudDestination.nas;
 
   @override
   Widget build(BuildContext context) {
@@ -1637,15 +1843,26 @@ class _FilesTab extends StatelessWidget {
           child: ListView(
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
             children: [
-              _StorageCapacityCard(
+              // Drive's quota card is Drive's. The NAS has 275 GB of pool free
+              // and no per-user quota, so showing a ring against a 15 GB limit
+              // there would be a made-up number — the real figure belongs to
+              // the Stats dashboard, which measures it properly.
+              if (!_isNas) ...[
+                _StorageCapacityCard(
+                  colors: colors,
+                  usedFraction: usedFraction,
+                  usedGb: usedGb,
+                  totalGb: totalGb,
+                  pctUsed: pctUsed,
+                ),
+                const SizedBox(height: 14),
+              ],
+              _UploadZone(
                 colors: colors,
-                usedFraction: usedFraction,
-                usedGb: usedGb,
-                totalGb: totalGb,
-                pctUsed: pctUsed,
+                onTap: onUploadTap,
+                destination: destination,
+                nasRoot: nasRoot,
               ),
-              const SizedBox(height: 14),
-              _UploadZone(colors: colors, onTap: onUploadTap),
               const SizedBox(height: 14),
               _SearchBar(
                 colors: colors,
@@ -1667,7 +1884,16 @@ class _FilesTab extends StatelessWidget {
                     child: Text(
                       searchController.text.isNotEmpty
                           ? 'No files found for "${searchController.text}"'
-                          : 'No files match this filter',
+                          : filter != FileFilter.all
+                              ? 'No files match this filter'
+                              // Naming the destination matters most here: an
+                              // empty list is exactly what someone sees after
+                              // uploading to the other one and looking in the
+                              // wrong place.
+                              : _isNas
+                                  ? 'Nothing in ${nasRoot.isEmpty ? 'the NAS folder' : nasRoot} yet'
+                                  : 'Nothing in Google Drive yet',
+                      textAlign: TextAlign.center,
                       style: GoogleFonts.plusJakartaSans(
                           color: colors.text4, fontSize: 14),
                     ),
@@ -1679,8 +1905,11 @@ class _FilesTab extends StatelessWidget {
                       child: _FileRow(
                         file: f,
                         colors: colors,
+                        // Starring is a Drive concept. There is nowhere on a
+                        // WebDAV share to keep it, so the control is absent
+                        // rather than present and inert.
+                        onStar: _isNas ? null : () => onToggleStar(f.id),
                         onDownload: () => onDownload(f),
-                        onStar: () => onToggleStar(f.id),
                         onDelete: () => onDelete(f.id),
                         onLongPress: () => onLongPress(f),
                       ),
@@ -1794,9 +2023,16 @@ class _StorageCapacityCard extends StatelessWidget {
 // ── Upload zone ──────────────────────────────────────────────────────────────
 
 class _UploadZone extends StatefulWidget {
-  const _UploadZone({required this.colors, required this.onTap});
+  const _UploadZone({
+    required this.colors,
+    required this.onTap,
+    required this.destination,
+    required this.nasRoot,
+  });
   final AppColors colors;
   final VoidCallback onTap;
+  final CloudDestination destination;
+  final String nasRoot;
 
   @override
   State<_UploadZone> createState() => _UploadZoneState();
@@ -1809,6 +2045,13 @@ class _UploadZoneState extends State<_UploadZone> {
   Widget build(BuildContext context) {
     final c = widget.colors;
     final cyan = AppColors.accentCyan.withValues(alpha: 0.45);
+    final isNas = widget.destination == CloudDestination.nas;
+    // Named on the button itself, not only on the switch above it. This is the
+    // control the finger is actually on, and it is the last thing read before
+    // the file picker takes over the screen.
+    final target = isNas
+        ? (widget.nasRoot.isEmpty ? 'the NAS' : widget.nasRoot)
+        : 'Google Drive';
     return GestureDetector(
       onTapDown: (_) => setState(() => _scale = 0.98),
       onTapUp: (_) => setState(() => _scale = 1),
@@ -1827,15 +2070,26 @@ class _UploadZoneState extends State<_UploadZone> {
               color: AppColors.accentCyan.withValues(alpha: 0.04),
             ),
             child: Column(children: [
-              const Icon(LucideIcons.uploadCloud, size: 40,
-                  color: AppColors.accentCyan),
+              Icon(isNas ? LucideIcons.hardDrive : LucideIcons.uploadCloud,
+                  size: 40, color: AppColors.accentCyan),
               const SizedBox(height: 12),
-              Text('Tap to upload files to Google Drive',
-                  textAlign: TextAlign.center,
-                  style: GoogleFonts.plusJakartaSans(
-                      color: c.text, fontSize: 16, fontWeight: FontWeight.w600)),
+              // Cross-faded rather than swapped, so flipping the switch reads
+              // as this control changing its mind about where it points.
+              AnimatedSwitcher(
+                duration: const Duration(milliseconds: 220),
+                child: Text('Tap to upload files to $target',
+                    key: ValueKey(target),
+                    textAlign: TextAlign.center,
+                    style: GoogleFonts.plusJakartaSans(
+                        color: c.text,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600)),
+              ),
               const SizedBox(height: 6),
-              Text('PDF, DOCX, XLSX, JPG, PNG, MP4, ZIP',
+              Text(
+                  isNas
+                      ? 'Any file type · stored on your own hardware'
+                      : 'PDF, DOCX, XLSX, JPG, PNG, MP4, ZIP',
                   textAlign: TextAlign.center,
                   style: GoogleFonts.plusJakartaSans(
                       color: c.text3, fontSize: 12)),
@@ -2060,7 +2314,11 @@ class _FileRow extends StatelessWidget {
   final CloudFileItem file;
   final AppColors colors;
   final VoidCallback onDownload;
-  final VoidCallback onStar;
+
+  /// Null where starring has nowhere to be stored — the button is then left
+  /// out rather than shown disabled, because a greyed star invites a tap that
+  /// will never do anything.
+  final VoidCallback? onStar;
   final VoidCallback onDelete;
   final VoidCallback onLongPress;
 
@@ -2119,14 +2377,15 @@ class _FileRow extends StatelessWidget {
                   ],
                 ),
               ),
-              IconButton(
-                visualDensity: VisualDensity.compact,
-                onPressed: onStar,
-                icon: Icon(LucideIcons.star, size: 20,
-                    color: file.starred
-                        ? const Color(0xFFFBBF24) : colors.text4,
-                    fill: file.starred ? 1 : 0),
-              ),
+              if (onStar != null)
+                IconButton(
+                  visualDensity: VisualDensity.compact,
+                  onPressed: onStar,
+                  icon: Icon(LucideIcons.star, size: 20,
+                      color: file.starred
+                          ? const Color(0xFFFBBF24) : colors.text4,
+                      fill: file.starred ? 1 : 0),
+                ),
               IconButton(
                 visualDensity: VisualDensity.compact,
                 onPressed: onDownload,
