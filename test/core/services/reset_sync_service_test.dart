@@ -51,7 +51,7 @@ class _DeviceApi extends ApiClient {
 
   @override
   Future<Response<T>> get<T>(String path,
-      {Map<String, dynamic>? queryParameters}) async {
+      {Map<String, dynamic>? queryParameters, CancelToken? cancelToken}) async {
     if (backend.offline) _offline(path);
     if (path.contains('data-reset')) return _ok<T>(path, backend.state);
     return _ok<T>(path, const <dynamic>[]);

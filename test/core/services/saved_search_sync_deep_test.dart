@@ -293,7 +293,7 @@ class _Api extends ApiClient {
 
   @override
   Future<Response<T>> get<T>(String path,
-      {Map<String, dynamic>? queryParameters}) async {
+      {Map<String, dynamic>? queryParameters, CancelToken? cancelToken}) async {
     final body = _b.handle('GET', _strip(path));
     return Response<T>(
       requestOptions: RequestOptions(path: path),

@@ -36,7 +36,7 @@ class _SyncFakeApi extends ApiClient {
 
   @override
   Future<Response<T>> get<T>(String path,
-      {Map<String, dynamic>? queryParameters}) async {
+      {Map<String, dynamic>? queryParameters, CancelToken? cancelToken}) async {
     if (path.endsWith('/expenses')) {
       return _r<T>(path, List<Map<String, dynamic>>.from(serverExpenses));
     }

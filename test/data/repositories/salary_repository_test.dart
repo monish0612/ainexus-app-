@@ -28,7 +28,7 @@ class _FakeApi extends ApiClient {
 
   @override
   Future<Response<T>> get<T>(String path,
-      {Map<String, dynamic>? queryParameters}) async {
+      {Map<String, dynamic>? queryParameters, CancelToken? cancelToken}) async {
     calls.add('GET $path');
     return _resp<T>(path, getResponse ?? <dynamic>[]);
   }

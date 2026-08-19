@@ -44,7 +44,7 @@ class _FakeApi extends ApiClient {
 
   @override
   Future<Response<T>> get<T>(String path,
-      {Map<String, dynamic>? queryParameters}) async {
+      {Map<String, dynamic>? queryParameters, CancelToken? cancelToken}) async {
     calls.add('GET $path');
     if (path.contains('/saved-words/tombstones')) {
       if (tombstones404) throw _dioErr(path, 404);

@@ -75,6 +75,18 @@ abstract final class ApiEndpoints {
   /// can talk to Drive directly without embedding the service-account key.
   static String get cloudDriveToken => '$_base/api/v1/cloud/token';
 
+  /// Live NAS + VPS metrics for the Stats dashboard.
+  ///
+  /// Nothing to do with Google Drive — it shares the `/cloud` prefix only
+  /// because Stats lives under the Cloud tab. The API proxies this from
+  /// `nas-status.py` on the home NAS over WireGuard, so the phone never holds
+  /// the NAS token and needs no extra hostname or certificate.
+  ///
+  /// Always answers 200. `online: false` means the NAS is off, which the
+  /// dashboard renders as a dull zeroed screen; a Dio error means the *phone*
+  /// could not reach the API, which is a different message to the user.
+  static String get cloudStats => '$_base/api/v1/cloud/stats';
+
   // Auth
   static String get login => '$_base/api/v1/auth/login';
   static String get register => '$_base/api/v1/auth/register';

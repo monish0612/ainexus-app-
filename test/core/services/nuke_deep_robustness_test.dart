@@ -71,7 +71,7 @@ class _ProgApi extends ApiClient {
 
   @override
   Future<Response<T>> get<T>(String path,
-      {Map<String, dynamic>? queryParameters}) async {
+      {Map<String, dynamic>? queryParameters, CancelToken? cancelToken}) async {
     final n = _bump('GET', path);
     if (failRule?.call('GET', path, n) ?? false) _offline(path);
     return _ok<T>(path, getResponder?.call(path) ?? const <dynamic>[]);

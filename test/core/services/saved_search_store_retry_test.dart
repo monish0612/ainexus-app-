@@ -57,7 +57,7 @@ class _FakeApiClient extends ApiClient {
 
   @override
   Future<Response<T>> get<T>(String path,
-      {Map<String, dynamic>? queryParameters}) async {
+      {Map<String, dynamic>? queryParameters, CancelToken? cancelToken}) async {
     calls.add(_FakeCall('GET', path, null));
     // Background sync pulls always succeed with an empty index/tombstone list.
     return Response<T>(

@@ -246,7 +246,7 @@ class _BackedApi extends ApiClient {
 
   @override
   Future<Response<T>> get<T>(String path,
-      {Map<String, dynamic>? queryParameters}) async {
+      {Map<String, dynamic>? queryParameters, CancelToken? cancelToken}) async {
     return Response<T>(
         requestOptions: RequestOptions(path: path),
         statusCode: 200,

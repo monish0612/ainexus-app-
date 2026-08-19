@@ -17,6 +17,7 @@ import '../../../core/theme/app_colors.dart';
 import '../../../data/services/google_drive_service.dart';
 import '../../widgets/compact_header.dart';
 import '../settings/settings_modal.dart';
+import 'stats/widgets/stats_launcher.dart';
 
 // ── UI Models ────────────────────────────────────────────────────────────────
 
@@ -1279,6 +1280,9 @@ class _CloudScreenState extends ConsumerState<CloudScreen>
           title: 'Cloud',
           onAvatarTap: () => showSettingsModal(context, ref),
         ),
+        // Above the TabBar rather than inside a tab, so it stays reachable from
+        // both Files and History instead of scrolling away with the file list.
+        const StatsLauncher(),
         Container(
           decoration: BoxDecoration(
             color: colors.headerBg,

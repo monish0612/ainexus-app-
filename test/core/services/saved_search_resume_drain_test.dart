@@ -78,7 +78,7 @@ class _ProgrammableApi extends ApiClient {
 
   @override
   Future<Response<T>> get<T>(String path,
-      {Map<String, dynamic>? queryParameters}) =>
+      {Map<String, dynamic>? queryParameters, CancelToken? cancelToken}) =>
       _serve<T>('GET', path, null);
 
   @override
