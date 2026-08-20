@@ -184,6 +184,9 @@ class NasStatsController extends StateNotifier<NasStatsState>
   Future<void> _tick() async {
     if (_disposed) return;
 
+    // A resume or Retry tap must not leave the previous hop running: two
+    // overlapping fetches would fight over state and double the NAS load.
+    _inFlight?.cancel('superseded');
     final token = CancelToken();
     _inFlight = token;
     try {
@@ -192,9 +195,11 @@ class NasStatsController extends StateNotifier<NasStatsState>
       _onEnvelope(envelope);
     } on NasStatsUnavailable catch (e) {
       if (_disposed) return;
+      if (token.isCancelled) return;
       _onTransportFailure(e);
     } catch (e, st) {
       if (_disposed) return;
+      if (token.isCancelled) return;
       // Never let an unexpected parse bug end the poll loop: the screen would
       // freeze on stale figures with no indication it had stopped updating.
       TLog.e(_tag, 'Unexpected failure while polling', error: e, st: st);
@@ -205,6 +210,7 @@ class NasStatsController extends StateNotifier<NasStatsState>
       if (identical(_inFlight, token)) _inFlight = null;
     }
 
+    if (_disposed || token.isCancelled) return;
     _scheduleNext();
   }
 
@@ -225,7 +231,7 @@ class NasStatsController extends StateNotifier<NasStatsState>
       phoneOffline: null,
       live: appendLiveSample(
         state.live,
-        LiveStatSample.fromEnvelope(envelope, DateTime.now()),
+        LiveStatSample.fromEnvelope(envelope, _sampleTime(envelope)),
       ),
     );
 
@@ -309,6 +315,14 @@ class NasStatsController extends StateNotifier<NasStatsState>
     return ms >= maxBackoff.inMilliseconds
         ? maxBackoff
         : Duration(milliseconds: ms);
+  }
+
+  /// Prefer the envelope's own clock so a cached reply in the same second
+  /// replaces the last sparkline point instead of plotting a twin.
+  static DateTime _sampleTime(NasStatsEnvelope envelope) {
+    final at = envelope.at;
+    if (at == null) return DateTime.now();
+    return DateTime.fromMillisecondsSinceEpoch(at * 1000, isUtc: true).toLocal();
   }
 
   Duration get nextDelay => backoffFor(state.consecutiveFailures);

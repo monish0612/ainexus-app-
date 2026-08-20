@@ -27,11 +27,24 @@ class _StatDetailScreenState extends ConsumerState<StatDetailScreen> {
   StatsHistoryEnvelope? _history;
   bool _loadingHistory = false;
   Object? _historyError;
+  int _historyGen = 0;
 
   StatMetric get _metric => widget.metric;
 
+  @override
+  void didUpdateWidget(covariant StatDetailScreen old) {
+    super.didUpdateWidget(old);
+    if (old.metric == widget.metric) return;
+    _historyGen++;
+    _range = StatsHistoryRange.now;
+    _history = null;
+    _historyError = null;
+    _loadingHistory = false;
+  }
+
   Future<void> _loadHistory(StatsHistoryRange range) async {
     if (range == StatsHistoryRange.now) {
+      _historyGen++;
       setState(() {
         _range = range;
         _historyError = null;
@@ -39,6 +52,7 @@ class _StatDetailScreenState extends ConsumerState<StatDetailScreen> {
       });
       return;
     }
+    final gen = ++_historyGen;
     setState(() {
       _range = range;
       _loadingHistory = true;
@@ -49,13 +63,13 @@ class _StatDetailScreenState extends ConsumerState<StatDetailScreen> {
             range,
             metric: _metric,
           );
-      if (!mounted) return;
+      if (!mounted || gen != _historyGen) return;
       setState(() {
         _history = env;
         _loadingHistory = false;
       });
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted || gen != _historyGen) return;
       setState(() {
         _history = StatsHistoryEnvelope.empty(range);
         _historyError = e;

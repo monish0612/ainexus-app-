@@ -205,8 +205,15 @@ List<LiveStatSample> appendLiveSample(
   final kept = <LiveStatSample>[
     for (final p in prev)
       if (p.at.isAfter(cut) || p.at.isAtSameMomentAs(cut)) p,
-    next,
   ];
+  // Two polls landing in the same second (800ms cache, a retry, a resume)
+  // must replace the last point rather than drawing a flat twin.
+  if (kept.isNotEmpty &&
+      kept.last.at.difference(next.at).inMilliseconds.abs() < 500) {
+    kept[kept.length - 1] = next;
+  } else {
+    kept.add(next);
+  }
   if (kept.length <= cap) return List<LiveStatSample>.unmodifiable(kept);
   return List<LiveStatSample>.unmodifiable(kept.sublist(kept.length - cap));
 }

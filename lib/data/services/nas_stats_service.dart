@@ -28,11 +28,11 @@ class NasStatsUnavailable implements Exception {
 
 /// Fetches the NAS + VPS snapshot from `GET /api/v1/cloud/stats`.
 ///
-/// Deliberately thin. It does not retry, cache, or log: [ApiClient]'s retry
-/// interceptor already covers transient failures with backoff and jitter, and
-/// stacking a second retry layer under a 1-second poll would turn one slow
-/// response into a queue of overlapping requests. Caching lives on the server
-/// where one entry protects the NAS from every device at once. Telegram logging
+/// Deliberately thin. It does not cache or log. The 1-second poller owns
+/// recovery: a blip is the next tick, so this request opts out of the client's
+/// 3-retry / 30-second timeout stack — otherwise one hung hop freezes the
+/// gauges for the better part of a minute. Caching lives on the server where
+/// one entry protects the NAS from every device at once. Telegram logging
 /// lives in the controller, which is the only place that knows whether a
 /// failure is new or the twentieth in a row.
 class NasStatsService {
@@ -40,11 +40,24 @@ class NasStatsService {
 
   final ApiClient _api;
 
+  static final _pollOptions = Options(
+    extra: const {kNoRetry: true},
+    sendTimeout: const Duration(seconds: 4),
+    receiveTimeout: const Duration(seconds: 4),
+  );
+
+  static final _historyOptions = Options(
+    extra: const {kNoRetry: true},
+    sendTimeout: const Duration(seconds: 8),
+    receiveTimeout: const Duration(seconds: 8),
+  );
+
   Future<NasStatsEnvelope> fetch({CancelToken? cancelToken}) async {
     try {
-      final res = await _api.get<dynamic>(
+      final res = await _api.dio.get<dynamic>(
         ApiEndpoints.cloudStats,
         cancelToken: cancelToken,
+        options: _pollOptions,
       );
       final data = res.data;
       if (data is! Map) {
@@ -72,9 +85,10 @@ class NasStatsService {
       return StatsHistoryEnvelope.empty(range);
     }
     try {
-      final res = await _api.get<dynamic>(
+      final res = await _api.dio.get<dynamic>(
         ApiEndpoints.cloudStatsHistory(range.query),
         cancelToken: cancelToken,
+        options: _historyOptions,
       );
       final data = res.data;
       if (data is! Map) return StatsHistoryEnvelope.empty(range);

@@ -166,10 +166,10 @@ void main() {
             .having((e) => e.message, 'message', contains('No connection')),
       ),
     );
-    // ApiClient's interceptor already retries transient failures three times, so
-    // the controller must not add a fourth layer on top of a 2-second poll.
-    expect(t.adapter.calls, 4);
-  }, timeout: const Timeout(Duration(seconds: 30)));
+    // A 1-second poll opts out of the client's 3-retry stack: a blip is the
+    // next tick, not a 15-second freeze of the gauges.
+    expect(t.adapter.calls, 1);
+  });
 
   test('a body that is not an object is rejected rather than half-parsed',
       () async {
@@ -191,7 +191,8 @@ void main() {
       throwsA(isA<NasStatsUnavailable>()
           .having((e) => e.message, 'message', contains('took too long'))),
     );
-  }, timeout: const Timeout(Duration(seconds: 30)));
+    expect(t.adapter.calls, 1);
+  });
 
   test('a cancelled poll is distinguishable, so screen teardown is not an error',
       () async {

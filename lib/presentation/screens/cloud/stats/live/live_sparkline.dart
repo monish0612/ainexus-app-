@@ -41,13 +41,30 @@ class LiveSparkline extends StatelessWidget {
     ];
   }
 
+  static List<FlSpot> downsample(List<FlSpot> spots, {int max = 64}) {
+    if (spots.length <= max) return spots;
+    final last = spots.length - 1;
+    final step = last / (max - 1);
+    final out = <FlSpot>[];
+    var prev = -1;
+    for (var i = 0; i < max; i++) {
+      final idx = i == max - 1 ? last : (i * step).round();
+      if (idx == prev) continue;
+      out.add(spots[idx]);
+      prev = idx;
+    }
+    return out;
+  }
+
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).extension<AppColors>()!;
+    final plotted =
+        height >= 140 ? spots : downsample(spots);
     final active = color ??
-        (spots.isEmpty ? colors.text4 : FluidGauge.rampFor(spots.last.y));
+        (plotted.isEmpty ? colors.text4 : FluidGauge.rampFor(plotted.last.y));
 
-    if (spots.length < 2) {
+    if (plotted.length < 2) {
       return SizedBox(
         height: height,
         child: Center(
@@ -64,8 +81,8 @@ class LiveSparkline extends StatelessWidget {
       );
     }
 
-    final lastX = spots.last.x;
-    final minX = spots.first.x;
+    final lastX = plotted.last.x;
+    final minX = plotted.first.x;
 
     return SizedBox(
       height: height,
@@ -129,7 +146,7 @@ class LiveSparkline extends StatelessWidget {
           ),
           lineBarsData: [
             LineChartBarData(
-              spots: spots,
+              spots: plotted,
               isCurved: true,
               preventCurveOverShooting: true,
               color: active,
@@ -150,7 +167,12 @@ class LiveSparkline extends StatelessWidget {
             ),
           ],
         ),
-        duration: const Duration(milliseconds: 280),
+        // Compact dashboard charts update every second with ~180 points; a
+        // 280ms rebuild of the whole bezier is the jank. The enlarged view
+        // can afford a short ease because it is one series, full width.
+        duration: height >= 140
+            ? const Duration(milliseconds: 220)
+            : Duration.zero,
         curve: Curves.easeOutCubic,
       ),
     );

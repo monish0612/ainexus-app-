@@ -1,6 +1,8 @@
+import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:ai_nexus/domain/entities/nas_stats.dart';
+import 'package:ai_nexus/presentation/screens/cloud/stats/live/live_sparkline.dart';
 import 'package:ai_nexus/presentation/screens/cloud/stats/live/stat_metric.dart';
 
 void main() {
@@ -34,6 +36,27 @@ void main() {
     expect(many.length, 180);
     expect(many.first.nasCpu, 20);
     expect(many.last.nasCpu, 199);
+  });
+
+  test('two samples in the same second replace rather than twin', () {
+    final t0 = DateTime.utc(2026, 8, 20, 10);
+    var buf = appendLiveSample(const [], LiveStatSample(at: t0, nasCpu: 10));
+    buf = appendLiveSample(
+      buf,
+      LiveStatSample(at: t0.add(const Duration(milliseconds: 200)), nasCpu: 22),
+    );
+    expect(buf.length, 1);
+    expect(buf.single.nasCpu, 22);
+  });
+
+  test('downsample keeps the ends and stays under the cap', () {
+    final spots = [
+      for (var i = 0; i < 180; i++) FlSpot(i.toDouble(), i / 2),
+    ];
+    final out = LiveSparkline.downsample(spots, max: 60);
+    expect(out.length, lessThanOrEqualTo(60));
+    expect(out.first.x, 0);
+    expect(out.last.x, 179);
   });
 
   test('offline envelope records NAS zeros so the chart matches the gauges', () {
