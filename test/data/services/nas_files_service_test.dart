@@ -14,6 +14,7 @@
 // is itself a decent alarm.
 
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
@@ -52,6 +53,9 @@ class _ScriptedAdapter implements HttpClientAdapter {
   ) async {
     paths.add(options.path);
     methods.add(options.method);
+    if (requestStream != null) {
+      await requestStream.drain<void>();
+    }
     final reply = script[calls < script.length ? calls : script.length - 1];
     calls += 1;
 
@@ -351,6 +355,73 @@ void main() {
       expect(const NasFile(name: 'Makefile', sizeBytes: 1).ext, '');
       expect(const NasFile(name: '.', sizeBytes: 1).ext, '');
       expect(const NasFile(name: 'trailing.', sizeBytes: 1).ext, '');
+    });
+  });
+
+  group('upload routing', () {
+    late Directory tmp;
+
+    setUp(() => tmp = Directory.systemTemp.createTempSync('nas-up-'));
+    tearDown(() {
+      if (tmp.existsSync()) tmp.deleteSync(recursive: true);
+    });
+
+    File _file(String name, int bytes) {
+      final f = File('${tmp.path}${Platform.pathSeparator}$name');
+      f.writeAsBytesSync(List<int>.filled(bytes, 7));
+      return f;
+    }
+
+    test('a small file is a single multipart POST', () async {
+      final h = build([
+        _Reply.json(201, {
+          'file': {'name': 'note.txt'},
+        }),
+      ]);
+      final out = await h.service.uploadFile(_file('note.txt', 128));
+      expect(out.name, 'note.txt');
+      expect(h.adapter.methods, ['POST']);
+      expect(h.adapter.paths.single, contains('/nas/upload'));
+      expect(h.adapter.paths.single, isNot(contains('resumable')));
+    });
+
+    test('a file over 5 MB is sent in chunks, not as one 30-minute PUT',
+        () async {
+      final h = build([
+        _Reply.json(201, {
+          'uploadId': 'abc123',
+          'chunkSize': NasFilesService.chunkSize,
+        }),
+        _Reply.json(201, {
+          'done': true,
+          'file': {'name': 'clip.bin'},
+        }),
+      ]);
+      final size = NasFilesService.simpleThreshold;
+      final out = await h.service.uploadFile(_file('clip.bin', size));
+      expect(out.name, 'clip.bin');
+      expect(h.adapter.methods, ['POST', 'PUT']);
+      expect(h.adapter.paths[0], contains('/nas/upload/resumable/start'));
+      expect(h.adapter.paths[1], contains('/nas/upload/resumable/abc123'));
+    });
+
+    test('a two-chunk file puts twice and finishes on the second reply',
+        () async {
+      final h = build([
+        _Reply.json(201, {
+          'uploadId': 'id9',
+          'chunkSize': NasFilesService.chunkSize,
+        }),
+        _Reply.json(200, {'done': false, 'received': NasFilesService.chunkSize}),
+        _Reply.json(201, {
+          'done': true,
+          'file': {'name': 'film.mkv'},
+        }),
+      ]);
+      final size = NasFilesService.chunkSize + 1024;
+      final out = await h.service.uploadFile(_file('film.mkv', size));
+      expect(out.name, 'film.mkv');
+      expect(h.adapter.methods, ['POST', 'PUT', 'PUT']);
     });
   });
 }

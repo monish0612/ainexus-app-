@@ -87,6 +87,11 @@ abstract final class ApiEndpoints {
   /// could not reach the API, which is a different message to the user.
   static String get cloudStats => '$_base/api/v1/cloud/stats';
 
+  /// On-demand 7D / 30D series for the enlarged stat view. Always 200 on a
+  /// current server; the app treats 404 as "no history yet".
+  static String cloudStatsHistory(String range) =>
+      '$_base/api/v1/cloud/stats/history?range=${Uri.encodeQueryComponent(range)}';
+
   // ── The Cloud tab's other destination: the home NAS ──
   //
   // Same shape as the Drive routes above, aimed at a `Cloud Storage` folder on
@@ -101,6 +106,15 @@ abstract final class ApiEndpoints {
   static String get cloudNasFiles => '$_base/api/v1/cloud/nas/files';
 
   static String get cloudNasUpload => '$_base/api/v1/cloud/nas/upload';
+
+  static String get cloudNasUploadResumableStart =>
+      '$_base/api/v1/cloud/nas/upload/resumable/start';
+
+  static String cloudNasUploadResumable(String id) =>
+      '$_base/api/v1/cloud/nas/upload/resumable/${Uri.encodeComponent(id)}';
+
+  static String cloudNasUploadResumableAbort(String id) =>
+      '$_base/api/v1/cloud/nas/upload/resumable/${Uri.encodeComponent(id)}';
 
   static String cloudNasDownload(String name) =>
       '$_base/api/v1/cloud/nas/files/${Uri.encodeComponent(name)}/download';

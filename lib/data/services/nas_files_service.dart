@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:math' as math;
+
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
@@ -26,6 +29,17 @@ class NasFilesService {
   final ApiClient _api;
 
   Dio get _dio => _api.dio;
+
+  /// 32 GB per file. Bigger than that is almost certainly a mistaken whole-disk
+  /// image, and the NAS would be the one to suffer it.
+  static const maxUploadBytes = 32 * 1024 * 1024 * 1024;
+
+  /// Matches the server. Advertised again by `/resumable/start` and preferred
+  /// when the two ever differ, so a server-side change does not strand a phone.
+  static const chunkSize = 8 * 1024 * 1024;
+
+  /// Below this a single PUT is fewer round-trips and just as reliable.
+  static const simpleThreshold = 5 * 1024 * 1024;
 
   /// Whether the NAS can be used as a destination, and why not if it cannot.
   ///
@@ -87,11 +101,11 @@ class NasFilesService {
 
   /// Stream a file up to the NAS.
   ///
-  /// Retrying is switched off for this request rather than left to the shared
-  /// interceptor. The multipart body is read from disk as it is sent, so by the
-  /// time a failure is known there is nothing left to replay — and the failure
-  /// this endpoint actually produces (503, "the NAS is switched off") will not
-  /// have changed by the end of a backoff.
+  /// Small files go as one multipart POST. Anything at or above 5 MB is sent
+  /// in 8 MB chunks: a dropped packet then retries that slice instead of the
+  /// whole film, and no single request is long enough for a proxy idle-timeout
+  /// to kill it. Retrying is switched off on each HTTP call; the loop below
+  /// retries a failed *chunk* while the bytes are still on disk.
   Future<NasFile> uploadFile(
     File file, {
     void Function(int sent, int total)? onProgress,
@@ -101,7 +115,38 @@ class NasFilesService {
         ? file.uri.pathSegments.last
         : 'upload-${DateTime.now().millisecondsSinceEpoch}';
     final size = await file.length();
+    if (size > maxUploadBytes) {
+      throw NasUnavailable(
+        'That file is larger than NAS uploads allow.',
+        reason: 'too_large',
+      );
+    }
 
+    if (size < simpleThreshold) {
+      return _simpleUpload(
+        file,
+        name: name,
+        size: size,
+        onProgress: onProgress,
+        cancelToken: cancelToken,
+      );
+    }
+    return _chunkedUpload(
+      file,
+      name: name,
+      size: size,
+      onProgress: onProgress,
+      cancelToken: cancelToken,
+    );
+  }
+
+  Future<NasFile> _simpleUpload(
+    File file, {
+    required String name,
+    required int size,
+    void Function(int sent, int total)? onProgress,
+    CancelToken? cancelToken,
+  }) async {
     final form = FormData.fromMap({
       'file': await MultipartFile.fromFile(file.path, filename: name),
     });
@@ -114,8 +159,6 @@ class NasFilesService {
         onSendProgress: onProgress,
         options: Options(
           extra: const {kNoRetry: true},
-          // A large file over a home uplink is slow, not stalled. The default
-          // 30s send timeout would make anything sizeable impossible.
           sendTimeout: const Duration(minutes: 30),
           receiveTimeout: const Duration(minutes: 30),
         ),
@@ -133,6 +176,177 @@ class NasFilesService {
       if (e.type == DioExceptionType.cancel) rethrow;
       throw NasUnavailable(_describeResponse(e));
     }
+  }
+
+  Future<NasFile> _chunkedUpload(
+    File file, {
+    required String name,
+    required int size,
+    void Function(int sent, int total)? onProgress,
+    CancelToken? cancelToken,
+  }) async {
+    String? uploadId;
+    try {
+      final started = await _dio.post<Map<String, dynamic>>(
+        ApiEndpoints.cloudNasUploadResumableStart,
+        data: {
+          'name': name,
+          'size': size,
+          'mimeType': _guessMime(name),
+        },
+        cancelToken: cancelToken,
+        options: Options(extra: const {kNoRetry: true}),
+      );
+      uploadId = started.data?['uploadId'] as String?;
+      final advertised = (started.data?['chunkSize'] as num?)?.toInt();
+      if (uploadId == null || uploadId.isEmpty) {
+        throw const NasUnavailable('The server did not start the upload.');
+      }
+      final slice = (advertised != null && advertised > 0) ? advertised : chunkSize;
+
+      final raf = await file.open(mode: FileMode.read);
+      var offset = 0;
+      var lastReported = 0;
+      try {
+        while (offset < size) {
+          if (cancelToken?.isCancelled == true) {
+            throw DioException(
+              requestOptions: RequestOptions(),
+              type: DioExceptionType.cancel,
+              error: 'Upload cancelled by user',
+            );
+          }
+          final end = math.min(offset + slice, size);
+          await raf.setPosition(offset);
+          final chunk = await raf.read(end - offset);
+          final chunkOffset = offset;
+
+          final res = await _putChunkWithRetry(
+            uploadId: uploadId,
+            chunk: chunk,
+            start: offset,
+            total: size,
+            cancelToken: cancelToken,
+            onSendProgress: (sent, _) {
+              final totalSent = chunkOffset + sent;
+              if (totalSent > lastReported) {
+                lastReported = totalSent;
+                onProgress?.call(totalSent, size);
+              }
+            },
+          );
+
+          offset = end;
+          if (offset > lastReported) {
+            lastReported = offset;
+            onProgress?.call(offset, size);
+          }
+
+          final data = res.data;
+          if (data != null && data['done'] == true) {
+            final f = data['file'];
+            final uploadedName =
+                f is Map && f['name'] is String ? f['name'] as String : name;
+            return NasFile(
+              name: uploadedName,
+              sizeBytes: size,
+              modified: DateTime.now(),
+            );
+          }
+        }
+      } finally {
+        await raf.close();
+      }
+
+      throw const NasUnavailable('The upload finished without a confirmation.');
+    } on DioException catch (e) {
+      if (uploadId != null) unawaited(_abort(uploadId));
+      if (e.type == DioExceptionType.cancel) rethrow;
+      throw NasUnavailable(_describeResponse(e));
+    } catch (e) {
+      if (uploadId != null) unawaited(_abort(uploadId));
+      if (e is NasUnavailable) rethrow;
+      throw NasUnavailable(e.toString());
+    }
+  }
+
+  Future<Response<Map<String, dynamic>>> _putChunkWithRetry({
+    required String uploadId,
+    required List<int> chunk,
+    required int start,
+    required int total,
+    CancelToken? cancelToken,
+    void Function(int, int)? onSendProgress,
+  }) async {
+    const maxAttempts = 5;
+    DioException? last;
+    for (var attempt = 0; attempt < maxAttempts; attempt++) {
+      try {
+        return await _dio.put<Map<String, dynamic>>(
+          ApiEndpoints.cloudNasUploadResumable(uploadId),
+          data: chunk,
+          cancelToken: cancelToken,
+          onSendProgress: onSendProgress,
+          options: Options(
+            extra: const {kNoRetry: true},
+            contentType: 'application/octet-stream',
+            sendTimeout: const Duration(minutes: 5),
+            receiveTimeout: const Duration(minutes: 5),
+            headers: {
+              Headers.contentLengthHeader: chunk.length,
+              'Content-Type': 'application/octet-stream',
+              'x-chunk-start': '$start',
+              'x-chunk-total': '$total',
+            },
+          ),
+        );
+      } on DioException catch (e) {
+        last = e;
+        if (e.type == DioExceptionType.cancel) rethrow;
+        if (e.response?.statusCode == 413 ||
+            e.response?.statusCode == 400 ||
+            e.response?.statusCode == 401 ||
+            e.response?.statusCode == 403) {
+          rethrow;
+        }
+        if (attempt == maxAttempts - 1) rethrow;
+        final delay = Duration(seconds: 1 << attempt);
+        TLog.w(
+          'Cloud/NAS',
+          'chunk at $start retry ${attempt + 1}/$maxAttempts after ${delay.inSeconds}s',
+        );
+        await Future<void>.delayed(delay);
+      }
+    }
+    throw last ?? DioException(requestOptions: RequestOptions());
+  }
+
+  Future<void> _abort(String uploadId) async {
+    try {
+      await _dio.delete<dynamic>(
+        ApiEndpoints.cloudNasUploadResumableAbort(uploadId),
+        options: Options(extra: const {kNoRetry: true}),
+      );
+    } catch (_) {
+      // Best-effort cleanup of the Nextcloud temp collection.
+    }
+  }
+
+  static String _guessMime(String name) {
+    final dot = name.lastIndexOf('.');
+    if (dot < 0) return 'application/octet-stream';
+    return switch (name.substring(dot + 1).toLowerCase()) {
+      'jpg' || 'jpeg' => 'image/jpeg',
+      'png' => 'image/png',
+      'gif' => 'image/gif',
+      'webp' => 'image/webp',
+      'mp4' => 'video/mp4',
+      'mkv' => 'video/x-matroska',
+      'pdf' => 'application/pdf',
+      'txt' => 'text/plain',
+      'zip' => 'application/zip',
+      _ => 'application/octet-stream',
+    };
   }
 
   /// Pull a file down to the device.

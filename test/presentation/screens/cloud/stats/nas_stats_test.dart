@@ -8,7 +8,7 @@
 //   • a partially-null snapshot still renders the sections that arrived;
 //   • the VPS screen stays live when the NAS is off, because the VPS is the
 //     machine answering the request;
-//   • the 2-second timer dies with the screen and backs off on failure;
+//   • the 1-second timer dies with the screen and backs off on failure;
 //   • nothing overflows at 320 px.
 //
 // The service is faked at the ProviderScope boundary, so no test touches Dio or
@@ -24,6 +24,9 @@ import 'package:ai_nexus/core/network/network_info.dart';
 import 'package:ai_nexus/core/theme/app_colors.dart';
 import 'package:ai_nexus/data/services/nas_stats_service.dart';
 import 'package:ai_nexus/domain/entities/nas_stats.dart';
+import 'package:ai_nexus/presentation/screens/cloud/stats/live/history_range_switch.dart';
+import 'package:ai_nexus/presentation/screens/cloud/stats/live/stat_detail_screen.dart';
+import 'package:ai_nexus/presentation/screens/cloud/stats/live/stat_metric.dart';
 import 'package:ai_nexus/presentation/screens/cloud/stats/nas_stats_controller.dart';
 import 'package:ai_nexus/presentation/screens/cloud/stats/nas_stats_screen.dart';
 import 'package:ai_nexus/presentation/screens/cloud/stats/vps_stats_screen.dart';
@@ -31,34 +34,14 @@ import 'package:ai_nexus/presentation/screens/cloud/stats/widgets/fluid_gauge.da
 import 'package:ai_nexus/presentation/screens/cloud/stats/widgets/stats_chrome.dart';
 import 'package:ai_nexus/presentation/screens/cloud/stats/widgets/stats_launcher.dart';
 
-ThemeData _testTheme() => ThemeData(
-      extensions: const <ThemeExtension<dynamic>>[
-        AppColors(
-          shadowColor: Color(0x66000000),
-          glassFill: Color(0x0DFFFFFF),
-          scrim: Color(0x99000000),
-          cardGradientTop: Color(0xFF0B0B0F),
-          cardGradientBottom: Color(0xFF060608),
-          shimmerBase: Color(0x14FFFFFF),
-          shimmerHighlight: Color(0x2EFFFFFF),
-          bg: Color(0xFF000000),
-          bg1: Color(0xFF060608),
-          bg2: Color(0xFF131316),
-          bg3: Color(0xFF1B1B1F),
-          bg4: Color(0xFF26262B),
-          text: Color(0xFFF1F5F9),
-          text2: Color(0xFF94A3B8),
-          text3: Color(0xFF6B7280),
-          text4: Color(0xFF4B5563),
-          text5: Color(0xFF374151),
-          border: Color(0xFF1F2937),
-          border2: Color(0xFF111827),
-          headerBg: Color(0xFF000000),
-          navBg: Color(0xFF000000),
-          isDark: true,
-        ),
-      ],
-    );
+ThemeData _testTheme({bool white = false}) {
+  final palette = white ? AppColors.white : AppColors.dark;
+  return ThemeData(
+    brightness: palette.isDark ? Brightness.dark : Brightness.light,
+    scaffoldBackgroundColor: palette.bg,
+    extensions: <ThemeExtension<dynamic>>[palette],
+  );
+}
 
 // ── a fake service ──────────────────────────────────────────────────────────
 
@@ -72,7 +55,10 @@ class _FakeStatsService extends NasStatsService {
 
   final NasStatsEnvelope Function(int call) _next;
   Object? throwThis;
+  StatsHistoryEnvelope Function(StatsHistoryRange range, StatMetric metric)?
+      history;
   int calls = 0;
+  int historyCalls = 0;
 
   @override
   Future<NasStatsEnvelope> fetch({CancelToken? cancelToken}) async {
@@ -80,6 +66,18 @@ class _FakeStatsService extends NasStatsService {
     final err = throwThis;
     if (err != null) throw err;
     return _next(calls);
+  }
+
+  @override
+  Future<StatsHistoryEnvelope> fetchHistory(
+    StatsHistoryRange range, {
+    required StatMetric metric,
+    CancelToken? cancelToken,
+  }) async {
+    historyCalls += 1;
+    final h = history;
+    if (h != null) return h(range, metric);
+    return StatsHistoryEnvelope.empty(range);
   }
 }
 
@@ -310,6 +308,8 @@ Future<_FakeStatsService> _pump(
   required NasStatsEnvelope Function(int call) responses,
   Object? throwThis,
   Size size = const Size(320, 2400),
+  double textScale = 1.0,
+  bool white = false,
   bool? phoneConnected = false,
 }) async {
   tester.view.physicalSize = size;
@@ -329,7 +329,17 @@ Future<_FakeStatsService> _pump(
         // for a platform channel that does not exist under flutter test.
         networkInfoProvider.overrideWithValue(_FakeNetworkInfo(phoneConnected)),
       ],
-      child: MaterialApp(theme: _testTheme(), home: screen),
+      child: MaterialApp(
+        theme: _testTheme(white: white),
+        builder: (context, child) {
+          final mq = MediaQuery.of(context);
+          return MediaQuery(
+            data: mq.copyWith(textScaler: TextScaler.linear(textScale)),
+            child: child!,
+          );
+        },
+        home: screen,
+      ),
     ),
   );
   // One frame for the first fetch to resolve, then a slice of the 700 ms gauge
@@ -791,7 +801,7 @@ void main() {
   });
 
   group('polling', () {
-    testWidgets('polls about every two seconds while visible', (t) async {
+    testWidgets('polls about every second while visible', (t) async {
       final fake = await _pump(
         t,
         const NasStatsScreen(),
@@ -799,9 +809,78 @@ void main() {
       );
       final after = fake.calls;
 
-      await t.pump(const Duration(seconds: 2));
+      await t.pump(const Duration(seconds: 1));
       await t.pump();
       expect(fake.calls, greaterThan(after));
+    });
+
+    testWidgets('the CPU meter tracks a new sample without a pull-to-refresh',
+        (t) async {
+      await _pump(
+        t,
+        const NasStatsScreen(),
+        responses: (n) {
+          final snap = Map<String, dynamic>.from(_snapshotJson());
+          snap['cpu'] = {
+            'cores': 4,
+            'pct': 10.0 * n,
+            'load1': 0.4,
+            'load5': 0.3,
+            'load15': 0.2,
+          };
+          return _online(snapshot: snap);
+        },
+      );
+
+      expect(
+        t.widget<FluidGauge>(find.byKey(const ValueKey('nas-cpu'))).value,
+        10,
+      );
+      expect(find.byType(RefreshIndicator), findsNothing);
+
+      await t.pump(const Duration(seconds: 1));
+      await t.pump();
+
+      expect(
+        t.widget<FluidGauge>(find.byKey(const ValueKey('nas-cpu'))).value,
+        20,
+        reason: 'the second poll must move the arc; the user does not pull',
+      );
+    });
+
+    testWidgets('opening the notification shade does not freeze the meters',
+        (t) async {
+      final fake = await _pump(
+        t,
+        const NasStatsScreen(),
+        responses: (_) => _online(),
+      );
+      final afterOpen = fake.calls;
+
+      t.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      await t.pump();
+      await t.pump(const Duration(seconds: 1));
+      await t.pump();
+      expect(
+        fake.calls,
+        greaterThan(afterOpen),
+        reason: 'inactive is a shade, not a background; polling must continue',
+      );
+    });
+
+    testWidgets('a real background pause stops the poll', (t) async {
+      final fake = await _pump(
+        t,
+        const NasStatsScreen(),
+        responses: (_) => _online(),
+      );
+
+      t.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      await t.pump();
+      final settled = fake.calls;
+
+      await t.pump(const Duration(seconds: 10));
+      expect(fake.calls, settled);
     });
 
     testWidgets('the timer dies with the screen', (t) async {
@@ -821,6 +900,57 @@ void main() {
           reason: 'a popped screen must not keep polling the NAS');
     });
 
+    testWidgets('tapping CPU opens the live chart on the same poll', (t) async {
+      final fake = await _pump(
+        t,
+        const NasStatsScreen(),
+        responses: (_) => _online(),
+      );
+      final afterDash = fake.calls;
+
+      await t.tap(find.byKey(const ValueKey('nas-cpu')));
+      await t.pump();
+      await t.pump(const Duration(milliseconds: 400));
+
+      expect(find.byType(StatDetailScreen), findsOneWidget);
+      expect(find.byType(HistoryRangeSwitch), findsOneWidget);
+      expect(find.text('Now'), findsOneWidget);
+      expect(find.text('7D'), findsOneWidget);
+      expect(find.text('30D'), findsOneWidget);
+
+      await t.pump(const Duration(seconds: 1));
+      await t.pump();
+      expect(
+        fake.calls,
+        greaterThan(afterDash),
+        reason: 'the detail view must keep the existing poll alive',
+      );
+
+      await t.tap(find.text('7D'));
+      await t.pump();
+      await t.pump(const Duration(milliseconds: 50));
+      expect(fake.historyCalls, 1);
+      expect(find.textContaining('Not enough history yet'), findsOneWidget);
+
+      await t.pageBack();
+      await t.pump();
+      await t.pump(const Duration(milliseconds: 500));
+      expect(find.byType(StatDetailScreen), findsNothing);
+      expect(find.byKey(const ValueKey('nas-cpu')), findsOneWidget);
+    });
+
+    testWidgets('tapping VPS CPU opens the VPS live chart', (t) async {
+      await _pump(t, const VpsStatsScreen(), responses: (_) => _online());
+
+      await t.tap(find.byKey(const ValueKey('vps-cpu')));
+      await t.pump();
+      await t.pump(const Duration(milliseconds: 400));
+
+      expect(find.byType(StatDetailScreen), findsOneWidget);
+      expect(find.text('VPS CPU'), findsWidgets);
+      expect(find.byType(HistoryRangeSwitch), findsOneWidget);
+    });
+
     testWidgets('a transport failure reports it as unreachable, not as "off"',
         (t) async {
       await _pump(
@@ -836,15 +966,16 @@ void main() {
   });
 
   group('backoff arithmetic', () {
-    test('doubles from 2s and caps at 15s', () {
+    test('doubles from 1s and caps at 15s', () {
       const at = NasStatsController.backoffFor;
 
-      expect(at(0), const Duration(seconds: 2));
-      expect(at(1), const Duration(seconds: 2));
-      expect(at(2), const Duration(seconds: 4));
-      expect(at(3), const Duration(seconds: 8));
-      // A dead network must not cost 1,800 requests an hour.
-      expect(at(4), const Duration(seconds: 15));
+      expect(at(0), const Duration(seconds: 1));
+      expect(at(1), const Duration(seconds: 1));
+      expect(at(2), const Duration(seconds: 2));
+      expect(at(3), const Duration(seconds: 4));
+      expect(at(4), const Duration(seconds: 8));
+      // A dead network must not cost 3,600 requests an hour.
+      expect(at(5), const Duration(seconds: 15));
       // A long outage must not shift past 64 bits into a nonsense interval.
       expect(at(60), const Duration(seconds: 15));
     });
@@ -882,6 +1013,102 @@ void main() {
       await t.tap(find.text('Stats'));
       await t.pumpAndSettle();
       expect(find.text('NAS'), findsNothing);
+    });
+  });
+
+  group('layout across sizes, type scale and palettes', () {
+    const sizes = <Size>[
+      Size(320, 640),
+      Size(360, 800),
+      Size(411, 891),
+    ];
+    const scales = <double>[1.0, 1.3, 2.0];
+
+    testWidgets('NAS never overflows or paints the wrong background',
+        (t) async {
+      for (final size in sizes) {
+        for (final scale in scales) {
+          for (final white in const [false, true]) {
+            await _pump(
+              t,
+              const NasStatsScreen(),
+              responses: (_) => _online(),
+              size: size,
+              textScale: scale,
+              white: white,
+            );
+            expectNoOverflow();
+            expect(find.byType(RefreshIndicator), findsNothing);
+            final scaffold = t.widget<Scaffold>(find.byType(Scaffold));
+            expect(
+              scaffold.backgroundColor,
+              white ? AppColors.white.bg : AppColors.dark.bg,
+              reason: '${white ? 'white' : 'dark'} ${size.width}px @${scale}x',
+            );
+            await t.pumpWidget(const SizedBox());
+            await t.pump();
+          }
+        }
+      }
+    });
+
+    testWidgets('VPS never overflows, including the subscription card',
+        (t) async {
+      for (final size in sizes) {
+        for (final scale in scales) {
+          for (final white in const [false, true]) {
+            await _pump(
+              t,
+              const VpsStatsScreen(),
+              responses: (_) => NasStatsEnvelope.fromJson({
+                'online': true,
+                'at': _now(),
+                'age_s': 1,
+                'last_seen_at': _now(),
+                'snapshot': _snapshotJson(),
+                'vps_live': _vpsLiveJson(billing: _billingJson()),
+              }),
+              size: size,
+              textScale: scale,
+              white: white,
+            );
+            expectNoOverflow();
+            expect(find.byType(RefreshIndicator), findsNothing);
+            expect(find.text('Renews 18 Sep 2026'), findsOneWidget);
+            await t.pumpWidget(const SizedBox());
+            await t.pump();
+          }
+        }
+      }
+    });
+
+    testWidgets('the launcher stays inside 320 px at 2x type', (t) async {
+      t.view.physicalSize = const Size(320, 640);
+      t.view.devicePixelRatio = 1.0;
+      addTearDown(() {
+        t.view.resetPhysicalSize();
+        t.view.resetDevicePixelRatio();
+      });
+
+      await t.pumpWidget(
+        ProviderScope(
+          child: MaterialApp(
+            theme: _testTheme(),
+            builder: (context, child) {
+              final mq = MediaQuery.of(context);
+              return MediaQuery(
+                data: mq.copyWith(textScaler: const TextScaler.linear(2)),
+                child: child!,
+              );
+            },
+            home: const Scaffold(body: Column(children: [StatsLauncher()])),
+          ),
+        ),
+      );
+      await t.tap(find.text('Stats'));
+      await t.pumpAndSettle();
+      expect(find.text('NAS'), findsOneWidget);
+      expectNoOverflow();
     });
   });
 

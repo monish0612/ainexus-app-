@@ -300,6 +300,8 @@ class _LivePulseState extends State<LivePulse>
         const SizedBox(width: 7),
         Text(
           text,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
           style: GoogleFonts.plusJakartaSans(
             fontSize: 11.5,
             fontWeight: FontWeight.w600,
@@ -352,6 +354,8 @@ class StatsCard extends StatelessWidget {
                 Expanded(
                   child: Text(
                     title!.toUpperCase(),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: GoogleFonts.plusJakartaSans(
                       fontSize: 10.5,
                       fontWeight: FontWeight.w800,
@@ -360,7 +364,15 @@ class StatsCard extends StatelessWidget {
                     ),
                   ),
                 ),
-                if (trailing != null) trailing!,
+                if (trailing != null) ...[
+                  const SizedBox(width: 8),
+                  Flexible(
+                    child: Align(
+                      alignment: Alignment.centerRight,
+                      child: trailing!,
+                    ),
+                  ),
+                ],
               ],
             ),
             const SizedBox(height: 12),
@@ -463,38 +475,41 @@ class StatRow extends StatelessWidget {
     final colors = Theme.of(context).extension<AppColors>()!;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 5),
-      child: Wrap(
-        alignment: WrapAlignment.spaceBetween,
-        crossAxisAlignment: WrapCrossAlignment.center,
-        spacing: 10,
-        runSpacing: 2,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (icon != null) ...[
-                Icon(icon, size: 14, color: colors.text4),
-                const SizedBox(width: 7),
-              ],
-              Flexible(
-                child: Text(
-                  label,
-                  style: GoogleFonts.plusJakartaSans(
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.w500,
-                    color: colors.text3,
-                  ),
-                ),
+          if (icon != null) ...[
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Icon(icon, size: 14, color: colors.text4),
+            ),
+            const SizedBox(width: 7),
+          ],
+          Expanded(
+            child: Text(
+              label,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: GoogleFonts.plusJakartaSans(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w500,
+                color: colors.text3,
               ),
-            ],
+            ),
           ),
-          Text(
-            value,
-            style: GoogleFonts.plusJakartaSans(
-              fontSize: 12.5,
-              fontWeight: FontWeight.w700,
-              color: valueColor ?? colors.text,
-              fontFeatures: const [FontFeature.tabularFigures()],
+          const SizedBox(width: 10),
+          Flexible(
+            child: Text(
+              value,
+              textAlign: TextAlign.right,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: GoogleFonts.plusJakartaSans(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w700,
+                color: valueColor ?? colors.text,
+                fontFeatures: const [FontFeature.tabularFigures()],
+              ),
             ),
           ),
         ],
@@ -602,7 +617,13 @@ class StatsHeader extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 8),
-            LivePulse(live: live, ageSeconds: ageSeconds),
+            Flexible(
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerRight,
+                child: LivePulse(live: live, ageSeconds: ageSeconds),
+              ),
+            ),
           ],
         ),
       ),

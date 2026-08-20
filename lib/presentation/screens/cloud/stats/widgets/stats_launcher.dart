@@ -91,55 +91,34 @@ class _StatsLauncherState extends State<StatsLauncher>
           border: Border(bottom: BorderSide(color: colors.border)),
         ),
         padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
-        child: Row(
+        child: Wrap(
+          crossAxisAlignment: WrapCrossAlignment.center,
+          spacing: 8,
+          runSpacing: 8,
           children: [
             _StatsPill(open: _open, onTap: _toggle),
-            // Flexible, so the chips can only ever occupy the space the pill
-            // left behind. Without it the expanded row is sized to the chips'
-            // natural width and overflows a 320 px screen; with it they narrow
-            // instead, which is the failure mode a reader never notices.
-            Flexible(
-              child: AnimatedSize(
-                duration: const Duration(milliseconds: 320),
-                curve: AppConstants.animationCurve,
-                alignment: Alignment.centerLeft,
-                child: _open
-                    ? Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const SizedBox(width: 8),
-                          Flexible(
-                            child: _StaggeredChip(
-                              controller: _controller,
-                              order: 0,
-                              child: _DestinationChip(
-                                label: 'NAS',
-                                icon: Icons.storage_rounded,
-                                tint: AppColors.accent,
-                                onTap: () => _push(const NasStatsScreen()),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Flexible(
-                            child: _StaggeredChip(
-                              controller: _controller,
-                              order: 1,
-                              child: _DestinationChip(
-                                label: 'VPS',
-                                icon: Icons.cloud_rounded,
-                                tint: AppColors.accentCyan,
-                                onTap: () => _push(const VpsStatsScreen()),
-                              ),
-                            ),
-                          ),
-                        ],
-                      )
-                    // Zero-width rather than shrink so the row keeps its height
-                    // and the collapse animates the width alone.
-                    : const SizedBox(height: 38),
+            if (_open) ...[
+              _StaggeredChip(
+                controller: _controller,
+                order: 0,
+                child: _DestinationChip(
+                  label: 'NAS',
+                  icon: Icons.storage_rounded,
+                  tint: AppColors.accent,
+                  onTap: () => _push(const NasStatsScreen()),
+                ),
               ),
-            ),
+              _StaggeredChip(
+                controller: _controller,
+                order: 1,
+                child: _DestinationChip(
+                  label: 'VPS',
+                  icon: Icons.cloud_rounded,
+                  tint: AppColors.accentCyan,
+                  onTap: () => _push(const VpsStatsScreen()),
+                ),
+              ),
+            ],
           ],
         ),
       ),
@@ -298,16 +277,14 @@ class _DestinationChip extends StatelessWidget {
             children: [
               Icon(icon, size: 15, color: tint),
               const SizedBox(width: 6),
-              Flexible(
-                child: Text(
-                  label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: GoogleFonts.plusJakartaSans(
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.w700,
-                    color: colors.text,
-                  ),
+              Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: GoogleFonts.plusJakartaSans(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w700,
+                  color: colors.text,
                 ),
               ),
             ],

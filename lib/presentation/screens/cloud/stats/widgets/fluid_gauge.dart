@@ -8,10 +8,10 @@ import '../../../../../core/theme/app_colors.dart';
 /// An arc gauge that always travels to a new reading instead of jumping to it.
 ///
 /// Generalised from `_BudgetRingPainter`, with two differences that matter at a
-/// two-second poll:
+/// one-second poll:
 ///
 /// **It tweens from wherever it currently is.** A CPU gauge fed a fresh sample
-/// every two seconds would flicker if each one snapped into place. Every new
+/// every second would flicker if each one snapped into place. Every new
 /// value animates over ~700 ms from the arc's *current* position, so a sample
 /// arriving mid-animation bends the motion rather than restarting it — which is
 /// what makes a screen full of live numbers feel fluid instead of twitchy.
@@ -140,81 +140,85 @@ class _FluidGaugeState extends State<FluidGauge>
       animation: _controller,
       builder: (context, _) {
         final fraction = _fraction;
-        return SizedBox(
-          width: widget.size,
-          height: widget.size,
-          child: Stack(
-            alignment: Alignment.center,
-            children: [
-              CustomPaint(
-                size: Size.square(widget.size),
-                painter: _FluidGaugePainter(
-                  fraction: fraction,
-                  strokeWidth: widget.strokeWidth,
-                  trackColor: colors.text4.withValues(alpha: 0.14),
-                  activeColor: active,
+        // The centre figures are sized as a fraction of the ring. System font
+        // scaling would push them out of the circle, which reads as a broken
+        // gauge rather than as larger type — so this widget owns its type size.
+        return MediaQuery(
+          data: MediaQuery.of(context).copyWith(textScaler: TextScaler.noScaling),
+          child: SizedBox(
+            width: widget.size,
+            height: widget.size,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                CustomPaint(
+                  size: Size.square(widget.size),
+                  painter: _FluidGaugePainter(
+                    fraction: fraction,
+                    strokeWidth: widget.strokeWidth,
+                    trackColor: colors.text4.withValues(alpha: 0.14),
+                    activeColor: active,
+                  ),
                 ),
-              ),
-              Padding(
-                padding: EdgeInsets.symmetric(
-                  horizontal: widget.size * 0.16,
-                ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (widget.showValue)
-                      FittedBox(
-                        child: Text(
-                          value == null
-                              ? '—'
-                              // Read off the animation, not the prop, so the
-                              // number and the arc arrive together.
-                              : '${(fraction * widget.max).toStringAsFixed(widget.decimals)}${widget.unit}',
-                          maxLines: 1,
-                          style: GoogleFonts.plusJakartaSans(
-                            fontSize: widget.size * 0.2,
-                            fontWeight: FontWeight.w800,
-                            color: value == null ? colors.text3 : active,
-                            height: 1.05,
-                            letterSpacing: -0.5,
-                            fontFeatures: const [
-                              FontFeature.tabularFigures(),
-                            ],
+                Padding(
+                  padding: EdgeInsets.symmetric(
+                    horizontal: widget.size * 0.16,
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (widget.showValue)
+                        FittedBox(
+                          child: Text(
+                            value == null
+                                ? '—'
+                                : '${(fraction * widget.max).toStringAsFixed(widget.decimals)}${widget.unit}',
+                            maxLines: 1,
+                            style: GoogleFonts.plusJakartaSans(
+                              fontSize: widget.size * 0.2,
+                              fontWeight: FontWeight.w800,
+                              color: value == null ? colors.text3 : active,
+                              height: 1.05,
+                              letterSpacing: -0.5,
+                              fontFeatures: const [
+                                FontFeature.tabularFigures(),
+                              ],
+                            ),
                           ),
                         ),
-                      ),
-                    const SizedBox(height: 2),
-                    Text(
-                      widget.label,
-                      textAlign: TextAlign.center,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: GoogleFonts.plusJakartaSans(
-                        fontSize: widget.size * 0.082,
-                        fontWeight: FontWeight.w700,
-                        color: colors.text3,
-                        letterSpacing: 0.6,
-                      ),
-                    ),
-                    if (widget.subtitle case final s?) ...[
-                      const SizedBox(height: 1),
+                      const SizedBox(height: 2),
                       Text(
-                        s,
+                        widget.label,
                         textAlign: TextAlign.center,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: GoogleFonts.plusJakartaSans(
-                          fontSize: widget.size * 0.075,
-                          fontWeight: FontWeight.w600,
-                          color: colors.text4,
-                          fontFeatures: const [FontFeature.tabularFigures()],
+                          fontSize: widget.size * 0.082,
+                          fontWeight: FontWeight.w700,
+                          color: colors.text3,
+                          letterSpacing: 0.6,
                         ),
                       ),
+                      if (widget.subtitle case final s?) ...[
+                        const SizedBox(height: 1),
+                        Text(
+                          s,
+                          textAlign: TextAlign.center,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: GoogleFonts.plusJakartaSans(
+                            fontSize: widget.size * 0.075,
+                            fontWeight: FontWeight.w600,
+                            color: colors.text4,
+                            fontFeatures: const [FontFeature.tabularFigures()],
+                          ),
+                        ),
+                      ],
                     ],
-                  ],
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         );
       },
@@ -316,7 +320,11 @@ class _FluidGaugePainter extends CustomPainter {
 /// A horizontal fill bar with the same tweening behaviour, for the film-space
 /// hero where a bar reads better than a ring: it maps onto "how full is the
 /// disk" directly, and it can carry a much larger number beside it.
-class FluidBar extends StatelessWidget {
+///
+/// Stateful for the same reason [FluidGauge] is: a new sample every second
+/// must travel from the bar's current width, not restart from empty, or the
+/// meter would pulse from zero on every poll instead of tracking the disk.
+class FluidBar extends StatefulWidget {
   const FluidBar({
     super.key,
     required this.fraction,
@@ -331,44 +339,165 @@ class FluidBar extends StatelessWidget {
   final Duration duration;
 
   @override
+  State<FluidBar> createState() => _FluidBarState();
+}
+
+class _FluidBarState extends State<FluidBar>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: widget.duration,
+  );
+
+  late double _from = 0;
+  late double _to = widget.fraction.clamp(0.0, 1.0);
+
+  @override
+  void initState() {
+    super.initState();
+    _controller.forward();
+  }
+
+  @override
+  void didUpdateWidget(covariant FluidBar old) {
+    super.didUpdateWidget(old);
+    final next = widget.fraction.clamp(0.0, 1.0);
+    if ((next - _to).abs() < 0.0005) return;
+    _from = _fraction;
+    _to = next;
+    _controller
+      ..reset()
+      ..forward();
+  }
+
+  double get _fraction {
+    final t = Curves.easeOutCubic.transform(_controller.value);
+    return _from + (_to - _from) * t;
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).extension<AppColors>()!;
-    final f = fraction.clamp(0.0, 1.0);
-    final active = color ?? FluidGauge.rampFor(f * 100);
+    final active = widget.color ?? FluidGauge.rampFor(_to * 100);
 
     return ClipRRect(
-      borderRadius: BorderRadius.circular(height),
-      child: Stack(
-        children: [
-          Container(
-            height: height,
-            color: colors.text4.withValues(alpha: 0.14),
-          ),
-          TweenAnimationBuilder<double>(
-            tween: Tween(begin: 0, end: f),
-            duration: duration,
-            curve: Curves.easeOutCubic,
-            builder: (context, v, _) => FractionallySizedBox(
-              widthFactor: v,
-              child: Container(
-                height: height,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(height),
-                  gradient: LinearGradient(
-                    colors: [active.withValues(alpha: 0.65), active],
-                  ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: active.withValues(alpha: 0.45),
-                      blurRadius: 8,
-                      spreadRadius: -1,
+      borderRadius: BorderRadius.circular(widget.height),
+      child: AnimatedBuilder(
+        animation: _controller,
+        builder: (context, _) {
+          final v = _fraction.clamp(0.0, 1.0);
+          return Stack(
+            children: [
+              Container(
+                height: widget.height,
+                color: colors.text4.withValues(alpha: 0.14),
+              ),
+              FractionallySizedBox(
+                widthFactor: v,
+                child: Container(
+                  height: widget.height,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(widget.height),
+                    gradient: LinearGradient(
+                      colors: [active.withValues(alpha: 0.65), active],
                     ),
-                  ],
+                    boxShadow: [
+                      BoxShadow(
+                        color: active.withValues(alpha: 0.45),
+                        blurRadius: 8,
+                        spreadRadius: -1,
+                      ),
+                    ],
+                  ),
                 ),
               ),
-            ),
-          ),
-        ],
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+/// A live figure that counts from wherever it currently is, not from zero.
+///
+/// Used for the film-space headline: a 2-second poll that rebuilt a
+/// [TweenAnimationBuilder] from `begin: 0` would make 275 GB count up from
+/// empty twice a second, which looks like a loading spinner rather than a disk.
+class TweenedFigure extends StatefulWidget {
+  const TweenedFigure({
+    super.key,
+    required this.value,
+    required this.style,
+    this.blank = false,
+    this.decimals = 0,
+    this.duration = const Duration(milliseconds: 700),
+  });
+
+  final double value;
+  final TextStyle style;
+  final bool blank;
+  final int decimals;
+  final Duration duration;
+
+  @override
+  State<TweenedFigure> createState() => _TweenedFigureState();
+}
+
+class _TweenedFigureState extends State<TweenedFigure>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: widget.duration,
+  );
+
+  late double _from = 0;
+  late double _to = widget.value;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller.forward();
+  }
+
+  @override
+  void didUpdateWidget(covariant TweenedFigure old) {
+    super.didUpdateWidget(old);
+    if ((widget.value - _to).abs() < 0.05) return;
+    _from = _current;
+    _to = widget.value;
+    _controller
+      ..reset()
+      ..forward();
+  }
+
+  double get _current {
+    final t = Curves.easeOutCubic.transform(_controller.value);
+    return _from + (_to - _from) * t;
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (widget.blank) {
+      return Text('—', style: widget.style);
+    }
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, _) => Text(
+        _current.toStringAsFixed(widget.decimals),
+        style: widget.style,
       ),
     );
   }

@@ -5,6 +5,9 @@ import 'package:google_fonts/google_fonts.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../domain/entities/nas_stats.dart';
 import 'nas_stats_controller.dart';
+import 'live/live_sparkline.dart';
+import 'live/stat_metric.dart';
+import 'live/tappable_stat_gauge.dart';
 import 'widgets/fluid_gauge.dart';
 import 'widgets/stats_chrome.dart';
 
@@ -80,13 +83,10 @@ class VpsStatsScreen extends ConsumerWidget {
                       ),
                     ),
                   )
-                : RefreshIndicator(
-                    onRefresh: controller.refreshNow,
-                    color: AppColors.accent,
-                    backgroundColor: colors.bg2,
-                    child: ListView(
-                      padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
-                      children: [
+                : ListView(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+                    children: [
                         if (state.vpsUnreachable) ...[
                           _VpsUnreachableBanner(
                             phoneOffline: state.phoneOffline,
@@ -123,9 +123,14 @@ class VpsStatsScreen extends ConsumerWidget {
                               _VpsResourcesCard(
                                 vps: vps,
                                 offline: unreachable,
+                                live: state.live,
                               ),
                               const SizedBox(height: 14),
-                              _VpsLoadCard(vps: vps, offline: unreachable),
+                              _VpsLoadCard(
+                                vps: vps,
+                                offline: unreachable,
+                                live: state.live,
+                              ),
                               const SizedBox(height: 14),
                               _VpsPlatformCard(
                                 vps: vps,
@@ -137,7 +142,6 @@ class VpsStatsScreen extends ConsumerWidget {
                         ),
                       ],
                     ),
-                  ),
           ),
         ],
       ),
@@ -277,14 +281,20 @@ class _ThrottleWarning extends StatelessWidget {
 /// lets Wrap place the remainder, so the layout degrades to 2+1 and then to a
 /// single column instead of throwing.
 class _VpsResourcesCard extends StatelessWidget {
-  const _VpsResourcesCard({required this.vps, required this.offline});
+  const _VpsResourcesCard({
+    required this.vps,
+    required this.offline,
+    required this.live,
+  });
 
   final VpsLive? vps;
   final bool offline;
+  final List<LiveStatSample> live;
 
   @override
   Widget build(BuildContext context) {
     final v = vps;
+    final wide = MediaQuery.sizeOf(context).width >= StatMetric.wideBreakpoint;
 
     return StatsCard(
       title: 'Resources',
@@ -301,35 +311,63 @@ class _VpsResourcesCard extends StatelessWidget {
           // quietly switching to dashes, which reads as a rendering bug.
           double? val(double? x) => offline ? 0 : x;
 
+          Widget gauge(StatMetric metric, FluidGauge child) {
+            final wrapped = TappableStatGauge(metric: metric, child: child);
+            if (!wide) return wrapped;
+            return Column(
+              children: [
+                wrapped,
+                const SizedBox(height: 8),
+                LiveSparkline(
+                  spots: spotsForMetric(live, metric),
+                  height: 72,
+                  interactive: false,
+                ),
+              ],
+            );
+          }
+
           return Wrap(
             alignment: WrapAlignment.center,
             spacing: gap,
             runSpacing: gap,
             children: [
-              FluidGauge(
-                value: val(v?.cpuPct),
-                label: 'CPU',
-                size: size,
-                decimals: (v?.cpuPct ?? 100) < 10 ? 1 : 0,
-                subtitle: v?.cores == null ? null : '${v!.cores} vCPU',
+              gauge(
+                StatMetric.vpsCpu,
+                FluidGauge(
+                  key: const ValueKey('vps-cpu'),
+                  value: val(v?.cpuPct),
+                  label: 'CPU',
+                  size: size,
+                  decimals: (v?.cpuPct ?? 100) < 10 ? 1 : 0,
+                  subtitle: v?.cores == null ? null : '${v!.cores} vCPU',
+                ),
               ),
-              FluidGauge(
-                value: val(v?.memPct),
-                label: 'RAM',
-                size: size,
-                decimals: 1,
-                subtitle: v?.memTotalGb == null
-                    ? null
-                    : '${formatGb(v!.memFreeGb)} free',
+              gauge(
+                StatMetric.vpsRam,
+                FluidGauge(
+                  key: const ValueKey('vps-ram'),
+                  value: val(v?.memPct),
+                  label: 'RAM',
+                  size: size,
+                  decimals: 1,
+                  subtitle: v?.memTotalGb == null
+                      ? null
+                      : '${formatGb(v!.memFreeGb)} free',
+                ),
               ),
-              FluidGauge(
-                value: val(v?.diskPct),
-                label: 'DISK',
-                size: size,
-                decimals: 1,
-                subtitle: v?.diskTotalGb == null
-                    ? null
-                    : '${formatGb(v!.diskFreeGb)} free',
+              gauge(
+                StatMetric.vpsDisk,
+                FluidGauge(
+                  key: const ValueKey('vps-disk'),
+                  value: val(v?.diskPct),
+                  label: 'DISK',
+                  size: size,
+                  decimals: 1,
+                  subtitle: v?.diskTotalGb == null
+                      ? null
+                      : '${formatGb(v!.diskFreeGb)} free',
+                ),
               ),
             ],
           );
@@ -340,10 +378,15 @@ class _VpsResourcesCard extends StatelessWidget {
 }
 
 class _VpsLoadCard extends StatelessWidget {
-  const _VpsLoadCard({required this.vps, required this.offline});
+  const _VpsLoadCard({
+    required this.vps,
+    required this.offline,
+    required this.live,
+  });
 
   final VpsLive? vps;
   final bool offline;
+  final List<LiveStatSample> live;
 
   @override
   Widget build(BuildContext context) {
@@ -360,18 +403,30 @@ class _VpsLoadCard extends StatelessWidget {
           // it is the single most diagnostic number here: high steal means the
           // host is taking processor time away, which no amount of local tuning
           // will fix. It is the shape the 15 August incident had.
-          final steal = FluidGauge(
-            value: offline ? 0 : v?.stealPct,
-            label: 'STEAL',
-            size: size,
-            color: (v?.stealIsHigh ?? false) ? FluidGauge.red : null,
-            decimals: 1,
-            subtitle: v?.stealPct == null ? 'via NAS' : null,
+          final steal = TappableStatGauge(
+            metric: StatMetric.vpsSteal,
+            child: FluidGauge(
+              key: const ValueKey('vps-steal'),
+              value: offline ? 0 : v?.stealPct,
+              label: 'STEAL',
+              size: size,
+              color: (v?.stealIsHigh ?? false) ? FluidGauge.red : null,
+              decimals: 1,
+              subtitle: v?.stealPct == null ? 'via NAS' : null,
+            ),
           );
 
           return Column(
             children: [
               steal,
+              if (MediaQuery.sizeOf(context).width >= StatMetric.wideBreakpoint) ...[
+                const SizedBox(height: 10),
+                LiveSparkline(
+                  spots: spotsForMetric(live, StatMetric.vpsSteal),
+                  height: 88,
+                  interactive: false,
+                ),
+              ],
               const SizedBox(height: 14),
               Divider(color: colors.border, height: 1),
               const SizedBox(height: 6),

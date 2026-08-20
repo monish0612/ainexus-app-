@@ -64,12 +64,13 @@ class DestinationSwitch extends ConsumerWidget {
               final half = (constraints.maxWidth - 8) / 2;
               return Stack(
                 children: [
-                  Container(
-                    height: 42,
-                    decoration: BoxDecoration(
-                      color: colors.bg,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: colors.border),
+                  Positioned.fill(
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: colors.bg,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: colors.border),
+                      ),
                     ),
                   ),
                   // The travelling highlight. Curves.easeOutCubic rather than a
@@ -79,42 +80,38 @@ class DestinationSwitch extends ConsumerWidget {
                     curve: Curves.easeOutCubic,
                     left: view.isNas ? half + 4 : 4,
                     top: 4,
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 260),
-                      curve: Curves.easeOutCubic,
-                      width: half,
-                      height: 34,
+                    bottom: 4,
+                    width: half,
+                    child: DecoratedBox(
                       decoration: BoxDecoration(
                         color: AppColors.accent.withValues(alpha: 0.16),
                         borderRadius: BorderRadius.circular(9),
-                        border:
-                            Border.all(color: AppColors.accent.withValues(alpha: 0.45)),
+                        border: Border.all(
+                          color: AppColors.accent.withValues(alpha: 0.45),
+                        ),
                       ),
                     ),
                   ),
-                  SizedBox(
-                    height: 42,
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: _Segment(
-                            icon: LucideIcons.cloud,
-                            label: 'Google Drive',
-                            selected: !view.isNas,
-                            onTap: () => pick(CloudDestination.drive),
-                          ),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _Segment(
+                          icon: LucideIcons.cloud,
+                          label: 'Google Drive',
+                          selected: !view.isNas,
+                          onTap: () => pick(CloudDestination.drive),
                         ),
-                        Expanded(
-                          child: _Segment(
-                            icon: LucideIcons.hardDrive,
-                            label: 'NAS',
-                            selected: view.isNas,
-                            disabled: nasBlocked,
-                            onTap: () => pick(CloudDestination.nas),
-                          ),
+                      ),
+                      Expanded(
+                        child: _Segment(
+                          icon: LucideIcons.hardDrive,
+                          label: 'NAS',
+                          selected: view.isNas,
+                          disabled: nasBlocked,
+                          onTap: () => pick(CloudDestination.nas),
                         ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
                 ],
               );
@@ -168,15 +165,18 @@ class _Segment extends StatelessWidget {
             fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
             color: color,
           ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(disabled ? LucideIcons.lock : icon, size: 15, color: color),
-              const SizedBox(width: 7),
-              Flexible(
-                child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
-              ),
-            ],
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 10),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(disabled ? LucideIcons.lock : icon, size: 15, color: color),
+                const SizedBox(width: 7),
+                Flexible(
+                  child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
+                ),
+              ],
+            ),
           ),
         ),
       ),

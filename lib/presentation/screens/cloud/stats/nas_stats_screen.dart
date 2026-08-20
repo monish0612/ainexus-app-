@@ -5,6 +5,9 @@ import 'package:google_fonts/google_fonts.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../domain/entities/nas_stats.dart';
 import 'nas_stats_controller.dart';
+import 'live/live_sparkline.dart';
+import 'live/stat_metric.dart';
+import 'live/tappable_stat_gauge.dart';
 import 'widgets/fluid_gauge.dart';
 import 'widgets/stats_chrome.dart';
 
@@ -44,13 +47,10 @@ class NasStatsScreen extends ConsumerWidget {
           Expanded(
             child: !state.hasLoaded
                 ? const _StatsLoading()
-                : RefreshIndicator(
-                    onRefresh: controller.refreshNow,
-                    color: AppColors.accent,
-                    backgroundColor: colors.bg2,
-                    child: ListView(
-                      padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
-                      children: [
+                : ListView(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+                    children: [
                         if (state.transportError case final err?) ...[
                           StatsOfflineBanner(
                             title: 'Can\'t reach the stats server',
@@ -89,9 +89,15 @@ class NasStatsScreen extends ConsumerWidget {
                           offline: offline,
                           child: Column(
                             children: [
-                              _FilmSpaceHero(snapshot: snapshot),
+                              _FilmSpaceHero(
+                                snapshot: snapshot,
+                                live: state.live,
+                              ),
                               const SizedBox(height: 14),
-                              _LoadGauges(snapshot: snapshot),
+                              _LoadGauges(
+                                snapshot: snapshot,
+                                live: state.live,
+                              ),
                               const SizedBox(height: 14),
                               _PoolsCard(snapshot: snapshot),
                               const SizedBox(height: 14),
@@ -112,7 +118,6 @@ class NasStatsScreen extends ConsumerWidget {
                         ),
                       ],
                     ),
-                  ),
           ),
         ],
       ),
@@ -171,9 +176,10 @@ class _StatsLoading extends StatelessWidget {
 /// Backup pool is labelled as the USB backup disk and never added in — it is a
 /// copy of what is already there, not extra room.
 class _FilmSpaceHero extends StatelessWidget {
-  const _FilmSpaceHero({required this.snapshot});
+  const _FilmSpaceHero({required this.snapshot, required this.live});
 
   final NasSnapshot? snapshot;
+  final List<LiveStatSample> live;
 
   @override
   Widget build(BuildContext context) {
@@ -189,7 +195,10 @@ class _FilmSpaceHero extends StatelessWidget {
       (main?.usedPct ?? usedPct.round()).toDouble(),
     );
 
-    return StatsCard(
+    return GestureDetector(
+      onTap: () => openStatDetail(context, StatMetric.nasDisk),
+      behavior: HitTestBehavior.opaque,
+      child: StatsCard(
       title: 'Free for films',
       trailing: main == null
           ? null
@@ -200,18 +209,20 @@ class _FilmSpaceHero extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.baseline,
-            textBaseline: TextBaseline.alphabetic,
-            children: [
-              // Tweened so a copy finishing makes the number travel down
-              // rather than blink to a new value.
-              TweenAnimationBuilder<double>(
-                tween: Tween(begin: 0, end: (freeGb ?? 0).toDouble()),
-                duration: const Duration(milliseconds: 700),
-                curve: Curves.easeOutCubic,
-                builder: (context, v, _) => Text(
-                  freeGb == null ? kUnknown : v.toStringAsFixed(0),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Hero(
+              tag: StatMetric.nasDisk.heroTag,
+              child: Material(
+                type: MaterialType.transparency,
+                child: Row(
+              crossAxisAlignment: CrossAxisAlignment.baseline,
+              textBaseline: TextBaseline.alphabetic,
+              children: [
+                TweenedFigure(
+                  value: (freeGb ?? 0).toDouble(),
+                  blank: freeGb == null,
                   style: GoogleFonts.plusJakartaSans(
                     fontSize: 42,
                     fontWeight: FontWeight.w800,
@@ -221,20 +232,22 @@ class _FilmSpaceHero extends StatelessWidget {
                     fontFeatures: const [FontFeature.tabularFigures()],
                   ),
                 ),
-              ),
-              const SizedBox(width: 6),
-              Padding(
-                padding: const EdgeInsets.only(bottom: 4),
-                child: Text(
-                  'GB',
-                  style: GoogleFonts.plusJakartaSans(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w700,
-                    color: colors.text3,
+                const SizedBox(width: 6),
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: Text(
+                    'GB',
+                    style: GoogleFonts.plusJakartaSans(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                      color: colors.text3,
+                    ),
                   ),
                 ),
+              ],
+                ),
               ),
-            ],
+            ),
           ),
           const SizedBox(height: 12),
           FluidBar(fraction: usedPct / 100, color: tint, height: 11),
@@ -275,23 +288,34 @@ class _FilmSpaceHero extends StatelessWidget {
               icon: Icons.history_rounded,
             ),
           ],
+          if (MediaQuery.sizeOf(context).width >= StatMetric.wideBreakpoint) ...[
+            const SizedBox(height: 12),
+            LiveSparkline(
+              spots: spotsForMetric(live, StatMetric.nasDisk),
+              height: 96,
+              interactive: false,
+            ),
+          ],
         ],
       ),
+    ),
     );
   }
 }
 
 /// CPU and memory side by side.
 class _LoadGauges extends StatelessWidget {
-  const _LoadGauges({required this.snapshot});
+  const _LoadGauges({required this.snapshot, required this.live});
 
   final NasSnapshot? snapshot;
+  final List<LiveStatSample> live;
 
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).extension<AppColors>()!;
     final cpu = snapshot?.cpu;
     final mem = snapshot?.memory;
+    final wide = MediaQuery.sizeOf(context).width >= StatMetric.wideBreakpoint;
 
     final memColor = switch (mem?.pressure) {
       MemoryPressure.critical => FluidGauge.red,
@@ -310,24 +334,57 @@ class _LoadGauges extends StatelessWidget {
               ((constraints.maxWidth - 16) / 2).clamp(96.0, 132.0);
           final stack = constraints.maxWidth < 240;
 
-          final cpuGauge = FluidGauge(
-            // Zero rather than null when offline, so the arc visibly sweeps
-            // down to empty instead of switching to a dash.
-            value: snapshot == null ? 0 : cpu?.pct,
-            label: 'CPU',
-            size: gaugeSize,
-            decimals: cpu?.pct != null && cpu!.pct! < 10 ? 1 : 0,
-            subtitle: cpu?.cores == null ? null : '${cpu!.cores} cores',
+          Widget cpuGauge = TappableStatGauge(
+            metric: StatMetric.nasCpu,
+            child: FluidGauge(
+              key: const ValueKey('nas-cpu'),
+              // Zero rather than null when offline, so the arc visibly sweeps
+              // down to empty instead of switching to a dash.
+              value: snapshot == null ? 0 : cpu?.pct,
+              label: 'CPU',
+              size: gaugeSize,
+              decimals: cpu?.pct != null && cpu!.pct! < 10 ? 1 : 0,
+              subtitle: cpu?.cores == null ? null : '${cpu!.cores} cores',
+            ),
           );
-          final memGauge = FluidGauge(
-            value: snapshot == null ? 0 : mem?.usedPct,
-            label: 'RAM',
-            size: gaugeSize,
-            color: memColor,
-            subtitle: mem?.availableMb == null
-                ? null
-                : '${mem!.availableMb} MB free',
+          Widget memGauge = TappableStatGauge(
+            metric: StatMetric.nasRam,
+            child: FluidGauge(
+              key: const ValueKey('nas-ram'),
+              value: snapshot == null ? 0 : mem?.usedPct,
+              label: 'RAM',
+              size: gaugeSize,
+              color: memColor,
+              subtitle: mem?.availableMb == null
+                  ? null
+                  : '${mem!.availableMb} MB free',
+            ),
           );
+
+          if (wide) {
+            cpuGauge = Column(
+              children: [
+                cpuGauge,
+                const SizedBox(height: 10),
+                LiveSparkline(
+                  spots: spotsForMetric(live, StatMetric.nasCpu),
+                  height: 88,
+                  interactive: false,
+                ),
+              ],
+            );
+            memGauge = Column(
+              children: [
+                memGauge,
+                const SizedBox(height: 10),
+                LiveSparkline(
+                  spots: spotsForMetric(live, StatMetric.nasRam),
+                  height: 88,
+                  interactive: false,
+                ),
+              ],
+            );
+          }
 
           return Column(
             children: [
@@ -340,7 +397,10 @@ class _LoadGauges extends StatelessWidget {
               else
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                  children: [cpuGauge, memGauge],
+                  children: [
+                    Expanded(child: cpuGauge),
+                    Expanded(child: memGauge),
+                  ],
                 ),
               const SizedBox(height: 14),
               Divider(color: colors.border, height: 1),
@@ -474,9 +534,11 @@ class _PoolRow extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 8),
-            StatChip(
-              label: pool.health ?? 'Unknown',
-              tone: pool.isHealthy ? StatTone.good : StatTone.bad,
+            Flexible(
+              child: StatChip(
+                label: pool.health ?? 'Unknown',
+                tone: pool.isHealthy ? StatTone.good : StatTone.bad,
+              ),
             ),
           ],
         ),

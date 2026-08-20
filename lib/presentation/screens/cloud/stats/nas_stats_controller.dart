@@ -9,6 +9,7 @@ import '../../../../core/network/network_info.dart';
 import '../../../../core/services/telegram_logger.dart';
 import '../../../../data/services/nas_stats_service.dart';
 import '../../../../domain/entities/nas_stats.dart';
+import 'live/stat_metric.dart';
 
 const _tag = 'NasStats';
 
@@ -27,6 +28,7 @@ class NasStatsState {
     this.transportError,
     this.lastSuccessAt,
     this.phoneOffline,
+    this.live = const [],
   });
 
   final NasStatsEnvelope envelope;
@@ -60,6 +62,10 @@ class NasStatsState {
   /// signal" — two very different pieces of advice to give someone.
   final bool? phoneOffline;
 
+  /// Rolling 1-second samples for the live sparkline. Trimmed to three minutes
+  /// so the detail screen cannot grow without bound if it is left open.
+  final List<LiveStatSample> live;
+
   bool get isOnline => envelope.online;
   NasSnapshot? get snapshot => envelope.snapshot;
   VpsLive? get vps => envelope.vpsLive;
@@ -86,6 +92,7 @@ class NasStatsState {
     Object? transportError = _sentinel,
     DateTime? lastSuccessAt,
     Object? phoneOffline = _sentinel,
+    List<LiveStatSample>? live,
   }) {
     return NasStatsState(
       envelope: envelope ?? this.envelope,
@@ -98,6 +105,7 @@ class NasStatsState {
       lastSuccessAt: lastSuccessAt ?? this.lastSuccessAt,
       phoneOffline:
           phoneOffline == _sentinel ? this.phoneOffline : phoneOffline as bool?,
+      live: live ?? this.live,
     );
   }
 
@@ -111,14 +119,14 @@ class NasStatsState {
 ///
 /// 1. **The timer must die with the screen.** It is an `autoDispose` provider
 ///    and the timer is cancelled in `dispose()`, so navigating back cannot
-///    leave a two-second poll running for the rest of the session.
+///    leave a one-second poll running for the rest of the session.
 ///
 /// 2. **Backgrounding stops the poll.** Without the lifecycle observer, putting
 ///    the phone in a pocket with this screen open would keep asking the VPS —
-///    and the NAS behind it — every two seconds, indefinitely, on mobile data.
+///    and the NAS behind it — every second, indefinitely, on mobile data.
 ///
 /// 3. **Failures back off, and are announced once.** A dead network at a
-///    two-second cadence is thirty requests and thirty Telegram messages a
+///    one-second cadence is sixty requests and sixty Telegram messages a
 ///    minute. The interval grows to 15 s and only *transitions* are logged.
 class NasStatsController extends StateNotifier<NasStatsState>
     with WidgetsBindingObserver {
@@ -132,7 +140,7 @@ class NasStatsController extends StateNotifier<NasStatsState>
   final NasStatsService _service;
   final NetworkInfo _network;
 
-  static const Duration pollInterval = Duration(seconds: 2);
+  static const Duration pollInterval = Duration(seconds: 1);
   static const Duration maxBackoff = Duration(seconds: 15);
 
   Timer? _timer;
@@ -163,8 +171,9 @@ class NasStatsController extends StateNotifier<NasStatsState>
     }
   }
 
-  /// Fetch now, resetting the backoff. Used by pull-to-refresh and on resume,
-  /// where the user is watching and expects the screen to move immediately.
+  /// Fetch now, resetting the backoff. Used by the retry control on an error
+  /// banner and on resume, where the user is watching and expects the meters
+  /// to move immediately rather than waiting out a timer.
   Future<void> refreshNow() async {
     _timer?.cancel();
     _timer = null;
@@ -214,6 +223,10 @@ class NasStatsController extends StateNotifier<NasStatsState>
       transportError: null,
       lastSuccessAt: DateTime.now(),
       phoneOffline: null,
+      live: appendLiveSample(
+        state.live,
+        LiveStatSample.fromEnvelope(envelope, DateTime.now()),
+      ),
     );
 
     _reportOnlineTransition(envelope);
@@ -251,8 +264,8 @@ class NasStatsController extends StateNotifier<NasStatsState>
       transportError: e.message,
     );
 
-    // Once per outage, not once per poll. At a 2-second cadence the alternative
-    // is thirty messages a minute into a channel that also carries real alarms.
+    // Once per outage, not once per poll. At a 1-second cadence the alternative
+    // is sixty messages a minute into a channel that also carries real alarms.
     if (!_reportedTransportFailure) {
       _reportedTransportFailure = true;
       TLog.w(_tag, 'Cannot reach the stats server: ${e.message}');
@@ -283,8 +296,8 @@ class NasStatsController extends StateNotifier<NasStatsState>
     }
   }
 
-  /// 2s, 4s, 8s, then 15s. Doubling keeps a healthy screen at full speed while
-  /// making a dead network cost a request every 15 seconds rather than 1,800 an
+  /// 1s, 2s, 4s, 8s, then 15s. Doubling keeps a healthy screen at full speed while
+  /// making a dead network cost a request every 15 seconds rather than 3,600 an
   /// hour. Pure and static so the arithmetic can be tested without a live
   /// notifier and a real clock.
   static Duration backoffFor(int consecutiveFailures) {
@@ -314,11 +327,16 @@ class NasStatsController extends StateNotifier<NasStatsState>
   void didChangeAppLifecycleState(AppLifecycleState lifecycle) {
     if (_disposed) return;
     switch (lifecycle) {
+      // `inactive` is deliberately not paused. Android fires it for the
+      // notification shade, an incoming-call banner, and a brief blip every
+      // time this route is pushed — none of which should freeze the meters
+      // or cancel the in-flight sample the user is watching.
       case AppLifecycleState.paused:
-      case AppLifecycleState.inactive:
       case AppLifecycleState.detached:
       case AppLifecycleState.hidden:
         stop();
+      case AppLifecycleState.inactive:
+        break;
       case AppLifecycleState.resumed:
         if (!state.isPolling) {
           state = state.copyWith(isPolling: true);
@@ -340,7 +358,7 @@ class NasStatsController extends StateNotifier<NasStatsState>
 }
 
 /// `autoDispose` is doing real work here, not decoration: it is what guarantees
-/// the two-second timer cannot outlive the screen that started it.
+/// the one-second timer cannot outlive the screen that started it.
 final nasStatsControllerProvider =
     StateNotifierProvider.autoDispose<NasStatsController, NasStatsState>((ref) {
   return NasStatsController(

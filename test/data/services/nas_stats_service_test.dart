@@ -19,6 +19,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:ai_nexus/core/network/api_client.dart';
 import 'package:ai_nexus/data/services/nas_stats_service.dart';
 import 'package:ai_nexus/domain/entities/nas_stats.dart';
+import 'package:ai_nexus/presentation/screens/cloud/stats/live/stat_metric.dart';
 
 class _Reply {
   _Reply.json(this.status, Object body)
@@ -224,5 +225,59 @@ void main() {
     expect(env.snapshot?.cpu, isNull);
     expect(env.snapshot?.pools, isEmpty);
     expect(env.vpsLive, isNull);
+  });
+
+  test('fetchHistory on 404 is empty history, not a crash', () async {
+    final t = build([_Reply.json(404, {'error': 'not found'})]);
+    final env = await t.service.fetchHistory(
+      StatsHistoryRange.d7,
+      metric: StatMetric.nasCpu,
+    );
+    expect(env.nas, isEmpty);
+    expect(env.vps, isEmpty);
+    expect(t.adapter.paths.single, contains('/api/v1/cloud/stats/history'));
+    expect(t.adapter.paths.single, contains('range=7d'));
+  });
+
+  test('fetchHistory Now does not hit the network', () async {
+    final t = build([_Reply.json(500, {'error': 'nope'})]);
+    final env = await t.service.fetchHistory(
+      StatsHistoryRange.now,
+      metric: StatMetric.vpsCpu,
+    );
+    expect(env.range, StatsHistoryRange.now);
+    expect(t.adapter.calls, 0);
+  });
+
+  test('fetchHistory parses NAS and VPS points for the requested metric', () async {
+    final t = build([
+      _Reply.json(200, {
+        'range': '7d',
+        'nas': {
+          'online': true,
+          'points': [
+            {'t': 1786940000, 'cpu': 11.5, 'mem': 40.0, 'disk': 37},
+          ],
+        },
+        'vps': {
+          'points': [
+            {'t': 1786940000, 'cpu': 9.2, 'mem': 27.3, 'disk': 11.0, 'steal': 3.9},
+          ],
+        },
+      }),
+    ]);
+
+    final nas = await t.service.fetchHistory(
+      StatsHistoryRange.d7,
+      metric: StatMetric.nasCpu,
+    );
+    expect(nas.nasOnline, isTrue);
+    expect(nas.seriesFor(StatMetric.nasCpu).single.value, 11.5);
+
+    final vps = await t.service.fetchHistory(
+      StatsHistoryRange.d7,
+      metric: StatMetric.vpsSteal,
+    );
+    expect(vps.seriesFor(StatMetric.vpsSteal).single.value, 3.9);
   });
 }

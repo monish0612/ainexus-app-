@@ -645,19 +645,46 @@ class _CloudScreenState extends ConsumerState<CloudScreen>
     final totalBytes =
         validPicks.fold<int>(0, (sum, f) => sum + f.size);
 
-    // The 10 GB ceiling is Google's, so it is only enforced for Google. The NAS
-    // is bounded by the free space in its own pool, and the server answers 507
-    // with a real explanation when that runs out — a better answer than an
-    // invented app-side limit that would be wrong the moment a disk is added.
+    // The 10 GB ceiling is Google's. The NAS allows 32 GB per file — a film,
+    // not a whole-disk image — and the server answers 507 when the pool is full.
     if (destination == CloudDestination.drive) {
       if (totalBytes > GoogleDriveService.maxUploadBytes) {
-        _showSizeExceededError(totalBytes, validPicks.length);
+        _showSizeExceededError(
+          totalBytes,
+          validPicks.length,
+          limitBytes: GoogleDriveService.maxUploadBytes,
+        );
         return;
       }
 
       for (final picked in validPicks) {
         if (picked.size > GoogleDriveService.maxUploadBytes) {
-          _showSizeExceededError(picked.size, 1, fileName: picked.name);
+          _showSizeExceededError(
+            picked.size,
+            1,
+            fileName: picked.name,
+            limitBytes: GoogleDriveService.maxUploadBytes,
+          );
+          return;
+        }
+      }
+    } else {
+      if (totalBytes > NasFilesService.maxUploadBytes) {
+        _showSizeExceededError(
+          totalBytes,
+          validPicks.length,
+          limitBytes: NasFilesService.maxUploadBytes,
+        );
+        return;
+      }
+      for (final picked in validPicks) {
+        if (picked.size > NasFilesService.maxUploadBytes) {
+          _showSizeExceededError(
+            picked.size,
+            1,
+            fileName: picked.name,
+            limitBytes: NasFilesService.maxUploadBytes,
+          );
           return;
         }
       }
@@ -717,7 +744,12 @@ class _CloudScreenState extends ConsumerState<CloudScreen>
     _showMultiTransferSheet(pairs, totalBytes);
   }
 
-  void _showSizeExceededError(int bytes, int fileCount, {String? fileName}) {
+  void _showSizeExceededError(
+    int bytes,
+    int fileCount, {
+    String? fileName,
+    required int limitBytes,
+  }) {
     final colors = Theme.of(context).extension<AppColors>()!;
     final label = fileName ?? '$fileCount file${fileCount > 1 ? 's' : ''}';
     showDialog<void>(
@@ -739,7 +771,7 @@ class _CloudScreenState extends ConsumerState<CloudScreen>
                   fontWeight: FontWeight.w700)),
         ]),
         content: Text(
-          '$label (${_fmtBytes(bytes)}) exceeds the 10 GB limit.',
+          '$label (${_fmtBytes(bytes)}) exceeds the ${_fmtBytes(limitBytes)} limit.',
           style: GoogleFonts.plusJakartaSans(
               color: colors.text2, fontSize: 14),
         ),

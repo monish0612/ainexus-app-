@@ -3,6 +3,7 @@ import 'package:dio/dio.dart';
 import '../../core/network/api_client.dart';
 import '../../core/network/api_endpoints.dart';
 import '../../domain/entities/nas_stats.dart';
+import '../../presentation/screens/cloud/stats/live/stat_metric.dart';
 
 /// Thrown when the *phone* could not reach the API.
 ///
@@ -29,7 +30,7 @@ class NasStatsUnavailable implements Exception {
 ///
 /// Deliberately thin. It does not retry, cache, or log: [ApiClient]'s retry
 /// interceptor already covers transient failures with backoff and jitter, and
-/// stacking a second retry layer under a 2-second poll would turn one slow
+/// stacking a second retry layer under a 1-second poll would turn one slow
 /// response into a queue of overlapping requests. Caching lives on the server
 /// where one entry protects the NAS from every device at once. Telegram logging
 /// lives in the controller, which is the only place that knows whether a
@@ -51,6 +52,40 @@ class NasStatsService {
       }
       return NasStatsEnvelope.fromJson(Map<String, dynamic>.from(data));
     } on DioException catch (e) {
+      throw NasStatsUnavailable(
+        _describe(e),
+        statusCode: e.response?.statusCode,
+      );
+    }
+  }
+
+  /// On-demand 7D / 30D series. Not called by the poller.
+  ///
+  /// A 404 (older API) or an empty body is an empty envelope, never a crash:
+  /// the enlarged view must still show Now from the local rolling window.
+  Future<StatsHistoryEnvelope> fetchHistory(
+    StatsHistoryRange range, {
+    required StatMetric metric,
+    CancelToken? cancelToken,
+  }) async {
+    if (range == StatsHistoryRange.now) {
+      return StatsHistoryEnvelope.empty(range);
+    }
+    try {
+      final res = await _api.get<dynamic>(
+        ApiEndpoints.cloudStatsHistory(range.query),
+        cancelToken: cancelToken,
+      );
+      final data = res.data;
+      if (data is! Map) return StatsHistoryEnvelope.empty(range);
+      return StatsHistoryEnvelope.fromJson(
+        Map<String, dynamic>.from(data),
+        metric,
+      );
+    } on DioException catch (e) {
+      if (e.response?.statusCode == 404) {
+        return StatsHistoryEnvelope.empty(range);
+      }
       throw NasStatsUnavailable(
         _describe(e),
         statusCode: e.response?.statusCode,
