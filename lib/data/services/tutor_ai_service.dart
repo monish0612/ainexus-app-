@@ -340,7 +340,11 @@ class TutorAiService {
           '[mode=$resolvedMode, provider=$resolvedProvider]');
       return ArticleFollowUpResponse.fromJson(data);
     } catch (e) {
-      TLog.e('TutorAI', 'Article follow-up failed', error: e);
+      if (e is DioException && e.response?.statusCode == 429) {
+        TLog.w('TutorAI', 'Article follow-up failed (HTTP 429)');
+      } else {
+        TLog.e('TutorAI', 'Article follow-up failed', error: e);
+      }
       rethrow;
     }
   }

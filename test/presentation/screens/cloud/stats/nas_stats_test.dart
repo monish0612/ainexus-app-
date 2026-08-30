@@ -307,6 +307,8 @@ Future<_FakeStatsService> _pump(
   Widget screen, {
   required NasStatsEnvelope Function(int call) responses,
   Object? throwThis,
+  StatsHistoryEnvelope Function(StatsHistoryRange range, StatMetric metric)?
+      history,
   Size size = const Size(320, 2400),
   double textScale = 1.0,
   bool white = false,
@@ -319,7 +321,9 @@ Future<_FakeStatsService> _pump(
     tester.view.resetDevicePixelRatio();
   });
 
-  final fake = _FakeStatsService(responses)..throwThis = throwThis;
+  final fake = _FakeStatsService(responses)
+    ..throwThis = throwThis
+    ..history = history;
 
   await tester.pumpWidget(
     ProviderScope(
@@ -949,6 +953,68 @@ void main() {
       expect(find.byType(StatDetailScreen), findsOneWidget);
       expect(find.text('VPS CPU'), findsWidgets);
       expect(find.byType(HistoryRangeSwitch), findsOneWidget);
+    });
+
+    testWidgets('30D history shows calendar-day ticks on the enlarged NAS chart', (t) async {
+      final origin = DateTime.utc(2026, 8, 1);
+      final pts = [
+        for (var i = 0; i < 8; i++)
+          StatsHistoryPoint(
+            at: origin.add(Duration(days: i * 4)),
+            value: 10 + i.toDouble(),
+          ),
+      ];
+      await _pump(
+        t,
+        const NasStatsScreen(),
+        responses: (_) => _online(),
+        size: const Size(400, 2400),
+        history: (range, metric) => StatsHistoryEnvelope(
+          range: range,
+          nasOnline: true,
+          nas: pts,
+          vps: pts,
+        ),
+      );
+
+      await t.tap(find.byKey(const ValueKey('nas-cpu')));
+      await t.pump();
+      await t.pump(const Duration(milliseconds: 400));
+      await t.tap(find.text('30D'));
+      await t.pump();
+      await t.pump(const Duration(milliseconds: 50));
+      expect(find.textContaining('Aug'), findsWidgets);
+    });
+
+    testWidgets('30D history shows calendar-day ticks on the enlarged VPS chart', (t) async {
+      final origin = DateTime.utc(2026, 8, 1);
+      final pts = [
+        for (var i = 0; i < 8; i++)
+          StatsHistoryPoint(
+            at: origin.add(Duration(days: i * 4)),
+            value: 10 + i.toDouble(),
+          ),
+      ];
+      await _pump(
+        t,
+        const VpsStatsScreen(),
+        responses: (_) => _online(),
+        size: const Size(400, 2400),
+        history: (range, metric) => StatsHistoryEnvelope(
+          range: range,
+          nasOnline: true,
+          nas: pts,
+          vps: pts,
+        ),
+      );
+
+      await t.tap(find.byKey(const ValueKey('vps-cpu')));
+      await t.pump();
+      await t.pump(const Duration(milliseconds: 400));
+      await t.tap(find.text('30D'));
+      await t.pump();
+      await t.pump(const Duration(milliseconds: 50));
+      expect(find.textContaining('Aug'), findsWidgets);
     });
 
     testWidgets('a transport failure reports it as unreachable, not as "off"',

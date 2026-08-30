@@ -64,6 +64,24 @@ void main() {
       expect(err.status, 500);
     });
 
+    test('HTTP 429 with a string limiter body maps to RATE_LIMIT', () {
+      final dio = _buildDio(
+        status: 429,
+        body: {'error': 'Too many requests, please try again later'},
+      );
+      final err = AiError.fromDio(dio);
+      expect(err.code, 'RATE_LIMIT');
+      expect(err.status, 429);
+      expect(err.toastMessage, contains('rate limit'));
+    });
+
+    test('HTTP 429 with no envelope still maps to RATE_LIMIT', () {
+      final dio = _buildDio(status: 429, body: null);
+      final err = AiError.fromDio(dio);
+      expect(err.code, 'RATE_LIMIT');
+      expect(err.toastMessage, contains('rate limit'));
+    });
+
     test('RATE_LIMIT is retryable but NOT settings-actionable', () {
       final dio = _buildDio(
         status: 429,

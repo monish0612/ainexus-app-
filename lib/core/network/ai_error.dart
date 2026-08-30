@@ -186,9 +186,20 @@ class AiError {
         ? message
         : (fallbackMessage ?? 'Something went wrong');
 
+    // Express `{ error: "Too many requests..." }` is a string, not the
+    // Gemini envelope. HTTP 429 still means RATE_LIMIT so the toast and
+    // logs stay short instead of dumping DioException.
+    var resolvedCode = code;
+    if (status == 429 &&
+        (resolvedCode == null ||
+            resolvedCode == 'UNKNOWN' ||
+            resolvedCode == 'API')) {
+      resolvedCode = 'RATE_LIMIT';
+    }
+
     return AiError(
       userMessage: resolved,
-      code: code ?? 'UNKNOWN',
+      code: resolvedCode ?? 'UNKNOWN',
       provider: provider,
       model: model,
       status: status,

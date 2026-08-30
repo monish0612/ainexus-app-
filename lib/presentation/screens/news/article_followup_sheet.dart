@@ -14,6 +14,7 @@ import 'package:lucide_icons/lucide_icons.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/di/injection.dart';
+import '../../../core/network/ai_error.dart';
 import '../../../core/network/api_client.dart';
 import '../../../core/network/api_endpoints.dart';
 import '../../../core/platform/platform_capabilities.dart';
@@ -801,10 +802,17 @@ class ArticleFollowUpStore with WidgetsBindingObserver {
         );
         keepPending = true;
         TLog.w('FollowUp', 'Scheduled auto-retry on resume for $articleId');
-      } else if (_cache.containsKey(articleId)) {
-        TLog.e('FollowUp', 'Article follow-up failed', error: lastError);
+      } else if (lastError != null && _cache.containsKey(articleId)) {
+        final ai = AiError.fromAny(lastError!);
+        if (ai.status == 429 || ai.code == 'RATE_LIMIT') {
+          TLog.w('FollowUp', 'Article follow-up failed (HTTP 429)');
+        } else {
+          TLog.e('FollowUp', 'Article follow-up failed', error: lastError);
+        }
         aiMsg
-          ..text = 'Something went wrong. Please try again.'
+          ..text = ai.status == 429 || ai.code == 'RATE_LIMIT'
+              ? ai.toastMessage
+              : 'Something went wrong. Please try again.'
           ..isLoading = false
           ..isError = true;
       }

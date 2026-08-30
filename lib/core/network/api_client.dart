@@ -338,8 +338,10 @@ class _RetryInterceptor extends Interceptor {
 
     final status = err.response?.statusCode;
     if (status != null) {
+      // 429 is a budget the extra retries would spend. Gemini/Drive 429
+      // retry stays in those services; this interceptor must not amplify
+      // the global API limiter.
       return status == 408 ||
-          status == 429 ||
           status == 502 ||
           status == 503 ||
           status == 504;

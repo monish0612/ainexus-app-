@@ -3,8 +3,8 @@
 // We swap in a scripted HttpClientAdapter so no real network is touched, and
 // drive the exact retry/backoff/give-up behaviour:
 //   • retryable transient (connectionError) → retried then succeeds
-//   • retryable status (503 / 429) → retried then succeeds
-//   • non-retryable status (400 / 404) → NOT retried, error bubbles once
+//   • retryable status (503) → retried then succeeds
+//   • non-retryable status (400 / 404 / 429) → NOT retried, error bubbles once
 //   • persistent retryable failure → original + 3 retries (4 calls) then fails
 //
 // Backoff is real (500ms→1s→2s base) so the exhaustion test is a few seconds.
@@ -91,15 +91,18 @@ void main() {
     expect(adapter.calls, 2);
   });
 
-  test('retryable 429 (rate limit) → retried then succeeds', () async {
+  test('HTTP 429 is not retried — extra hits would spend the limiter budget',
+      () async {
     late _ScriptedAdapter adapter;
     final client = withScript(
       [const _Outcome.status(429), const _Outcome.status(200)],
       (a) => adapter = a,
     );
-    final resp = await client.get<dynamic>('/x');
-    expect(resp.statusCode, 200);
-    expect(adapter.calls, 2);
+    await expectLater(
+      client.get<dynamic>('/x'),
+      throwsA(isA<DioException>()),
+    );
+    expect(adapter.calls, 1, reason: '429 must not be retried by Dio');
   });
 
   test('non-retryable 400 → NOT retried, error bubbles after one call',
@@ -113,7 +116,7 @@ void main() {
       client.get<dynamic>('/x'),
       throwsA(isA<DioException>()),
     );
-    expect(adapter.calls, 1, reason: '4xx (except 408/429) is not retryable');
+    expect(adapter.calls, 1, reason: '4xx is not retryable');
   });
 
   test('non-retryable 404 → NOT retried', () async {

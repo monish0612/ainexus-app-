@@ -1,3 +1,4 @@
+import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -6,6 +7,7 @@ import '../../../../../core/theme/app_colors.dart';
 import '../nas_stats_controller.dart';
 import '../widgets/fluid_gauge.dart';
 import '../widgets/stats_chrome.dart';
+import 'chart_time.dart';
 import 'history_range_switch.dart';
 import 'live_sparkline.dart';
 import 'stat_metric.dart';
@@ -24,7 +26,8 @@ class StatDetailScreen extends ConsumerStatefulWidget {
 
 class _StatDetailScreenState extends ConsumerState<StatDetailScreen> {
   StatsHistoryRange _range = StatsHistoryRange.now;
-  StatsHistoryEnvelope? _history;
+  List<FlSpot> _historySpots = const [];
+  DateTime? _historyAxisOrigin;
   bool _loadingHistory = false;
   Object? _historyError;
   int _historyGen = 0;
@@ -37,9 +40,25 @@ class _StatDetailScreenState extends ConsumerState<StatDetailScreen> {
     if (old.metric == widget.metric) return;
     _historyGen++;
     _range = StatsHistoryRange.now;
-    _history = null;
+    _historySpots = const [];
+    _historyAxisOrigin = null;
     _historyError = null;
     _loadingHistory = false;
+  }
+
+  void _rememberHistory(StatsHistoryEnvelope env, {Object? error}) {
+    final samples = [
+      for (final p in env.seriesFor(_metric)) (at: p.at, value: p.value),
+    ];
+    _historyError = error;
+    _loadingHistory = false;
+    // Downsample once. The 1-second poll still rebuilds this screen for the
+    // gauge; recomputing 43k 30D points every tick is the hitch.
+    _historySpots = LiveSparkline.downsample(
+      LiveSparkline.spotsFrom(samples),
+      max: 360,
+    );
+    _historyAxisOrigin = firstDatedAt(samples);
   }
 
   Future<void> _loadHistory(StatsHistoryRange range) async {
@@ -64,17 +83,13 @@ class _StatDetailScreenState extends ConsumerState<StatDetailScreen> {
             metric: _metric,
           );
       if (!mounted || gen != _historyGen) return;
-      setState(() {
-        _history = env;
-        _loadingHistory = false;
-      });
+      setState(() => _rememberHistory(env));
     } catch (e) {
       if (!mounted || gen != _historyGen) return;
-      setState(() {
-        _history = StatsHistoryEnvelope.empty(range);
-        _historyError = e;
-        _loadingHistory = false;
-      });
+      setState(() => _rememberHistory(
+            StatsHistoryEnvelope.empty(range),
+            error: e,
+          ));
     }
   }
 
@@ -87,10 +102,12 @@ class _StatDetailScreenState extends ConsumerState<StatDetailScreen> {
 
     final spots = _range == StatsHistoryRange.now
         ? spotsForMetric(state.live, _metric)
-        : LiveSparkline.spotsFrom([
-            for (final p in _history?.seriesFor(_metric) ?? const <StatsHistoryPoint>[])
-              (at: p.at, value: p.value),
-          ]);
+        : (_loadingHistory ? const <FlSpot>[] : _historySpots);
+    final axisOrigin = _range == StatsHistoryRange.now
+        ? firstDatedAt([
+            for (final s in state.live) (at: s.at, value: s.valueOf(_metric)),
+          ])
+        : (_loadingHistory ? null : _historyAxisOrigin);
 
     final emptyLabel = switch (true) {
       _ when _range == StatsHistoryRange.now =>
@@ -147,6 +164,8 @@ class _StatDetailScreenState extends ConsumerState<StatDetailScreen> {
                     height: wide ? 280 : 220,
                     interactive: true,
                     emptyLabel: emptyLabel,
+                    range: _range,
+                    axisOrigin: axisOrigin,
                   ),
                 ),
                 const SizedBox(height: 12),
