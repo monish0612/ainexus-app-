@@ -77,6 +77,21 @@ void main() {
     });
   });
 
+  group('formatCompactRupee', () {
+    test('empty for zero, rupee for small, k and L for larger', () {
+      expect(formatCompactRupee(0), '');
+      expect(formatCompactRupee(219), '₹219');
+      expect(formatCompactRupee(1200), '₹1.2k');
+      expect(formatCompactRupee(12000), '₹12k');
+      expect(formatCompactRupee(120000), '₹1.2L');
+    });
+
+    test('never throws on degenerate numbers', () {
+      expect(() => formatCompactRupee(double.nan), returnsNormally);
+      expect(() => formatCompactRupee(double.infinity), returnsNormally);
+    });
+  });
+
   group('formatBytes', () {
     test('scales across units', () {
       expect(formatBytes(512), '512 B');

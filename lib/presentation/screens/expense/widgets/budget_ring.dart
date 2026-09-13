@@ -6,6 +6,7 @@ import 'package:google_fonts/google_fonts.dart';
 
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/utils/currency_formatter.dart';
+import '../../../../core/services/expense_pace_metrics.dart';
 import '../../settings/settings_controller.dart';
 
 class BudgetRing extends ConsumerWidget {
@@ -30,7 +31,7 @@ class BudgetRing extends ConsumerWidget {
     if (budget <= 0) return AppColors.accent;
     final pct = (spent / budget) * 100;
     if (pct >= 100) return _red;
-    if (pct >= 70) return _amber;
+    if (pct >= kBudgetAtRiskRatio * 100) return _amber;
     return _green;
   }
 
@@ -38,7 +39,7 @@ class BudgetRing extends ConsumerWidget {
     if (budget <= 0) return '';
     final pct = (spent / budget) * 100;
     if (pct >= 100) return 'OVER BUDGET';
-    if (pct >= 70) return 'AT RISK';
+    if (pct >= kBudgetAtRiskRatio * 100) return 'AT RISK';
     return 'ON TRACK';
   }
 

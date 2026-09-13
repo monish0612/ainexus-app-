@@ -2,9 +2,13 @@ import 'dart:math' as math;
 
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
+import '../../../../core/services/expense_pace_metrics.dart';
+import '../../../../core/services/expense_composition.dart';
+import '../../../../core/services/telegram_logger.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../../../domain/entities/expense_entities.dart';
@@ -26,9 +30,11 @@ class TrackerTab extends StatefulWidget {
     required this.onSetBudget,
     required this.onUpdateLearnings,
     required this.onEditExpense,
-    required this.onShowTrend,
+    this.onShowTrend,
     required this.onShowBudgetHistory,
     required this.onOpenTimeframe,
+    this.onOpenDay,
+    this.onOpenCategory,
   });
 
   final List<ExpenseData> expenses;
@@ -41,12 +47,22 @@ class TrackerTab extends StatefulWidget {
   final VoidCallback onSetBudget;
   final VoidCallback onUpdateLearnings;
   final void Function(ExpenseData expense) onEditExpense;
-  final VoidCallback onShowTrend;
+
+  /// Kept so existing call sites that still pass a trend callback compile.
+  /// Trend lives on Insights now; Tracker does not invoke this.
+  final VoidCallback? onShowTrend;
   final VoidCallback onShowBudgetHistory;
 
   /// Opens the full-screen drill-down for the spending-analysis period at
   /// [index] (0=Today, 1=7D, 2=1M, 3=6M, 4=All).
   final void Function(int index) onOpenTimeframe;
+
+  /// Opens the existing timeframe screen for a single calendar day
+  /// (heat-calendar tap). Does not open add-expense.
+  final void Function(DateTime day)? onOpenDay;
+
+  /// Pie / legend drill: same period as [onOpenTimeframe], filtered to [category].
+  final void Function(int index, String category)? onOpenCategory;
 
   @override
   State<TrackerTab> createState() => _TrackerTabState();
@@ -77,6 +93,13 @@ class _TrackerTabState extends State<TrackerTab> {
   }
 
   DateTime _parseDate(String raw) => safeParseDate(raw);
+
+  PaceTxn _toPace(ExpenseData e) => PaceTxn(
+        amount: e.amount.toDouble(),
+        category: e.category,
+        date: _parseDate(e.date),
+        description: e.description,
+      );
 
   /// Spending only — investments (wealth) and loan repayments (debt) are not
   /// expenses, so every total / chart / list on this tab is computed from this
@@ -143,8 +166,10 @@ class _TrackerTabState extends State<TrackerTab> {
     final isDark = colors.isDark;
     final hasBudget = budget > 0;
     final over = hasBudget && monthSpent > budget;
-    final pct = hasBudget ? (monthSpent / budget).clamp(0.0, 1.0) : 0.0;
-    final atRisk = hasBudget && !over && pct > 0.75;
+    final atRisk = ExpensePaceMetrics.isAtRisk(
+      spent: monthSpent,
+      budget: budget,
+    );
 
     if (!hasBudget) {
       return _BalanceCardTheme(
@@ -273,28 +298,28 @@ class _TrackerTabState extends State<TrackerTab> {
     if (top.pct > 40) {
       return '${top.category} takes up ${top.pct.round()}% of your spending. Consider a sub-limit.';
     }
-    if (hasBudget && budgetPct > 0.7) {
+    if (hasBudget && budgetPct >= kBudgetAtRiskRatio) {
       return 'You\'ve used ${(budgetPct * 100).round()}% of your budget. Slow down on ${top.category}!';
     }
     return 'Top category: ${top.category} at ${formatCurrency(top.total)}. You\'re doing well! 🎉';
   }
 
   List<_CategorySlice> _categorySlices(List<ExpenseData> scope) {
-    final total = _sumAmounts(scope);
     final map = <String, double>{};
     for (final e in scope) {
       map[e.category] = (map[e.category] ?? 0) + e.amount.toDouble();
     }
-    final entries = map.entries.toList()
-      ..sort((a, b) => b.value.compareTo(a.value));
-    return entries
-        .take(5)
+    return ExpenseComposition.pieSlices(map)
         .map(
           (e) => _CategorySlice(
-            category: e.key,
-            total: e.value,
-            pct: total > 0 ? (e.value / total) * 100 : 0,
-            color: AppColors.categoryColors[e.key] ?? const Color(0xFF818CF8),
+            category: e.category,
+            total: e.total,
+            pct: e.pct,
+            color: e.isOther
+                ? const Color(0xFF94A3B8)
+                : (AppColors.categoryColors[e.category] ??
+                    const Color(0xFF818CF8)),
+            isOther: e.isOther,
           ),
         )
         .toList();
@@ -372,15 +397,42 @@ class _TrackerTabState extends State<TrackerTab> {
     final txToday = todayExpenses.length;
     final todaySpent = _sumAmounts(todayExpenses);
 
-    final allTimeSlices = _categorySlices(_spend);
+    final monthSlices = _categorySlices(monthList);
     final tip = _smartTip(
       monthSpent: monthSpent,
       budget: widget.budget,
-      allTimeTop: allTimeSlices,
+      allTimeTop: monthSlices,
     );
 
     final recent = _mostRecentTransactions();
     final totalTxns = _spend.length;
+
+    final pace = ExpensePaceMetrics.monthPace(
+      budget: widget.budget,
+      monthSpent: monthSpent,
+      today: now,
+    );
+    final heatDays = ExpensePaceMetrics.heatMonth(
+      expenses: _spend.map(_toPace),
+      month: now,
+      today: now,
+    );
+    ExpenseComposition? composition;
+    try {
+      composition = ExpenseComposition.ofMonth(
+        txns: widget.expenses.map(
+          (e) => CompositionTxn(
+            amount: e.amount.toDouble(),
+            category: e.category,
+            cardType: e.cardType,
+            date: _parseDate(e.date),
+          ),
+        ),
+        now: now,
+      );
+    } catch (e) {
+      TLog.w('Tracker', 'composition failed (non-fatal)', error: e);
+    }
 
     return SingleChildScrollView(
       padding: const EdgeInsets.only(bottom: 120),
@@ -401,14 +453,44 @@ class _TrackerTabState extends State<TrackerTab> {
               historyCount: widget.budgetHistory.length,
               onSetBudget: widget.onSetBudget,
               onShowBudgetHistory: widget.onShowBudgetHistory,
+              expectedByNow: pace.hasBudget ? pace.expectedByNow : null,
+              safeDaily: pace.hasBudget ? pace.safeDaily : null,
+              todayFraction: pace.hasBudget ? pace.todayFraction : null,
             ),
           ),
+          if (pace.hasBudget) ...[
+            const SizedBox(height: 10),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: _PaceBanner(pace: pace, colors: colors),
+            ),
+          ],
           const SizedBox(height: 16),
           Center(
             child: BudgetRing(
               budget: widget.budget,
               spent: monthSpent,
               onSetBudget: widget.onSetBudget,
+            ),
+          ),
+          if (composition != null && composition.hasAny) ...[
+            const SizedBox(height: 14),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: _CompositionStrip(
+                colors: colors,
+                composition: composition,
+              ),
+            ),
+          ],
+          const SizedBox(height: 16),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: _HeatCalendar(
+              colors: colors,
+              days: heatDays,
+              now: now,
+              onOpenDay: widget.onOpenDay,
             ),
           ),
           const SizedBox(height: 16),
@@ -448,19 +530,15 @@ class _TrackerTabState extends State<TrackerTab> {
                     slices: slices,
                     spent: spent,
                     periodLabel: _analysisLabels[pageIndex],
+                    onOpenPeriod: () => widget.onOpenTimeframe(pageIndex),
+                    onOpenCategory: (cat) =>
+                        widget.onOpenCategory?.call(pageIndex, cat),
                   ),
                 );
               },
             ),
           ),
           const SizedBox(height: 12),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: _ExpenseTrendRow(
-              colors: colors,
-              onShowTrend: widget.onShowTrend,
-            ),
-          ),
           if (tip != null) ...[
             const SizedBox(height: 16),
             Padding(
@@ -518,12 +596,14 @@ class _CategorySlice {
     required this.total,
     required this.pct,
     required this.color,
+    this.isOther = false,
   });
 
   final String category;
   final double total;
   final double pct;
   final Color color;
+  final bool isOther;
 }
 
 class _TotalBalanceCard extends StatelessWidget {
@@ -539,6 +619,9 @@ class _TotalBalanceCard extends StatelessWidget {
     required this.historyCount,
     required this.onSetBudget,
     required this.onShowBudgetHistory,
+    this.expectedByNow,
+    this.safeDaily,
+    this.todayFraction,
   });
 
   final _BalanceCardTheme theme;
@@ -552,6 +635,9 @@ class _TotalBalanceCard extends StatelessWidget {
   final int historyCount;
   final VoidCallback onSetBudget;
   final VoidCallback onShowBudgetHistory;
+  final double? expectedByNow;
+  final double? safeDaily;
+  final double? todayFraction;
 
   @override
   Widget build(BuildContext context) {
@@ -749,16 +835,75 @@ class _TotalBalanceCard extends StatelessWidget {
             ),
             if (hasBudget) ...[
               const SizedBox(height: 12),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(4),
-                child: LinearProgressIndicator(
-                  value: barPct,
-                  minHeight: 4,
-                  backgroundColor: titleColor.withValues(alpha: 0.07),
-                  valueColor: AlwaysStoppedAnimation<Color>(
-                    theme.ringColor.withValues(alpha: 0.85),
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final frac = todayFraction ?? 0;
+                  final tickLeft = (constraints.maxWidth * frac)
+                      .clamp(0.0, math.max(0.0, constraints.maxWidth - 2))
+                      .toDouble();
+                  return SizedBox(
+                    height: 8,
+                    child: Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        Positioned(
+                          left: 0,
+                          right: 0,
+                          top: 2,
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(4),
+                            child: LinearProgressIndicator(
+                              value: barPct,
+                              minHeight: 4,
+                              backgroundColor:
+                                  titleColor.withValues(alpha: 0.07),
+                              valueColor: AlwaysStoppedAnimation<Color>(
+                                theme.ringColor.withValues(alpha: 0.85),
+                              ),
+                            ),
+                          ),
+                        ),
+                        Positioned(
+                          left: tickLeft,
+                          top: 0,
+                          child: Container(
+                            width: 2,
+                            height: 8,
+                            decoration: BoxDecoration(
+                              color: titleColor.withValues(alpha: 0.75),
+                              borderRadius: BorderRadius.circular(1),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ],
+            if (expectedByNow != null && safeDaily != null) ...[
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 12,
+                runSpacing: 4,
+                children: [
+                  Text(
+                    'Expected ${formatCurrency(expectedByNow!)}',
+                    style: GoogleFonts.plusJakartaSans(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: titleColor.withValues(alpha: 0.55),
+                    ),
                   ),
-                ),
+                  Text(
+                    'Safe ${formatCurrency(safeDaily!)}/day',
+                    style: GoogleFonts.plusJakartaSans(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: titleColor.withValues(alpha: 0.55),
+                    ),
+                  ),
+                ],
               ),
             ],
             const SizedBox(height: 12),
@@ -1075,12 +1220,16 @@ class _AnalysisPageBody extends StatefulWidget {
     required this.slices,
     required this.spent,
     required this.periodLabel,
+    required this.onOpenPeriod,
+    this.onOpenCategory,
   });
 
   final AppColors colors;
   final List<_CategorySlice> slices;
   final double spent;
   final String periodLabel;
+  final VoidCallback onOpenPeriod;
+  final void Function(String category)? onOpenCategory;
 
   @override
   State<_AnalysisPageBody> createState() => _AnalysisPageBodyState();
@@ -1088,6 +1237,34 @@ class _AnalysisPageBody extends StatefulWidget {
 
 class _AnalysisPageBodyState extends State<_AnalysisPageBody> {
   int _touchedIndex = -1;
+
+  @override
+  void didUpdateWidget(covariant _AnalysisPageBody oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final oldCats = oldWidget.slices.map((s) => s.category).join('|');
+    final newCats = widget.slices.map((s) => s.category).join('|');
+    if (oldCats != newCats) {
+      _touchedIndex = -1;
+    }
+  }
+
+  void _selectOrDrill(int idx) {
+    if (idx < 0 || idx >= widget.slices.length) return;
+    if (_touchedIndex == idx) {
+      _drill(widget.slices[idx]);
+      return;
+    }
+    setState(() => _touchedIndex = idx);
+  }
+
+  void _drill(_CategorySlice slice) {
+    HapticFeedback.selectionClick();
+    if (slice.isOther || widget.onOpenCategory == null) {
+      widget.onOpenPeriod();
+      return;
+    }
+    widget.onOpenCategory!(slice.category);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1141,8 +1318,12 @@ class _AnalysisPageBodyState extends State<_AnalysisPageBody> {
             children: [
               GestureDetector(
                 onTap: () {
-                  if (_touchedIndex != -1) {
-                    setState(() => _touchedIndex = -1);
+                  final slice =
+                      _touchedIndex >= 0 && _touchedIndex < slices.length
+                          ? slices[_touchedIndex]
+                          : null;
+                  if (slice != null) {
+                    _drill(slice);
                   }
                 },
                 child: SizedBox(
@@ -1156,19 +1337,11 @@ class _AnalysisPageBodyState extends State<_AnalysisPageBody> {
                           pieTouchData: PieTouchData(
                             touchCallback:
                                 (FlTouchEvent event, pieTouchResponse) {
-                              setState(() {
-                                if (!event.isInterestedForInteractions ||
-                                    pieTouchResponse == null ||
-                                    pieTouchResponse.touchedSection == null) {
-                                  _touchedIndex = -1;
-                                  return;
-                                }
-                                final idx = pieTouchResponse
-                                    .touchedSection!
-                                    .touchedSectionIndex;
-                                _touchedIndex =
-                                    _touchedIndex == idx ? -1 : idx;
-                              });
+                              if (event is! FlTapUpEvent) return;
+                              final idx = pieTouchResponse
+                                  ?.touchedSection?.touchedSectionIndex;
+                              if (idx == null || idx < 0) return;
+                              _selectOrDrill(idx);
                             },
                           ),
                           sectionsSpace: 3,
@@ -1289,12 +1462,7 @@ class _AnalysisPageBodyState extends State<_AnalysisPageBody> {
                   final emoji =
                       AppColors.categoryIcons[s.category] ?? '📦';
                   return GestureDetector(
-                    onTap: () {
-                      setState(() {
-                        _touchedIndex =
-                            _touchedIndex == i ? -1 : i;
-                      });
-                    },
+                    onTap: () => _selectOrDrill(i),
                     child: AnimatedContainer(
                       duration: const Duration(milliseconds: 200),
                       curve: Curves.easeOutCubic,
@@ -1366,49 +1534,115 @@ class _AnalysisPageBodyState extends State<_AnalysisPageBody> {
   }
 }
 
-class _ExpenseTrendRow extends StatelessWidget {
-  const _ExpenseTrendRow({
+class _CompositionStrip extends StatelessWidget {
+  const _CompositionStrip({
     required this.colors,
-    required this.onShowTrend,
+    required this.composition,
   });
 
   final AppColors colors;
-  final VoidCallback onShowTrend;
+  final ExpenseComposition composition;
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+    final mom = composition.momIndex;
+    Widget chip(String label, double amount, Color accent) {
+      return Expanded(
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(8, 10, 8, 10),
+          decoration: BoxDecoration(
+            color: colors.bg2,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: colors.border),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: GoogleFonts.plusJakartaSans(
+                  fontSize: 9,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.6,
+                  color: colors.text4,
+                ),
+              ),
+              const SizedBox(height: 4),
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  formatCurrency(amount),
+                  maxLines: 1,
+                  style: GoogleFonts.plusJakartaSans(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w800,
+                    color: accent,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text(
-          'Expense Trend',
-          style: GoogleFonts.plusJakartaSans(
-            fontSize: 16,
-            fontWeight: FontWeight.w700,
-            color: colors.text,
-          ),
+        Row(
+          children: [
+            chip('CASH', composition.cash, const Color(0xFF34D399)),
+            const SizedBox(width: 8),
+            chip('DEBIT', composition.debit, const Color(0xFF60A5FA)),
+            const SizedBox(width: 8),
+            chip('CREDIT', composition.credit, const Color(0xFFA78BFA)),
+          ],
         ),
-        TextButton.icon(
-          onPressed: onShowTrend,
-          icon: const Icon(
-            LucideIcons.chevronRight,
-            size: 14,
-            color: Color(0xFF818CF8),
+        if (composition.moved > 0 ||
+            mom != null ||
+            composition.completedMonthAverage != null) ...[
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 10,
+            runSpacing: 4,
+            children: [
+              if (composition.moved > 0)
+                Text(
+                  'Moved ${formatCurrency(composition.moved)} to wealth/debt',
+                  style: GoogleFonts.plusJakartaSans(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600,
+                    color: colors.text3,
+                  ),
+                ),
+              if (mom != null)
+                Text(
+                  'MoM ${mom.round()}',
+                  style: GoogleFonts.plusJakartaSans(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                    color: mom > 100
+                        ? const Color(0xFFF87171)
+                        : mom < 100
+                            ? const Color(0xFF34D399)
+                            : colors.text3,
+                  ),
+                ),
+              if (composition.completedMonthAverage != null)
+                Text(
+                  'Avg month ${formatCurrency(composition.completedMonthAverage!)}',
+                  style: GoogleFonts.plusJakartaSans(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600,
+                    color: colors.text3,
+                  ),
+                ),
+            ],
           ),
-          label: Text(
-            'Details',
-            style: GoogleFonts.plusJakartaSans(
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-              color: const Color(0xFF818CF8),
-            ),
-          ),
-          style: TextButton.styleFrom(
-            padding: EdgeInsets.zero,
-            minimumSize: Size.zero,
-            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-          ),
-        ),
+        ],
       ],
     );
   }
@@ -1716,5 +1950,348 @@ class _RecentTransactionsSection extends StatelessWidget {
         ],
       ],
     );
+  }
+}
+
+class _PaceBanner extends StatelessWidget {
+  const _PaceBanner({required this.pace, required this.colors});
+
+  final MonthPace pace;
+  final AppColors colors;
+
+  @override
+  Widget build(BuildContext context) {
+    final (label, color, copy) = switch (pace.status) {
+      PaceStatus.overPlan => (
+          'OVER PLAN',
+          const Color(0xFFEF4444),
+          '${formatCurrency(pace.monthSpent - pace.budget)} over the monthly budget',
+        ),
+      PaceStatus.aheadOfPace => (
+          'AHEAD OF PACE',
+          const Color(0xFFF59E0B),
+          '${formatCurrency(pace.monthSpent - pace.expectedByNow)} above expected-by-now',
+        ),
+      _ => (
+          'ON TRACK',
+          const Color(0xFF22C55E),
+          'Spending is in line with ${formatCurrency(pace.expectedByNow)} expected by now',
+        ),
+    };
+
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 240),
+      switchInCurve: Curves.easeOutCubic,
+      switchOutCurve: Curves.easeOutCubic,
+      child: Container(
+        key: ValueKey(pace.status),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: colors.isDark ? 0.16 : 0.10),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: color.withValues(alpha: 0.35)),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Container(
+                width: 8,
+                height: 8,
+                decoration:
+                    BoxDecoration(color: color, shape: BoxShape.circle),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Text(
+              label,
+              style: GoogleFonts.plusJakartaSans(
+                fontSize: 10,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 0.8,
+                color: color,
+                height: 1.5,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    copy,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.plusJakartaSans(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      height: 1.35,
+                      color: colors.text3,
+                    ),
+                  ),
+                  if (pace.remainingSentence.isNotEmpty) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      pace.remainingSentence,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.plusJakartaSans(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w600,
+                        height: 1.3,
+                        color: colors.text4,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _HeatCalendar extends StatelessWidget {
+  const _HeatCalendar({
+    required this.colors,
+    required this.days,
+    required this.now,
+    required this.onOpenDay,
+  });
+
+  final AppColors colors;
+  final List<HeatDay> days;
+  final DateTime now;
+  final void Function(DateTime day)? onOpenDay;
+
+  static const _dow = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+
+  @override
+  Widget build(BuildContext context) {
+    if (days.isEmpty) return const SizedBox.shrink();
+    final leading = DateTime(now.year, now.month, 1).weekday % 7;
+    final monthTitle =
+        '${_monthName(now.month)} ${now.year}';
+    const hot = Color(0xFFEF4444);
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 10),
+      decoration: BoxDecoration(
+        color: colors.bg2,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: colors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Heat · $monthTitle',
+                  style: GoogleFonts.plusJakartaSans(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w800,
+                    color: colors.text,
+                  ),
+                ),
+              ),
+              Text(
+                'Tap a day',
+                style: GoogleFonts.plusJakartaSans(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w600,
+                  color: colors.text4,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              for (final d in _dow)
+                Expanded(
+                  child: Center(
+                    child: Text(
+                      d,
+                      style: GoogleFonts.plusJakartaSans(
+                        fontSize: 9,
+                        fontWeight: FontWeight.w700,
+                        color: colors.text4,
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final cellW = (constraints.maxWidth - 18) / 7;
+              final cellH = math.min(math.max(cellW, 40.0), 46.0);
+              return GridView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: leading + days.length,
+                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 7,
+                  mainAxisSpacing: 3,
+                  crossAxisSpacing: 3,
+                  mainAxisExtent: cellH,
+                ),
+                itemBuilder: (context, i) {
+                  if (i < leading) {
+                    return const SizedBox.shrink();
+                  }
+                  final day = days[i - leading];
+                  final bg = day.isFuture
+                      ? colors.bg3.withValues(alpha: 0.45)
+                      : Color.lerp(
+                          colors.bg3,
+                          hot,
+                          day.intensity.clamp(0.0, 1.0),
+                        )!;
+                  final tappable = !day.isFuture && onOpenDay != null;
+                  final tip = day.isFuture
+                      ? 'Upcoming'
+                      : day.spent <= 0
+                          ? 'No spend'
+                          : formatCurrency(day.spent);
+                  return Tooltip(
+                    message: tip,
+                    child: Material(
+                      key: ValueKey('heat-day-${day.date.day}'),
+                      color: bg,
+                      borderRadius: BorderRadius.circular(8),
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(8),
+                        onTap: tappable
+                            ? () {
+                                HapticFeedback.selectionClick();
+                                onOpenDay!(day.date);
+                              }
+                            : null,
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 180),
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(8),
+                            border: day.isToday
+                                ? Border.all(
+                                    color: AppColors.accent,
+                                    width: 1.4,
+                                  )
+                                : null,
+                          ),
+                          child: SizedBox.expand(
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 1,
+                                vertical: 2,
+                              ),
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Text(
+                                    '${day.date.day}',
+                                    style: GoogleFonts.plusJakartaSans(
+                                      fontSize: 10,
+                                      fontWeight: day.isToday
+                                          ? FontWeight.w800
+                                          : FontWeight.w600,
+                                      height: 1.05,
+                                      color: day.isFuture
+                                          ? colors.text5
+                                          : day.intensity > 0.55
+                                              ? Colors.white
+                                              : colors.text,
+                                    ),
+                                  ),
+                                  if (!day.isFuture && day.spent > 0)
+                                    FittedBox(
+                                      fit: BoxFit.scaleDown,
+                                      child: Text(
+                                        formatCompactRupee(day.spent),
+                                        maxLines: 1,
+                                        style: GoogleFonts.plusJakartaSans(
+                                          fontSize: 8,
+                                          fontWeight: FontWeight.w700,
+                                          height: 1.05,
+                                          color: day.intensity > 0.55
+                                              ? Colors.white.withValues(
+                                                  alpha: 0.92,
+                                                )
+                                              : colors.text3,
+                                        ),
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              );
+            },
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Text(
+                'Less',
+                style: GoogleFonts.plusJakartaSans(
+                  fontSize: 9,
+                  fontWeight: FontWeight.w600,
+                  color: colors.text4,
+                ),
+              ),
+              const SizedBox(width: 6),
+              for (final t in const [0.0, 0.25, 0.5, 0.75, 1.0]) ...[
+                Container(
+                  width: 12,
+                  height: 8,
+                  margin: const EdgeInsets.only(right: 3),
+                  decoration: BoxDecoration(
+                    color: Color.lerp(colors.bg3, hot, t),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ],
+              Text(
+                'More',
+                style: GoogleFonts.plusJakartaSans(
+                  fontSize: 9,
+                  fontWeight: FontWeight.w600,
+                  color: colors.text4,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  static String _monthName(int month) {
+    const names = [
+      'January',
+      'February',
+      'March',
+      'April',
+      'May',
+      'June',
+      'July',
+      'August',
+      'September',
+      'October',
+      'November',
+      'December',
+    ];
+    return names[month - 1];
   }
 }

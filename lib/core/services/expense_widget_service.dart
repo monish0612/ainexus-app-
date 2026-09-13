@@ -66,10 +66,12 @@ class ExpenseWidgetService {
   }) {
     if (!PlatformCapabilities.canUseExpenseWidget) return;
     double amountSum = 0;
+    var catHash = 0;
     for (final e in expenses) {
       amountSum += e.amount;
+      catHash = Object.hash(catHash, e.id, e.category);
     }
-    final hash = Object.hash(expenses.length, monthBudget, amountSum);
+    final hash = Object.hash(expenses.length, monthBudget, amountSum, catHash);
     if (hash == _lastHash) return;
     _lastHash = hash;
 
@@ -151,6 +153,7 @@ class ExpenseWidgetService {
     final todayStart = DateTime(now.year, now.month, now.day);
     final tomorrowStart = todayStart.add(const Duration(days: 1));
     final monthStart = DateTime(now.year, now.month, 1);
+    final nextMonthStart = DateTime(now.year, now.month + 1, 1);
 
     double todayTotal = 0;
     int todayCount = 0;
@@ -163,7 +166,7 @@ class ExpenseWidgetService {
       final d = DateTime.tryParse(e.date);
       if (d == null) continue;
 
-      if (!d.isBefore(monthStart)) {
+      if (!d.isBefore(monthStart) && d.isBefore(nextMonthStart)) {
         monthSpent += e.amount;
         monthCount++;
         final cat = e.category.trim().isEmpty ? 'Others' : e.category.trim();

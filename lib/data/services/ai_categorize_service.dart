@@ -5,6 +5,7 @@ import '../../core/network/api_client.dart';
 import '../../core/network/api_endpoints.dart';
 import '../../core/services/telegram_logger.dart';
 import '../../domain/entities/expense_entities.dart';
+import 'expense_category_memory.dart';
 
 /// Single source of truth for keyword → category mapping.
 /// Used by both [AICategorizeService] and the add-expense modal's local
@@ -90,7 +91,7 @@ const Map<String, List<String>> keywordRules = {
     'protein', 'supplement', 'wellness', 'ayurveda',
   ],
   'Medical': [
-    'hospital', 'doctor', 'clinic', 'apollo', 'diagnostic', 'lab',
+    'medical', 'hospital', 'doctor', 'clinic', 'apollo', 'diagnostic', 'lab',
     'test', 'consultation', 'surgery', 'operation', 'x-ray', 'mri',
     'scan', 'blood test', 'checkup', 'emergency', 'ambulance',
     'specialist', 'icu',
@@ -105,6 +106,7 @@ const Map<String, List<String>> keywordRules = {
     'family', 'kids', 'children', 'baby', 'diaper', 'school fees',
     'daycare', 'parenting', 'toys', 'daughter', 'son', 'wife',
     'husband', 'parents', 'mother', 'father',
+    'firstcry', 'babyhug', 'hopscotch', 'mothercare', 'hamleys',
   ],
   'Friends': [
     'friends', 'party', 'treat', 'outing', 'hangout', 'reunion',
@@ -163,27 +165,15 @@ AICategoryResult categorizeLocal(
     );
   }
 
-  final tokens = tokenize(trimmed);
   final fullText = trimmed.toLowerCase();
 
-  final learnedVotes = <String, int>{};
-  final matchedTokens = <String>[];
-  for (final t in tokens) {
-    final cat = learnings[t];
-    if (cat != null) {
-      learnedVotes[cat] = (learnedVotes[cat] ?? 0) + 1;
-      matchedTokens.add(t);
-    }
-  }
-  if (learnedVotes.isNotEmpty) {
-    final top = learnedVotes.entries.toList()
-      ..sort((a, b) => b.value.compareTo(a.value));
-    final c = top.first.key;
+  final learned = ExpenseCategoryMemory.matchLearned(trimmed, learnings);
+  if (learned != null) {
     return AICategoryResult(
-      category: c,
+      category: learned.category,
       confidence: 'learned',
       reasoning:
-          'AI remembered your correction — keyword "${matchedTokens.first}" → $c',
+          'AI remembered your correction — keyword "${learned.key}" → ${learned.category}',
       score: 0.97,
     );
   }
@@ -260,15 +250,8 @@ class AICategorizeService {
     Map<String, String> learnings,
   ) {
     final updated = Map<String, String>.from(learnings);
-    final words = description
-        .toLowerCase()
-        .split(RegExp(r'[\s,\-_/]+'))
-        .where((w) => w.length > 2)
-        .toList();
-    for (final word in words) {
-      if (word.length > 3) {
-        updated[word] = category;
-      }
+    for (final word in ExpenseCategoryMemory.keysFor(description)) {
+      updated[word] = category;
     }
     return updated;
   }
@@ -315,26 +298,13 @@ class AICategorizeService {
     String trimmed,
     Map<String, String> learnings,
   ) {
-    final tokens = tokenize(trimmed);
-    final learnedVotes = <String, int>{};
-    final matchedLearningTokens = <String>[];
-    for (final token in tokens) {
-      final cat = learnings[token];
-      if (cat != null) {
-        learnedVotes[cat] = (learnedVotes[cat] ?? 0) + 1;
-        matchedLearningTokens.add(token);
-      }
-    }
-    if (learnedVotes.isEmpty) return null;
-
-    final top = learnedVotes.entries.toList()
-      ..sort((a, b) => b.value.compareTo(a.value));
-    final winner = top.first;
+    final learned = ExpenseCategoryMemory.matchLearned(trimmed, learnings);
+    if (learned == null) return null;
     return AICategoryResult(
-      category: winner.key,
+      category: learned.category,
       confidence: 'learned',
       reasoning:
-          'AI remembered your correction — keyword "${matchedLearningTokens.first}" → ${winner.key}',
+          'AI remembered your correction — keyword "${learned.key}" → ${learned.category}',
       score: 0.97,
     );
   }

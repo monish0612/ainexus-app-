@@ -158,16 +158,21 @@ void main() {
       expect(data.topCatColor, matches(r'^#[0-9A-F]{6}$'));
     });
 
-    test('top category considers the whole month, not just today', () {
-      final data = ExpenseWidgetService.computeWidgetData(
-        expenses: [
-          exp(amount: 900, date: '2026-06-05', category: 'Bills'), // earlier
-          exp(amount: 100, date: '2026-06-29', category: 'Food'), // today
-        ],
+    test('recategorizing a month of Others to Medical updates top category', () {
+      final before = ExpenseWidgetService.computeWidgetData(
+        expenses: [exp(amount: 200, date: '2026-06-29T09:00:00', category: 'Others')],
         now: now,
       );
-      expect(data.topCatName, 'Bills');
-      expect(data.topCatAmount, 900);
+      expect(before.topCatName, 'Others');
+
+      final after = ExpenseWidgetService.computeWidgetData(
+        expenses: [exp(amount: 200, date: '2026-06-29T09:00:00', category: 'Medical')],
+        now: now,
+      );
+      expect(after.topCatName, 'Medical');
+      expect(after.topCatAmount, 200);
+      expect(after.topCatEmoji, AppColors.categoryIcons['Medical']);
+      expect(after.todayTotal, 200);
     });
   });
 
@@ -183,6 +188,17 @@ void main() {
       );
       expect(data.monthSpent, 100);
       expect(data.todayTotal, 100);
+    });
+
+    test('next calendar month is excluded from this month', () {
+      final data = ExpenseWidgetService.computeWidgetData(
+        expenses: [
+          exp(amount: 100, date: '2026-06-29T09:00:00'),
+          exp(amount: 999, date: '2026-07-01T00:00:00'),
+        ],
+        now: now,
+      );
+      expect(data.monthSpent, 100);
     });
   });
 }

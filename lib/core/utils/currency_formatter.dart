@@ -40,6 +40,35 @@ String formatCurrency(num amount, {bool showDecimal = false}) {
   }
 }
 
+/// Compact rupee label for tight cells (heat calendar). Never throws.
+///
+/// 0 → `''`; under 1000 → `₹219`; 1k–99.9k → `₹1.2k`; 1L+ → `₹1.2L`.
+String formatCompactRupee(num amount) {
+  if (amount is double && (amount.isNaN || amount.isInfinite)) return '';
+  final abs = amount.abs();
+  if (abs <= 0) return '';
+  final sign = amount < 0 ? '-' : '';
+  try {
+    if (abs >= 100000) {
+      final lakh = abs / 100000;
+      final body = lakh >= 10
+          ? lakh.toStringAsFixed(0)
+          : lakh.toStringAsFixed(1).replaceFirst(RegExp(r'\.0$'), '');
+      return '$sign₹${body}L';
+    }
+    if (abs >= 1000) {
+      final k = abs / 1000;
+      final body = k >= 10
+          ? k.toStringAsFixed(0)
+          : k.toStringAsFixed(1).replaceFirst(RegExp(r'\.0$'), '');
+      return '$sign₹${body}k';
+    }
+    return '$sign₹${abs.round()}';
+  } catch (_) {
+    return '';
+  }
+}
+
 String formatDate(String dateStr) {
   final date = DateTime.tryParse(dateStr);
   if (date == null) return dateStr;

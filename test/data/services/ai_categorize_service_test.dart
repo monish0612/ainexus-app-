@@ -75,6 +75,10 @@ void main() {
       final r = categorizeLocal('grooming session', const {});
       expect(r.category, 'Personal');
     });
+
+    test('Sundaram Medical is Medical, not Health or Others', () {
+      expect(categorizeLocal('Sundaram Medical', const {}).category, 'Medical');
+    });
   });
 
   group('learnFromCorrection', () {
@@ -84,8 +88,8 @@ void main() {
       final updated =
           svc.learnFromCorrection('Tiffin from Mess', 'Food', const {});
       expect(updated['tiffin'], 'Food');
-      expect(updated['from'], 'Food');
       expect(updated['mess'], 'Food');
+      expect(updated.containsKey('from'), isFalse);
     });
 
     test('does not mutate the original map', () {

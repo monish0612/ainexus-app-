@@ -61,7 +61,13 @@ ExpenseData _e(String id, String desc, DateTime date) => ExpenseData(
       date: date.toIso8601String(),
     );
 
-Future<void> _pumpTracker(WidgetTester tester, List<ExpenseData> expenses) async {
+Future<void> _pumpTracker(
+  WidgetTester tester,
+  List<ExpenseData> expenses, {
+  double budget = 10000,
+  void Function(DateTime day)? onOpenDay,
+  void Function(int index, String category)? onOpenCategory,
+}) async {
   tester.view.physicalSize = const Size(400, 1600);
   tester.view.devicePixelRatio = 1.0;
   addTearDown(tester.view.resetPhysicalSize);
@@ -77,7 +83,7 @@ Future<void> _pumpTracker(WidgetTester tester, List<ExpenseData> expenses) async
       home: Scaffold(
         body: TrackerTab(
           expenses: expenses,
-          budget: 10000,
+          budget: budget,
           budgetHistory: const [],
           learnings: const {},
           onAddExpense: () {},
@@ -86,9 +92,10 @@ Future<void> _pumpTracker(WidgetTester tester, List<ExpenseData> expenses) async
           onSetBudget: () {},
           onUpdateLearnings: () {},
           onEditExpense: (_) {},
-          onShowTrend: () {},
           onShowBudgetHistory: () {},
           onOpenTimeframe: (_) {},
+          onOpenDay: onOpenDay,
+          onOpenCategory: onOpenCategory,
         ),
       ),
       ),
@@ -165,6 +172,62 @@ void main() {
     // spending transaction list, and the badge counts spend only.
     expect(find.text('Mutual Funds'), findsNothing);
     expect(find.text('1 txn'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('pace banner, heat calendar, and composition render without overflow',
+      (tester) async {
+    final now = DateTime.now();
+    await _pumpTracker(tester, [
+      _e('1', 'Coffee', now),
+      _e('2', 'Lunch', now.subtract(const Duration(days: 2))),
+    ]);
+
+    expect(find.text('ON TRACK'), findsWidgets);
+    expect(find.textContaining('Heat ·'), findsOneWidget);
+    expect(find.text('Tap a day'), findsOneWidget);
+    expect(find.text('Expense Trend'), findsNothing);
+    expect(find.text('Last 6 months'), findsNothing);
+    expect(find.text('CASH'), findsOneWidget);
+    expect(find.text('DEBIT'), findsOneWidget);
+    expect(find.text('CREDIT'), findsOneWidget);
+    expect(find.textContaining('Expected'), findsWidgets);
+    expect(find.textContaining('Safe'), findsWidgets);
+    expect(find.byKey(ValueKey('heat-day-${now.day}')), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('heat-day tap opens the existing day timeframe, not add-expense',
+      (tester) async {
+    final now = DateTime.now();
+    DateTime? opened;
+    await _pumpTracker(
+      tester,
+      [_e('1', 'Coffee', now)],
+      onOpenDay: (day) => opened = day,
+    );
+
+    await tester.tap(find.byKey(ValueKey('heat-day-${now.day}')));
+    await tester.pump();
+    expect(opened, isNotNull);
+    expect(opened!.year, now.year);
+    expect(opened!.month, now.month);
+    expect(opened!.day, now.day);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('pace banner is hidden when no monthly budget is set',
+      (tester) async {
+    final now = DateTime.now();
+    await _pumpTracker(
+      tester,
+      [_e('1', 'Coffee', now)],
+      budget: 0,
+    );
+    expect(find.text('ON TRACK'), findsNothing);
+    expect(find.text('OVER PLAN'), findsNothing);
+    expect(find.text('AHEAD OF PACE'), findsNothing);
+    expect(find.textContaining('Heat ·'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 }
