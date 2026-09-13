@@ -9,18 +9,31 @@ import 'package:intl/date_symbol_data_local.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'app.dart';
+import 'bubble/overlay/overlay_app.dart';
 import 'core/auth/app_token_store.dart';
 import 'core/auth/auth_service.dart';
 import 'core/di/injection.dart';
 import 'core/platform/platform_capabilities.dart';
 import 'core/router/app_router.dart';
+import 'core/network/api_client.dart';
 import 'core/services/expense_widget_service.dart';
 import 'core/services/hold_to_speak_service.dart';
 import 'core/services/news_summarize_fg_task.dart';
 import 'core/services/news_summarize_store.dart';
 import 'core/services/notification_service.dart';
 import 'core/services/telegram_logger.dart';
+import 'data/services/narration_api.dart';
+import 'data/services/narration_audio_handler.dart';
+import 'data/services/narration_completion_store.dart';
 import 'presentation/screens/settings/settings_controller.dart';
+
+/// Entry point for the floating rephrase bubble's own Flutter engine, launched
+/// by RephraseAccessibilityService. Declared here so native can use the plain
+/// two-argument DartEntrypoint("overlayMain").
+@pragma('vm:entry-point')
+void overlayMain() {
+  runBubbleOverlay();
+}
 
 void main() async {
   runZonedGuarded(
@@ -97,6 +110,10 @@ void main() async {
       // needs to. Safe to call before the engine renders;
       // FlutterForegroundTask.init just stashes options.
       initBackgroundForegroundTask();
+      await NarrationCompletionStore.instance.load(sharedPreferences);
+      if (PlatformCapabilities.canUseAudioService) {
+        unawaited(initNarrationAudio(NarrationApi(ApiClient())));
+      }
       TLog.d('Init', 'Auth + Router + ForegroundTask ready');
 
       runApp(
@@ -141,7 +158,8 @@ Future<void> _initNotifications() async {
           notificationPayloadStream.add(payload);
         } else if (payload == 'expense_tab' ||
             payload == 'news_tab' ||
-            payload == 'tutor_tab') {
+            payload == 'tutor_tab' ||
+            payload.startsWith('watch:')) {
           notificationPayloadStream.add(payload);
         }
       },

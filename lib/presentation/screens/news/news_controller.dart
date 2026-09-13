@@ -74,7 +74,8 @@ class NewsController extends StateNotifier<AsyncValue<List<Article>>> {
   }
 
   /// Permanently removes an article (local row + server delete + tombstone).
-  /// Used by the Saved-tab trash button and the Movies/General swipe-delete.
+  /// Used by the Saved-tab trash button and For You swipe-to-delete
+  /// (All, AI News, Finance, Movies, General).
   Future<void> deleteArticle(String id) {
     return _repository.deleteArticle(id);
   }

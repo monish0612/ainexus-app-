@@ -218,6 +218,8 @@ class _NewsSummaryPartView extends StatelessWidget {
       case _NewsSummaryPartKind.lede:
         return Text(
           part.text,
+          softWrap: true,
+          overflow: TextOverflow.clip,
           style: GoogleFonts.plusJakartaSans(
             fontSize: 17.5,
             height: 1.45,
@@ -229,6 +231,8 @@ class _NewsSummaryPartView extends StatelessWidget {
       case _NewsSummaryPartKind.body:
         return Text(
           part.text,
+          softWrap: true,
+          overflow: TextOverflow.clip,
           style: GoogleFonts.plusJakartaSans(
             fontSize: 15.5,
             height: 1.62,
@@ -300,6 +304,8 @@ class _NewsKeyFactsList extends StatelessWidget {
               Expanded(
                 child: Text(
                   bullets[i],
+                  softWrap: true,
+                  overflow: TextOverflow.clip,
                   style: GoogleFonts.plusJakartaSans(
                     fontSize: 14,
                     height: 1.5,

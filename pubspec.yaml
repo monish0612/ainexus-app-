@@ -1,7 +1,7 @@
 name: ai_nexus
 description: Nexus AI - Next Generation AI Finance Companion
 publish_to: 'none'
-version: 1.0.17+18
+version: 1.0.18+19
 
 environment:
   sdk: '>=3.4.0 <4.0.0'
@@ -60,6 +60,7 @@ dependencies:
   # Audio (for AI Coach voice)
   record: ^6.0.0
   just_audio: ^0.9.38
+  audio_service: ^0.18.15
   speech_to_text: ^7.0.0
   flutter_markdown: ^0.7.7+1
   url_launcher: ^6.3.2

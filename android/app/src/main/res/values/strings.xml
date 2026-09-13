@@ -27,4 +27,8 @@
     <!-- Expense Widget -->
     <string name="widget_expense_label">Nexus AI Expenses</string>
     <string name="widget_expense_desc">Live expense dashboard \u2014 today\'s spend, month total, top category, budget pace &amp; time progress</string>
+
+    <!-- Floating rephrase bubble (accessibility service) -->
+    <string name="bubble_service_label">Nexus AI Rephrase Bubble</string>
+    <string name="bubble_service_desc">Shows a rephrase bubble next to the text you type in any app and replaces it with the tone you pick. Reads on-screen text only to power rephrasing, and skips password fields.</string>
 </resources>

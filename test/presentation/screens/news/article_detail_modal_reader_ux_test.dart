@@ -315,10 +315,49 @@ void main() {
         ),
       );
 
+      await tester.scrollUntilVisible(
+        find.text('Listen to Article'),
+        300,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.pump();
+
       expect(find.text('On-device voice narration'), findsOneWidget);
       expect(find.text('On-device AI narration'), findsNothing);
       // Full-content articles narrate the article itself.
       expect(find.text('Listen to Article'), findsOneWidget);
+      await _drain(tester);
+    });
+
+    testWidgets('listen control sits below AI Summarize, not between title and body',
+        (tester) async {
+      await _pump(
+        tester,
+        size: const Size(390, 2400),
+        article: _article(
+          category: 'AI News',
+          isFullContent: true,
+          summaryMarkdown:
+              'Picture a support inbox for a bank. Every message needs a category.\n\nSecond paragraph of the original article body.',
+        ),
+      );
+      await tester.pump();
+
+      expect(find.text('AI Summarize'), findsOneWidget);
+      expect(find.text('Listen to Article'), findsOneWidget);
+
+      final titleY = tester
+          .getTopLeft(find.text('A reasonably sized article title for the reader'))
+          .dy;
+      final summarizeY = tester.getTopLeft(find.text('AI Summarize')).dy;
+      final listenY = tester.getTopLeft(find.text('Listen to Article')).dy;
+      expect(titleY, lessThan(summarizeY),
+          reason: 'Title must lead, then Summarize.');
+      expect(summarizeY, lessThan(listenY),
+          reason: 'Listen must not sit in the hero above the article.');
+      final originalY = tester.getTopLeft(find.text('Read Original Article')).dy;
+      expect(listenY, lessThan(originalY),
+          reason: 'Listen sits above the original-article link, after the body.');
       await _drain(tester);
     });
   });

@@ -21,8 +21,11 @@ import '../../widgets/image_zoom_viewer.dart';
 import '../../widgets/wave_visualizer.dart';
 import '../settings/settings_controller.dart';
 import 'article_followup_sheet.dart';
+import 'news_reader_text_scale.dart';
+import 'news_review_meta.dart';
 import 'news_screen.dart' show newsCategoryIcon;
 import 'widgets/news_summary_view.dart';
+import 'widgets/narration_listen_bar.dart';
 
 /// Which body the article detail is currently showing.
 enum _ArticleView { full, summary }
@@ -134,11 +137,13 @@ class ArticleDetailModal extends ConsumerStatefulWidget {
     required this.article,
     required this.onToggleSave,
     required this.onMarkRead,
+    this.queue = const <Article>[],
   });
 
   final Article article;
   final ValueChanged<bool> onToggleSave;
   final VoidCallback onMarkRead;
+  final List<Article> queue;
 
   @override
   ConsumerState<ArticleDetailModal> createState() => _ArticleDetailModalState();
@@ -412,14 +417,18 @@ class _ArticleDetailModalState extends ConsumerState<ArticleDetailModal> {
                   delegate: SliverChildListDelegate([
                     _MetaRow(article: widget.article, cat: cat, colors: colors),
                     const SizedBox(height: 16),
-                    Text(
-                      widget.article.title,
-                      style: GoogleFonts.plusJakartaSans(
-                        fontSize: 26,
-                        fontWeight: FontWeight.w800,
-                        height: 1.27,
-                        letterSpacing: -0.5,
-                        color: colors.text,
+                    ArticleReaderProse(
+                      child: Text(
+                        widget.article.title,
+                        softWrap: true,
+                        overflow: TextOverflow.clip,
+                        style: GoogleFonts.plusJakartaSans(
+                          fontSize: 26,
+                          fontWeight: FontWeight.w800,
+                          height: 1.27,
+                          letterSpacing: -0.5,
+                          color: colors.text,
+                        ),
                       ),
                     ),
                     // The standalone RSS excerpt used to live here. It is
@@ -431,14 +440,6 @@ class _ArticleDetailModalState extends ConsumerState<ArticleDetailModal> {
                     const SizedBox(height: 22),
                     Divider(height: 1, color: colors.border),
                     const SizedBox(height: 20),
-                    _TtsPlayerBar(
-                      ttsService: _tts,
-                      article: widget.article,
-                      accentColor: cat,
-                      colors: colors,
-                      isFullContent: _showFullContent,
-                    ),
-                    const SizedBox(height: 20),
                     if (_showFullContent) ...[
                       // Full-content articles render the original body in the
                       // interactive reader by default and offer AI
@@ -449,47 +450,71 @@ class _ArticleDetailModalState extends ConsumerState<ArticleDetailModal> {
                         hasSummary: _hasSummary,
                         cat: cat,
                         colors: colors,
+                        isMovie: widget.article.category == 'Movies',
                         onSummarize: _onSummarize,
                         onShowFull: _showFull,
                       ),
                       const SizedBox(height: 18),
-                      if (_view == _ArticleView.summary)
-                        _OnDemandSummarySection(
-                          summarizing: _summarizing,
-                          error: _summaryError,
-                          summary: _summaryText,
-                          cat: cat,
-                          colors: colors,
-                          onRetry: _onRetrySummarize,
-                        )
-                      else if (hasSummaryMarkdown)
-                        _SummaryMarkdown(
-                          summary: summaryMarkdown,
-                          cat: cat,
-                          colors: colors,
-                          isFullArticle: true,
-                        )
-                      else
-                        _BlockList(
-                          blocks: widget.article.blocks,
-                          cat: cat,
-                          colors: colors,
-                        ),
-                    ] else if (hasSummaryMarkdown)
-                      _SummaryMarkdown(
-                        summary: summaryMarkdown,
-                        cat: cat,
-                        colors: colors,
-                        isFullArticle: _isFullContentArticle(widget.article),
-                      )
-                    else if (isSummaryUnavailable)
-                      _SummaryUnavailableBanner(colors: colors, cat: cat)
-                    else
-                      _BlockList(
-                          blocks: widget.article.blocks,
-                          cat: cat,
-                          colors: colors),
+                      ArticleReaderProse(
+                        child: _view == _ArticleView.summary
+                            ? _OnDemandSummarySection(
+                                summarizing: _summarizing,
+                                error: _summaryError,
+                                summary: _summaryText,
+                                cat: cat,
+                                colors: colors,
+                                isMovie: widget.article.category == 'Movies',
+                                onRetry: _onRetrySummarize,
+                              )
+                            : hasSummaryMarkdown
+                                ? _SummaryMarkdown(
+                                    summary: summaryMarkdown,
+                                    cat: cat,
+                                    colors: colors,
+                                    isFullArticle: true,
+                                  )
+                                : _BlockList(
+                                    blocks: widget.article.blocks,
+                                    cat: cat,
+                                    colors: colors,
+                                  ),
+                      ),
+                    ] else
+                      ArticleReaderProse(
+                        child: hasSummaryMarkdown
+                            ? _SummaryMarkdown(
+                                summary: summaryMarkdown,
+                                cat: cat,
+                                colors: colors,
+                                isFullArticle:
+                                    _isFullContentArticle(widget.article),
+                              )
+                            : isSummaryUnavailable
+                                ? _SummaryUnavailableBanner(
+                                    colors: colors, cat: cat)
+                                : _BlockList(
+                                    blocks: widget.article.blocks,
+                                    cat: cat,
+                                    colors: colors),
+                      ),
                     const SizedBox(height: 32),
+                    NarrationListenBar(
+                      article: widget.article,
+                      ttsService: _tts,
+                      accentColor: cat,
+                      colors: colors,
+                      isFullContent: _showFullContent,
+                      queue: widget.queue,
+                      fallback: _TtsPlayerBar(
+                        ttsService: _tts,
+                        article: widget.article,
+                        accentColor: cat,
+                        colors: colors,
+                        isFullContent: _showFullContent,
+                        onDevice: false,
+                      ),
+                    ),
+                    const SizedBox(height: 20),
                     if (hasOriginalUrl)
                       GestureDetector(
                         onTap: _openOriginalLink,
@@ -550,6 +575,14 @@ class _ArticleDetailModalState extends ConsumerState<ArticleDetailModal> {
               ),
             ],
           ),
+          if (!_scrolled)
+            Positioned(
+              top: MediaQuery.paddingOf(context).top + 8,
+              right: 12,
+              child: const ArticleReaderTextSizeBar(
+                variant: ArticleReaderTextSizeVariant.onMedia,
+              ),
+            ),
           if (_scrolled)
             Positioned(
               top: 0,
@@ -560,20 +593,33 @@ class _ArticleDetailModalState extends ConsumerState<ArticleDetailModal> {
                 children: [
                   Container(
                     padding: EdgeInsets.fromLTRB(
-                        16, MediaQuery.paddingOf(context).top + 10, 16, 10),
+                        12, MediaQuery.paddingOf(context).top + 8, 8, 8),
                     decoration: BoxDecoration(
                       color: colors.headerBg.withValues(alpha: 0.94),
                     ),
-                    child: Text(
-                      widget.article.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      textAlign: TextAlign.center,
-                      style: GoogleFonts.plusJakartaSans(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w700,
-                        color: colors.text,
-                      ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            widget.article.title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            textAlign: TextAlign.start,
+                            style: GoogleFonts.plusJakartaSans(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w700,
+                              color: colors.text,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        const FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: ArticleReaderTextSizeBar(
+                            variant: ArticleReaderTextSizeVariant.onSurface,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                   // Reading-progress line: a faint full-width track with a
@@ -731,6 +777,8 @@ class _SummaryMarkdown extends StatelessWidget {
       child: MarkdownBody(
         data: summary,
         selectable: false,
+        shrinkWrap: true,
+        fitContent: false,
         sizedImageBuilder: (config) =>
             _MarkdownArticleImage(uri: config.uri, colors: colors),
         onTapLink: (text, href, title) async {
@@ -868,104 +916,8 @@ class _SummaryMarkdown extends StatelessWidget {
 // is different from the AI-summary articles in the rest of the app.
 // ─────────────────────────────────────────────────────────────────────────
 
-/// Parsed review meta block (Gizbot). Stable shape guaranteed by
-/// `buildReviewMetaMarkdown` on the backend:
-///
-///     **⭐ Rating: 4.8 / 5**
-///
-///     #### ✅ Pros
-///     - …
-///
-///     #### ❌ Cons
-///     - …
-///
-///     ---
-///
-/// We strip the block from the markdown body and render it as a rich,
-/// color-coded card above the prose for a much better mobile UX than
-/// raw bullets. When `_ReviewMeta.tryParse` returns null, the article
-/// has no structured meta and the body renders unchanged.
-@immutable
-class _ReviewMeta {
-  const _ReviewMeta({
-    required this.rating,
-    required this.pros,
-    required this.cons,
-    required this.bodyAfter,
-  });
-
-  final String rating; // raw, may include "/ 5" or just "4.8"
-  final List<String> pros;
-  final List<String> cons;
-
-  /// The markdown body with the meta block removed — what the standard
-  /// `MarkdownBody` should render below the card.
-  final String bodyAfter;
-
-  bool get isEmpty => rating.isEmpty && pros.isEmpty && cons.isEmpty;
-
-  static _ReviewMeta? tryParse(String markdown) {
-    // Detection sentinel — the literal phrase the backend emits as the
-    // FIRST line of the meta header. Anything else (regular article body,
-    // empty-content fallback prose, etc.) leaves the markdown untouched.
-    final ratingRx = RegExp(r'^\*\*⭐\s*Rating:\s*([^*]+?)\*\*');
-    final firstLine = markdown.trimLeft();
-    final m = ratingRx.firstMatch(firstLine);
-    if (m == null) return null;
-
-    // The meta block always ends with a standalone `---` on its own
-    // line, followed by a blank line, then the body. If we can't find
-    // that separator within the first ~1200 chars (the meta block is
-    // small by construction), give up to avoid mis-parsing — `---` is
-    // also used elsewhere as a section break.
-    final searchSlice = markdown.substring(0, markdown.length.clamp(0, 1500));
-    final sepRx = RegExp(r'\n\s*---\s*\n');
-    final sepMatch = sepRx.firstMatch(searchSlice);
-    if (sepMatch == null) return null;
-
-    final header = markdown.substring(0, sepMatch.start);
-    final bodyAfter = markdown.substring(sepMatch.end).trimLeft();
-
-    final rating = m.group(1)?.trim() ?? '';
-
-    List<String> collectAfterHeading(RegExp headingRx) {
-      final lines = header.split('\n');
-      final out = <String>[];
-      var inSection = false;
-      for (final raw in lines) {
-        final line = raw.trimRight();
-        if (headingRx.hasMatch(line)) {
-          inSection = true;
-          continue;
-        }
-        if (inSection) {
-          // A new heading at any level OR a blank-then-heading boundary
-          // closes the section. We treat any line starting with `####`
-          // (the level the backend uses) as a new section.
-          if (line.startsWith('#### ')) break;
-          final bullet = RegExp(r'^\s*[-*]\s+(.*)$').firstMatch(line);
-          if (bullet != null) {
-            final text = bullet.group(1)?.trim();
-            if (text != null && text.isNotEmpty) out.add(text);
-          }
-        }
-      }
-      return out;
-    }
-
-    final pros = collectAfterHeading(RegExp(r'^####\s*✅\s*Pros\b'));
-    final cons = collectAfterHeading(RegExp(r'^####\s*❌\s*Cons\b'));
-
-    final meta = _ReviewMeta(
-      rating: rating,
-      pros: pros,
-      cons: cons,
-      bodyAfter: bodyAfter,
-    );
-    if (meta.isEmpty) return null;
-    return meta;
-  }
-}
+/// Parsed review meta (Gizbot / Only Kollywood / TOI) — see [NewsReviewMeta].
+/// The block is stripped from markdown and rendered as [_ReviewMetaCard].
 
 // ---------------------------------------------------------------------------
 // On-demand AI summarize controls
@@ -984,6 +936,7 @@ class _SummarizeToggleBar extends StatelessWidget {
     required this.colors,
     required this.onSummarize,
     required this.onShowFull,
+    this.isMovie = false,
   });
 
   final _ArticleView view;
@@ -993,13 +946,19 @@ class _SummarizeToggleBar extends StatelessWidget {
   final AppColors colors;
   final VoidCallback onSummarize;
   final VoidCallback onShowFull;
+  final bool isMovie;
 
   @override
   Widget build(BuildContext context) {
     // First-run call-to-action: no summary exists yet and nothing is in
     // flight — show a single prominent "AI Summarize" button.
     if (!hasSummary && !summarizing) {
-      return _AiSummarizeCta(cat: cat, colors: colors, onTap: onSummarize);
+      return _AiSummarizeCta(
+        cat: cat,
+        colors: colors,
+        onTap: onSummarize,
+        isMovie: isMovie,
+      );
     }
 
     // Once a summary exists (or is generating), show a segmented toggle so
@@ -1046,11 +1005,13 @@ class _AiSummarizeCta extends StatelessWidget {
     required this.cat,
     required this.colors,
     required this.onTap,
+    this.isMovie = false,
   });
 
   final Color cat;
   final AppColors colors;
   final VoidCallback onTap;
+  final bool isMovie;
 
   @override
   Widget build(BuildContext context) {
@@ -1102,7 +1063,9 @@ class _AiSummarizeCta extends StatelessWidget {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      'Condense this article into a quick read',
+                      isMovie
+                          ? 'Critic take plus real audience buzz and ratings'
+                          : 'Condense this article into a quick read',
                       style: GoogleFonts.plusJakartaSans(
                         fontSize: 11,
                         color: Colors.white.withValues(alpha: 0.85),
@@ -1190,6 +1153,7 @@ class _OnDemandSummarySection extends StatelessWidget {
     required this.cat,
     required this.colors,
     required this.onRetry,
+    this.isMovie = false,
   });
 
   final bool summarizing;
@@ -1198,11 +1162,12 @@ class _OnDemandSummarySection extends StatelessWidget {
   final Color cat;
   final AppColors colors;
   final VoidCallback onRetry;
+  final bool isMovie;
 
   @override
   Widget build(BuildContext context) {
     if (summarizing) {
-      return _SummaryLoadingCard(cat: cat, colors: colors);
+      return _SummaryLoadingCard(cat: cat, colors: colors, isMovie: isMovie);
     }
     if (error != null) {
       return _SummaryErrorCard(
@@ -1233,10 +1198,15 @@ class _OnDemandSummarySection extends StatelessWidget {
 /// Purely cosmetic + self-contained (single [AnimationController] + one
 /// [Timer]); no extra packages.
 class _SummaryLoadingCard extends StatefulWidget {
-  const _SummaryLoadingCard({required this.cat, required this.colors});
+  const _SummaryLoadingCard({
+    required this.cat,
+    required this.colors,
+    this.isMovie = false,
+  });
 
   final Color cat;
   final AppColors colors;
+  final bool isMovie;
 
   @override
   State<_SummaryLoadingCard> createState() => _SummaryLoadingCardState();
@@ -1252,6 +1222,12 @@ class _SummaryLoadingCardState extends State<_SummaryLoadingCard>
     'Writing your summary…',
     'Polishing the highlights…',
   ];
+  static const _moviePhases = <String>[
+    'Reading the critic’s review…',
+    'Checking Twitter and audience ratings…',
+    'Comparing critic vs general viewers…',
+    'Writing your spoiler-safe brief…',
+  ];
 
   late final AnimationController _c;
   Timer? _phaseTimer;
@@ -1266,7 +1242,8 @@ class _SummaryLoadingCardState extends State<_SummaryLoadingCard>
     )..repeat();
     _phaseTimer = Timer.periodic(const Duration(milliseconds: 1900), (_) {
       if (!mounted) return;
-      setState(() => _phase = (_phase + 1) % _phases.length);
+      final phases = widget.isMovie ? _moviePhases : _phases;
+      setState(() => _phase = (_phase + 1) % phases.length);
     });
   }
 
@@ -1327,7 +1304,7 @@ class _SummaryLoadingCardState extends State<_SummaryLoadingCard>
                         ),
                       ),
                       child: Text(
-                        _phases[_phase],
+                        (widget.isMovie ? _moviePhases : _phases)[_phase],
                         key: ValueKey<int>(_phase),
                         style: GoogleFonts.plusJakartaSans(
                           fontSize: 12.5,
@@ -1536,7 +1513,7 @@ class _FullArticleBody extends StatelessWidget {
   Widget build(BuildContext context) {
     // If the article opens with a Gizbot review meta block, strip it out
     // and render it as a rich card above the prose.
-    final meta = _ReviewMeta.tryParse(markdown);
+    final meta = NewsReviewMeta.tryParse(markdown);
     final effectiveMarkdown = meta?.bodyAfter ?? markdown;
 
     final styleSheet = MarkdownStyleSheet(
@@ -1635,6 +1612,8 @@ class _FullArticleBody extends StatelessWidget {
           child: MarkdownBody(
             data: effectiveMarkdown,
             selectable: false,
+            shrinkWrap: true,
+            fitContent: false,
             sizedImageBuilder: (config) =>
                 _MarkdownArticleImage(uri: config.uri, colors: colors),
             onTapLink: (text, href, title) async {
@@ -1673,7 +1652,7 @@ class _ReviewMetaCard extends StatelessWidget {
     required this.colors,
   });
 
-  final _ReviewMeta meta;
+  final NewsReviewMeta meta;
   final Color cat;
   final AppColors colors;
 
@@ -1768,6 +1747,36 @@ class _RatingPill extends StatelessWidget {
                 letterSpacing: -0.2,
               ),
             ),
+            Builder(
+              builder: (context) {
+                final score = NewsReviewMeta(
+                  rating: rating,
+                  pros: const [],
+                  cons: const [],
+                  bodyAfter: '',
+                ).score;
+                if (score == null) return const SizedBox.shrink();
+                return Padding(
+                  padding: const EdgeInsets.only(left: 8),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: List<Widget>.generate(5, (i) {
+                      final filled = score >= i + 1;
+                      final half = !filled && score >= i + 0.5;
+                      return Icon(
+                        filled
+                            ? Icons.star_rounded
+                            : half
+                                ? Icons.star_half_rounded
+                                : Icons.star_border_rounded,
+                        size: 14,
+                        color: _amber,
+                      );
+                    }),
+                  ),
+                );
+              },
+            ),
           ],
         ),
       ),
@@ -1859,30 +1868,36 @@ class _FullArticlePill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Align(
-      alignment: Alignment.centerLeft,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        decoration: BoxDecoration(
-          color: cat.withValues(alpha: 0.10),
-          borderRadius: BorderRadius.circular(999),
-          border: Border.all(color: cat.withValues(alpha: 0.22)),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(LucideIcons.bookOpen, size: 12, color: cat),
-            const SizedBox(width: 6),
-            Text(
-              'Original full article',
-              style: GoogleFonts.plusJakartaSans(
-                fontSize: 11,
-                fontWeight: FontWeight.w700,
-                color: cat,
-                letterSpacing: 0.2,
-              ),
+    return UnscaledReaderChrome(
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            color: cat.withValues(alpha: 0.10),
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(color: cat.withValues(alpha: 0.22)),
+          ),
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(LucideIcons.bookOpen, size: 12, color: cat),
+                const SizedBox(width: 6),
+                Text(
+                  'Original full article',
+                  style: GoogleFonts.plusJakartaSans(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: cat,
+                    letterSpacing: 0.2,
+                  ),
+                ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );
@@ -2057,34 +2072,40 @@ class _MetaRow extends StatelessWidget {
             ),
           ),
         ),
-        Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(LucideIcons.clock, size: 12, color: colors.text5),
-            const SizedBox(width: 4),
-            Text(
-              '${article.readTime} min',
-              style: GoogleFonts.plusJakartaSans(
-                fontSize: 12,
-                color: colors.text4,
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(LucideIcons.clock, size: 12, color: colors.text5),
+              const SizedBox(width: 4),
+              Text(
+                '${article.readTime} min',
+                style: GoogleFonts.plusJakartaSans(
+                  fontSize: 12,
+                  color: colors.text4,
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
         Text('·', style: TextStyle(color: colors.text5)),
-        Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(LucideIcons.calendar, size: 12, color: colors.text5),
-            const SizedBox(width: 4),
-            Text(
-              article.date,
-              style: GoogleFonts.plusJakartaSans(
-                fontSize: 12,
-                color: colors.text4,
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(LucideIcons.calendar, size: 12, color: colors.text5),
+              const SizedBox(width: 4),
+              Text(
+                article.date,
+                style: GoogleFonts.plusJakartaSans(
+                  fontSize: 12,
+                  color: colors.text4,
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ],
     );
@@ -2143,6 +2164,8 @@ class _BlockList extends StatelessWidget {
           padding: const EdgeInsets.only(bottom: 22),
           child: Text(
             b.content,
+            softWrap: true,
+            overflow: TextOverflow.clip,
             style: GoogleFonts.plusJakartaSans(
               fontSize: 15,
               height: 1.88,
@@ -2155,6 +2178,8 @@ class _BlockList extends StatelessWidget {
           padding: const EdgeInsets.only(top: 8, bottom: 12),
           child: Text(
             b.content,
+            softWrap: true,
+            overflow: TextOverflow.clip,
             style: GoogleFonts.plusJakartaSans(
               fontSize: 20,
               fontWeight: FontWeight.w800,
@@ -2178,6 +2203,8 @@ class _BlockList extends StatelessWidget {
                 children: [
                   Text(
                     '"${b.content}"',
+                    softWrap: true,
+                    overflow: TextOverflow.clip,
                     style: GoogleFonts.plusJakartaSans(
                       fontSize: 17,
                       fontStyle: FontStyle.italic,
@@ -2232,6 +2259,8 @@ class _StatCard extends StatelessWidget {
           Text(
             block.content,
             textAlign: TextAlign.center,
+            softWrap: true,
+            overflow: TextOverflow.clip,
             style: GoogleFonts.plusJakartaSans(
               fontSize: 22,
               fontWeight: FontWeight.w900,
@@ -2455,6 +2484,7 @@ class _TtsPlayerBar extends StatelessWidget {
     required this.accentColor,
     required this.colors,
     this.isFullContent = false,
+    this.onDevice = false,
   });
 
   final ArticleTtsService ttsService;
@@ -2465,6 +2495,7 @@ class _TtsPlayerBar extends StatelessWidget {
   /// When the article ships the full original body, the player narrates the
   /// article itself (not an AI summary), so the label reflects that.
   final bool isFullContent;
+  final bool onDevice;
 
   @override
   Widget build(BuildContext context) {
@@ -2526,7 +2557,9 @@ class _TtsPlayerBar extends StatelessWidget {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      'On-device voice narration',
+                      onDevice
+                          ? 'On-device voice'
+                          : 'On-device voice narration',
                       style: GoogleFonts.plusJakartaSans(
                         fontSize: 11,
                         color: colors.text4,

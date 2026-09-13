@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/theme/app_colors.dart';
 import '../../core/constants/app_constants.dart';
+import 'user_avatar.dart';
 
 class CompactHeader extends StatelessWidget {
   const CompactHeader({
@@ -11,6 +12,7 @@ class CompactHeader extends StatelessWidget {
     this.onActionTap,
     this.onAvatarTap,
     this.actionBadgeCount,
+    this.photoPath,
   });
 
   final String title;
@@ -19,6 +21,8 @@ class CompactHeader extends StatelessWidget {
   final VoidCallback? onAvatarTap;
   /// When non-null and > 0, shows a small red badge on the action icon.
   final int? actionBadgeCount;
+  /// Local JPEG path from Settings → profile photo. Null keeps the 😎 fallback.
+  final String? photoPath;
 
   @override
   Widget build(BuildContext context) {
@@ -35,30 +39,10 @@ class CompactHeader extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Row(
         children: [
-          GestureDetector(
+          UserAvatar(
+            size: 32,
+            photoPath: photoPath,
             onTap: onAvatarTap,
-            child: Container(
-              width: 32,
-              height: 32,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: const LinearGradient(
-                  colors: [AppColors.accent, AppColors.accentCyan],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-                border: Border.all(
-                  color: AppColors.accent.withValues(alpha: 0.3),
-                  width: 2,
-                ),
-              ),
-              child: const Center(
-                child: Text(
-                  '😎',
-                  style: TextStyle(fontSize: 16),
-                ),
-              ),
-            ),
           ),
           const Spacer(),
           Text(

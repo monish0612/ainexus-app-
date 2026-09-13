@@ -23,6 +23,10 @@ abstract final class ApiEndpoints {
   // AI
   static String get aiCategorize => '$_base/api/v1/ai/categorize';
   static String get aiRephrase => '$_base/api/v1/ai/rephrase';
+
+  /// Cheap TLS warmup target. The reverse proxy forwards `/nexusai/health`
+  /// to the API's `/health`. Body is ignored — we only want the handshake.
+  static String get health => '$_base/health';
   static String get aiCorrect => '$_base/api/v1/ai/correct';
   static String get aiDefine => '$_base/api/v1/ai/define';
   static String get aiSummarize => '$_base/api/v1/ai/summarize';
@@ -65,6 +69,15 @@ abstract final class ApiEndpoints {
   static String article(String id) => '$_base/api/v1/news/$id';
   static String articleSave(String id) => '$_base/api/v1/news/$id/save';
   static String articleRead(String id) => '$_base/api/v1/news/$id/read';
+
+  static String narrationStatus(String id) =>
+      '$_base/api/v1/narration/${Uri.encodeComponent(id)}';
+  static String narrationEnsure(String id) =>
+      '$_base/api/v1/narration/${Uri.encodeComponent(id)}/ensure';
+  static String narrationComplete(String id) =>
+      '$_base/api/v1/narration/${Uri.encodeComponent(id)}/complete';
+  static String narrationAudio(String id) =>
+      '$_base/api/v1/narration/${Uri.encodeComponent(id)}/audio';
 
   // Cloud
   static String get cloudFiles => '$_base/api/v1/cloud/files';
@@ -161,6 +174,9 @@ abstract final class ApiEndpoints {
   // AI Smart Parse (voice expense)
   static String get aiSmartParse => '$_base/api/v1/ai/smart-parse';
 
+  /// Last-resort Price Watch extract. Pins Settings `liteModel` (Gemini Flash).
+  static String get aiWatchExtract => '$_base/api/v1/ai/watch-extract';
+
   // AI Expense Query (natural-language → structured local query spec)
   static String get aiExpenseQuery => '$_base/api/v1/ai/expense-query';
 
@@ -178,6 +194,10 @@ abstract final class ApiEndpoints {
   static String get userPreferences => '$_base/api/v1/user-preferences';
   static String get userPreferencesBatch =>
       '$_base/api/v1/user-preferences/batch';
+
+  /// Rolling profile JPEG for the app login — shared by phone and web.
+  static String get profilePhoto => '$_base/api/v1/profile/photo';
+  static String get profilePhotoMeta => '$_base/api/v1/profile/photo/meta';
 
   // Sync
   static String get sync => '$_base/api/v1/sync';

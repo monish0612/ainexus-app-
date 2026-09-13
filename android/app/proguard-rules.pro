@@ -1,3 +1,5 @@
+-keep class app.ainexus.ai_nexus.sms.** { *; }
+-keep class com.ryanheise.** { *; }
 -keep class com.google.mlkit.vision.text.** { *; }
 -keep class com.google.mlkit.vision.text.chinese.** { *; }
 -keep class com.google.mlkit.vision.text.devanagari.** { *; }

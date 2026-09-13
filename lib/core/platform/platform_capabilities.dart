@@ -46,6 +46,9 @@ abstract final class PlatformCapabilities {
   /// Quick-tile / launcher shortcut bridge (Android only).
   static const bool canUseShortcuts = !kIsWeb;
 
+  /// SMS debit auto-log (`RECEIVE_SMS` BroadcastReceiver). Android only.
+  static const bool canUseSmsAutoExpense = !kIsWeb;
+
   /// Selection-toolbar `PROCESS_TEXT` intent + `ACTION_SEND` share intent
   /// (Android only).
   static const bool canUseProcessText = !kIsWeb;
@@ -54,6 +57,10 @@ abstract final class PlatformCapabilities {
   /// on web via the browser's SpeechSynthesis API; this flag specifically
   /// gates our **native** Android engine wrapper.
   static const bool canUseNativeTts = !kIsWeb;
+
+  /// `audio_service` mediaPlayback FGS (lock-screen / background narration).
+  /// Additive to [canUseForegroundTask]; do not reuse the dataSync FGS.
+  static const bool canUseAudioService = !kIsWeb;
 
   /// `flutter_tts` (browser SpeechSynthesis works, but quality varies). Kept
   /// enabled on web — individual screens can fall back to text-only display

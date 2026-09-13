@@ -13,7 +13,11 @@ class ProcessTextActivity : Activity() {
         val forward = Intent(this, MainActivity::class.java).apply {
             action = Intent.ACTION_PROCESS_TEXT
             putExtra(Intent.EXTRA_PROCESS_TEXT, text)
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            addFlags(
+                Intent.FLAG_ACTIVITY_NEW_TASK or
+                    Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                    Intent.FLAG_ACTIVITY_SINGLE_TOP,
+            )
         }
         startActivity(forward)
         finish()

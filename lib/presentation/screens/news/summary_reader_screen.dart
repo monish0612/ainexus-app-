@@ -156,6 +156,7 @@ class _SummaryReaderScreenState extends ConsumerState<SummaryReaderScreen> {
         fullscreenDialog: true,
         builder: (_) => ArticleDetailModal(
           article: article,
+          queue: _liveArticles(),
           onToggleSave: (_) {
             ref.read(newsControllerProvider.notifier).toggleSaved(raw.id);
           },

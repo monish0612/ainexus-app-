@@ -170,6 +170,26 @@ void main() {
       expect(find.text('Original full article'), findsNothing);
       await _drain(tester);
     });
+
+    testWidgets(
+        'Movies CTA promises critic + audience ratings, not a generic condense',
+        (tester) async {
+      final article = _article(
+        category: 'Movies',
+        isFullContent: true,
+        summaryMarkdown:
+            '**⭐ Rating: 3.75 / 5**\n\n---\n\nAfter Rocky, director Arun Matheswaran returns with DC.',
+      );
+      await _pumpDetail(tester, article: article);
+
+      expect(find.text('AI Summarize'), findsOneWidget);
+      expect(
+        find.text('Critic take plus real audience buzz and ratings'),
+        findsOneWidget,
+      );
+      expect(find.text('Condense this article into a quick read'), findsNothing);
+      await _drain(tester);
+    });
   });
 }
 

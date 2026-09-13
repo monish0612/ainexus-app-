@@ -14,7 +14,9 @@ import '../../../core/services/nuke_report.dart';
 import '../../../core/services/telegram_logger.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/utils/retry.dart';
+import '../../../data/services/narration_completion_store.dart';
 import '../../../domain/entities/news_entities.dart';
+import '../../providers/profile_photo_provider.dart';
 import '../../widgets/compact_header.dart';
 import '../../widgets/news_action_fab.dart';
 import '../../widgets/swipe_to_delete.dart';
@@ -24,6 +26,7 @@ import '../settings/settings_modal.dart';
 import 'article_detail_modal.dart';
 import 'article_followup_sheet.dart';
 import 'news_controller.dart';
+import 'news_review_meta.dart';
 import 'summary_reader_screen.dart';
 
 class _NewsNotif {
@@ -283,11 +286,13 @@ class _NewsScreenState extends ConsumerState<NewsScreen>
             raw;
     if (!mounted) return;
 
+    final feed = ref.read(newsControllerProvider).valueOrNull ?? const <Article>[];
     Navigator.of(context).push<void>(
       MaterialPageRoute<void>(
         fullscreenDialog: true,
         builder: (_) => ArticleDetailModal(
           article: article,
+          queue: feed,
           onToggleSave: (_) {
             ref.read(newsControllerProvider.notifier).toggleSaved(raw.id);
           },
@@ -336,7 +341,8 @@ class _NewsScreenState extends ConsumerState<NewsScreen>
     }
   }
 
-  /// Swipe-to-delete handler used by Movies/General list rows.
+  /// Swipe-to-delete handler used by every For You list row (All, AI
+  /// News, Finance, Movies, General).
   ///
   /// Semantics:
   ///   • The article is permanently removed — the local DB row is deleted
@@ -595,6 +601,7 @@ class _NewsScreenState extends ConsumerState<NewsScreen>
       children: [
         CompactHeader(
           title: 'News',
+          photoPath: ref.watch(profilePhotoPathProvider),
           actionIcon: LucideIcons.bell,
           actionBadgeCount:
               (!_notifSeen && unreadNotifCount > 0) ? unreadNotifCount : null,
@@ -646,6 +653,12 @@ class _NewsScreenState extends ConsumerState<NewsScreen>
                   color: colors.bg,
                   child: TabBarView(
                     controller: _tabCtrl,
+                    // Cards on every For You chip swipe-delete left or
+                    // right. If this view also pages horizontally, that
+                    // same gesture jumps to the Saved tab — the bug on
+                    // All / AI News / Finance. Switch tabs by tapping
+                    // For You or Saved only.
+                    physics: const NeverScrollableScrollPhysics(),
                     children: [
                       _ForYouTab(
                         colors: colors,
@@ -662,10 +675,8 @@ class _NewsScreenState extends ConsumerState<NewsScreen>
                         unreadCountInCategory: feed.length,
                         // Movies / General chips swap to the clearOnly FAB
                         // (single "Clear All" action, no Summarize, no
-                        // scope toggle) AND enable per-row swipe-delete.
-                        // Driven off `kNoSummarizeCategories` so the same
-                        // declarative set governs every place we treat
-                        // these feeds specially.
+                        // scope toggle). Swipe-to-delete is on EVERY For
+                        // You chip — All, AI News, Finance, Movies, General.
                         clearOnly:
                             kNoSummarizeCategories.contains(_category),
                         onSwipeDelete: _deleteArticle,
@@ -811,12 +822,14 @@ class _ForYouTab extends StatelessWidget {
   final VoidCallback onResumeSummary;
 
   /// `true` when the active chip is in `kNoSummarizeCategories` (Movies
-  /// or General). Drives both the FAB layout (clear-only mode) and the
-  /// per-row swipe-to-delete affordance.
+  /// or General). Drives the FAB layout (clear-only mode). Swipe-to-delete
+  /// is always on for For You rows, including All / AI News / Finance.
+  /// The parent TabBarView must NOT page on horizontal drag, otherwise
+  /// those swipes open the Saved tab instead of deleting.
   final bool clearOnly;
 
   /// Per-article delete handler — invoked from the swipe-to-delete
-  /// affordance on Movies/General rows. Hosted by the parent screen so
+  /// affordance on every For You row. Hosted by the parent screen so
   /// it can run with retry + Telegram logging + show snackbars.
   final ValueChanged<Article> onSwipeDelete;
 
@@ -843,23 +856,17 @@ class _ForYouTab extends StatelessWidget {
           if (featured != null) ...[
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
-              child: clearOnly
-                  ? SwipeToDelete(
-                      key: ValueKey<String>('swipe-featured-${featured!.id}'),
-                      onDelete: () => onSwipeDelete(featured!),
-                      borderRadius: 24,
-                      contentHeight: 280,
-                      child: _FeaturedCard(
-                        article: featured!,
-                        colors: colors,
-                        onTap: () => onOpen(featured!),
-                      ),
-                    )
-                  : _FeaturedCard(
-                      article: featured!,
-                      colors: colors,
-                      onTap: () => onOpen(featured!),
-                    ),
+              child: SwipeToDelete(
+                key: ValueKey<String>('swipe-featured-${featured!.id}'),
+                onDelete: () => onSwipeDelete(featured!),
+                borderRadius: 24,
+                contentHeight: 280,
+                child: _FeaturedCard(
+                  article: featured!,
+                  colors: colors,
+                  onTap: () => onOpen(featured!),
+                ),
+              ),
             ),
           ],
           SizedBox(
@@ -940,22 +947,15 @@ class _ForYouTab extends StatelessWidget {
               child: Column(
                 children: [
                   for (var i = 0; i < rest.length; i++)
-                    if (clearOnly)
-                      SwipeToDelete(
-                        key: ValueKey<String>('swipe-row-${rest[i].id}'),
-                        onDelete: () => onSwipeDelete(rest[i]),
-                        child: _NewsListCard(
-                          article: rest[i],
-                          colors: colors,
-                          onTap: () => onOpen(rest[i]),
-                        ),
-                      )
-                    else
-                      _NewsListCard(
+                    SwipeToDelete(
+                      key: ValueKey<String>('swipe-row-${rest[i].id}'),
+                      onDelete: () => onSwipeDelete(rest[i]),
+                      child: _NewsListCard(
                         article: rest[i],
                         colors: colors,
                         onTap: () => onOpen(rest[i]),
                       ),
+                    ),
                 ],
               ),
             ),
@@ -995,6 +995,7 @@ class _FeaturedCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cat = newsCategoryColor(article.category);
+    final rating = NewsReviewMeta.ratingLabelOf(article.summaryMarkdown);
 
     return Material(
       color: Colors.transparent,
@@ -1084,34 +1085,46 @@ class _FeaturedCard extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 10, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: cat.withValues(alpha: 0.2),
-                          borderRadius: BorderRadius.circular(999),
-                          border:
-                              Border.all(color: cat.withValues(alpha: 0.3)),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              newsCategoryIcon(article.category),
-                              size: 10,
-                              color: cat,
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 10, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: cat.withValues(alpha: 0.2),
+                              borderRadius: BorderRadius.circular(999),
+                              border:
+                                  Border.all(color: cat.withValues(alpha: 0.3)),
                             ),
-                            const SizedBox(width: 5),
-                            Text(
-                              article.category,
-                              style: GoogleFonts.plusJakartaSans(
-                                fontSize: 10,
-                                fontWeight: FontWeight.w700,
-                                color: cat,
-                              ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  newsCategoryIcon(article.category),
+                                  size: 10,
+                                  color: cat,
+                                ),
+                                const SizedBox(width: 5),
+                                Text(
+                                  article.category,
+                                  style: GoogleFonts.plusJakartaSans(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w700,
+                                    color: cat,
+                                  ),
+                                ),
+                              ],
                             ),
-                          ],
-                        ),
+                          ),
+                          if (rating != null)
+                            NewsRatingBadge(
+                              rating: rating,
+                              onDark: true,
+                            ),
+                        ],
                       ),
                       const SizedBox(height: 10),
                       Text(
@@ -1262,8 +1275,14 @@ class _NewsListCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cat = newsCategoryColor(article.category);
+    final rating = NewsReviewMeta.ratingLabelOf(article.summaryMarkdown);
 
-    return Material(
+    return ListenableBuilder(
+      listenable: NarrationCompletionStore.instance,
+      builder: (context, _) {
+        final done =
+            NarrationCompletionStore.instance.isCompleted(article.id);
+        return Material(
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
@@ -1337,6 +1356,26 @@ class _NewsListCard extends StatelessWidget {
                           ),
                         ),
                       ),
+                      if (rating != null)
+                        Positioned(
+                          left: 4,
+                          bottom: 4,
+                          child: NewsRatingBadge(
+                            rating: rating,
+                            onDark: true,
+                            compact: true,
+                          ),
+                        ),
+                      if (done)
+                        Positioned(
+                          right: 4,
+                          top: 4,
+                          child: Icon(
+                            LucideIcons.checkCircle2,
+                            size: 16,
+                            color: Colors.white,
+                          ),
+                        ),
                     ],
                   ),
                 ),
@@ -1353,7 +1392,9 @@ class _NewsListCard extends StatelessWidget {
                         fontWeight: FontWeight.w700,
                         height: 1.35,
                         letterSpacing: -0.1,
-                        color: colors.text,
+                        color: done
+                            ? colors.text.withValues(alpha: 0.5)
+                            : colors.text,
                       ),
                     ),
                     const SizedBox(height: 6),
@@ -1418,6 +1459,8 @@ class _NewsListCard extends StatelessWidget {
           ),
         ),
       ),
+    );
+      },
     );
   }
 }
