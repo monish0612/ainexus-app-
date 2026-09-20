@@ -77,6 +77,7 @@ void main() {
     expect(counts['Saved words'], 1);
     expect(counts['Learnings'], 1);
     expect(counts['News'], 0);
+    expect(counts['Watch'], 0);
   });
 
   test('wipeAllRows clears every table but preserves the schema', () async {

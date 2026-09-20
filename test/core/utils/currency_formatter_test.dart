@@ -39,6 +39,18 @@ void main() {
       );
     });
 
+    test('yesterday afternoon is Yesterday after midnight, not Today', () {
+      final now = DateTime(2026, 9, 17, 13, 29);
+      expect(
+        formatDate('2026-09-16T13:37:00', now: now),
+        'Yesterday',
+      );
+      expect(
+        formatDate('2026-09-17T08:00:00', now: now),
+        'Today',
+      );
+    });
+
     test('future date never renders a negative "-N days ago" (regression)', () {
       final future = DateTime.now().add(const Duration(days: 40));
       final label = formatDate(future.toIso8601String());
@@ -56,6 +68,17 @@ void main() {
 
     test('valid timestamp returns a non-empty time string', () {
       expect(formatTime('2024-03-15T13:05:00'), isNotEmpty);
+    });
+
+    test('UTC Z timestamps render in local time', () {
+      final utc = DateTime.utc(2026, 9, 13, 9, 44);
+      final label = formatTime(utc.toIso8601String());
+      expect(label, isNotEmpty);
+      final local = utc.toLocal();
+      expect(
+        label.toLowerCase(),
+        contains(local.minute.toString().padLeft(2, '0')),
+      );
     });
   });
 

@@ -1,3 +1,5 @@
+import '../../../core/utils/expense_logged_at.dart';
+
 /// Pure SMS auto-log decisions. Native + Dart both follow this so a
 /// notification tap, a second debit 15s later, and an end-of-day category
 /// edit cannot disagree.
@@ -79,17 +81,14 @@ class SmsIntakePolicy {
     return true;
   }
 
-  /// SMS calendar date for the expense row. Trust the bank day when it is
-  /// close to when the SMS arrived; otherwise use the phone's received day so
-  /// a dd/mm vs mm/dd misread cannot hide the row from Today.
-  static DateTime expenseDay(DateTime txn, DateTime received) {
-    final t = DateTime(txn.year, txn.month, txn.day);
-    final r = DateTime(received.year, received.month, received.day);
-    if ((t.difference(r).inDays).abs() > 1) {
-      return DateTime(r.year, r.month, r.day, 12);
-    }
-    return DateTime(t.year, t.month, t.day, 12);
-  }
+  /// SMS calendar day + logged clock for the expense row.
+  ///
+  /// Trust the bank day when it is close to when the SMS arrived; otherwise
+  /// use the phone's received day so a dd/mm vs mm/dd misread cannot hide
+  /// the row from Today. The clock is the bank time when present, otherwise
+  /// the SMS arrival time — never a dummy noon.
+  static DateTime expenseDay(DateTime txn, DateTime received) =>
+      smsExpenseLoggedAt(txn, received);
 
   static String expenseIdFor(String smsId) =>
       smsId.startsWith('sample-') ? smsId : 'sms-$smsId';

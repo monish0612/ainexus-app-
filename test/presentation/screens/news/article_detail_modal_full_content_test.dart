@@ -224,15 +224,21 @@ void main() {
       expect(find.text('Original full article'), findsNothing,
           reason:
               'AI-summarized articles must keep the existing compact dashboard styling.');
-      // The Finance article's markdown body still renders — text from
-      // `MarkdownBody` is rendered as RichText, so we assert by the
-      // presence of any RichText with the expected paragraph string.
+      // The Finance article's markdown body still renders — selectable
+      // markdown uses EditableText (plus RichText descendants).
       final richTexts = find.byType(RichText).evaluate().map((e) {
         final r = e.widget as RichText;
         return r.text.toPlainText();
       }).join(' || ');
-      expect(richTexts, contains('AI-generated summary content for the Finance piece'),
-          reason: 'Finance article body must render in the regular MarkdownBody path.');
+      final editableTexts = tester
+          .widgetList<EditableText>(find.byType(EditableText))
+          .map((e) => e.controller.text)
+          .join(' || ');
+      expect(
+        '$richTexts || $editableTexts',
+        contains('AI-generated summary content for the Finance piece'),
+        reason: 'Finance article body must render in the regular MarkdownBody path.',
+      );
       await _drain(tester);
     });
 

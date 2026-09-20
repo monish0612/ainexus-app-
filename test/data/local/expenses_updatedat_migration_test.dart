@@ -1,8 +1,8 @@
-// Verifies the v9 → v10 Drift migration that introduces `expenses.updated_at`.
+// Verifies the v9 → current Drift migration that introduces `expenses.updated_at`.
 //
 // We hand-build a v9-shaped database on disk (expenses table WITHOUT the
 // updated_at column, user_version = 9, with a seeded row), then open it through
-// the real [AppDatabase] (schemaVersion 10). Drift must run `onUpgrade` and
+// the real [AppDatabase]. Drift must run `onUpgrade` and
 // `ALTER TABLE expenses ADD COLUMN updated_at` — preserving the existing row
 // (with a NULL updatedAt) and accepting new writes that carry a timestamp.
 
@@ -64,15 +64,15 @@ void main() {
     raw.dispose();
   }
 
-  test('adds updated_at, preserves the legacy row, and is queryable at v10',
+  test('adds updated_at, preserves the legacy row, and is queryable at v12',
       () async {
     buildV9(file);
 
     final database = db.AppDatabase.forTesting(NativeDatabase(file));
     addTearDown(() async => database.close());
 
-    // Opening triggers onUpgrade(9 → 10). The legacy row must survive intact,
-    // with a NULL updatedAt (treated as "oldest" by the merge).
+    // Opening triggers onUpgrade(9 → current). The legacy row must survive
+    // intact, with a NULL updatedAt (treated as "oldest" by the merge).
     final legacy = await (database.select(database.expenses)
           ..where((t) => t.id.equals('legacy-1')))
         .getSingleOrNull();
@@ -102,8 +102,9 @@ void main() {
     expect(fresh, isNotNull);
     expect(fresh!.updatedAt, '2026-06-27T03:30:00.000Z');
 
-    // Schema is fully at v10.
-    expect(database.schemaVersion, 10);
+    // Schema is fully at the live version (v10 added updated_at; later
+    // versions only add watch tables and must still be reachable from v9).
+    expect(database.schemaVersion, 12);
   });
 
   test('updated_at column is exposed in the live PRAGMA after upgrade',

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../data/local/database/app_database.dart';
+import '../../data/services/profile_photo_service.dart';
 import '../network/api_client.dart';
 import '../network/api_endpoints.dart';
 import 'nuke_report.dart';
@@ -127,6 +128,7 @@ class ResetSyncService {
       );
       try {
         await _db.wipeAllRows();
+        await wipeLocalProfilePhoto();
       } catch (e, st) {
         TLog.e(_tag, 'Local full wipe (remote reset) failed', error: e, st: st);
         return false;
@@ -171,6 +173,14 @@ class ResetSyncService {
       await _db.delete(_db.expenseMonthlyCategory).go();
     });
     await _db.purgeSyncByType('salary');
+    await _db.purgeSyncByType('expense');
+  }
+
+  Future<void> wipeLocalProfilePhoto({bool pendingDelete = false}) {
+    return ProfilePhotoService.wipeLocalCache(
+      _prefs,
+      pendingDelete: pendingDelete,
+    );
   }
 
   Future<void> _retryPendingBumps() async {

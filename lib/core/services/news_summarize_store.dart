@@ -90,8 +90,13 @@ class NewsSummarizeStore extends ChangeNotifier with WidgetsBindingObserver {
 
   /// Max concurrent batches in flight. 4 keeps the backend comfortable while
   /// still letting a 200-article pile finish in ~30 seconds on a healthy
-  /// connection (200 / 10 / 4 ≈ 5 round-trips).
+  /// connection (200 / 10 / 4 ≈ 5 round-trips). Piles of 40+ bump to
+  /// [kMaxConcurrentLarge]; 80+ bump to [kMaxConcurrentHuge].
   static const int kMaxConcurrent = 4;
+  static const int kMaxConcurrentLarge = 6;
+  static const int kMaxConcurrentHuge = 8;
+  static const int kLargePileThreshold = 40;
+  static const int kHugePileThreshold = 80;
 
   /// Total attempts per batch (1 initial + 2 retries on transient errors).
   static const int kMaxAttempts = 3;
@@ -138,6 +143,7 @@ class NewsSummarizeStore extends ChangeNotifier with WidgetsBindingObserver {
 
   /// Concurrency semaphore (counter, no extra package needed).
   int _activeCount = 0;
+  int _maxConcurrent = kMaxConcurrent;
 
   /// True between [start] and the moment the last batch finishes / is
   /// cancelled. Reflects "there is non-trivial work happening / queued".
@@ -256,10 +262,16 @@ class NewsSummarizeStore extends ChangeNotifier with WidgetsBindingObserver {
     }
 
     final batches = _chunk(pending, kBatchSize);
+    _maxConcurrent = pending.length >= kHugePileThreshold
+        ? kMaxConcurrentHuge
+        : pending.length >= kLargePileThreshold
+            ? kMaxConcurrentLarge
+            : kMaxConcurrent;
     TLog.i('NewsSummarize',
         'start session#$mySession total=${articles.length} '
         'cached=${articles.length - pending.length} '
-        'pending=${pending.length} batches=${batches.length}');
+        'pending=${pending.length} batches=${batches.length} '
+        'concurrency=$_maxConcurrent');
 
     for (final batch in batches) {
       _retryQueue.add(batch);
@@ -429,7 +441,7 @@ class NewsSummarizeStore extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   void _drainQueue(int mySession) {
-    while (_activeCount < kMaxConcurrent && _retryQueue.isNotEmpty) {
+    while (_activeCount < _maxConcurrent && _retryQueue.isNotEmpty) {
       final batch = _retryQueue.removeFirst();
       _activeCount++;
       // Mark the batch's articles as loading so the UI swaps from skeleton
@@ -443,125 +455,126 @@ class NewsSummarizeStore extends ChangeNotifier with WidgetsBindingObserver {
     _maybeFinishSession();
   }
 
+  /// Hands the concurrency slot back and starts the next queued batch.
+  /// A superseded session must not touch the counter — [start] already
+  /// reset it for the new run.
+  void _releaseSlot(int mySession) {
+    if (mySession != _sessionId) return;
+    _activeCount = (_activeCount - 1).clamp(0, _maxConcurrent);
+    _drainQueue(mySession);
+  }
+
   Future<void> _runBatch(List<Article> batch, int mySession) async {
     final batchIndex = _nextBatchKey();
-    final service = _service;
-    final repository = _repository;
-    if (service == null || repository == null) {
-      _activeCount = (_activeCount - 1).clamp(0, kMaxConcurrent);
-      _maybeFinishSession();
-      return;
-    }
+    try {
+      final service = _service;
+      final repository = _repository;
+      if (service == null || repository == null) return;
 
-    final batchSw = Stopwatch()..start();
-    Object? lastError;
-    for (var attempt = 1; attempt <= kMaxAttempts; attempt++) {
-      if (mySession != _sessionId) {
-        TLog.d('NewsSummarize',
-            'batch #$batchIndex superseded (session#$mySession != #$_sessionId)');
-        _activeCount = (_activeCount - 1).clamp(0, kMaxConcurrent);
-        _maybeFinishSession();
-        return;
-      }
-
-      final token = CancelToken();
-      _activeTokens[batchIndex] = token;
-
-      try {
-        if (attempt > 1) {
-          // Exponential backoff: 500 ms → 1 s → 2 s. Fast enough to feel
-          // responsive in the UI, slow enough to dodge a brief upstream blip.
-          final delayMs = 500 * (1 << (attempt - 2));
-          await Future<void>.delayed(Duration(milliseconds: delayMs));
-          if (mySession != _sessionId) return;
-        }
-
-        final results = await service.summarizeBatch(
-          articles: batch,
-          liteModel: _liteModel,
-          cancelToken: token,
-        );
-
-        if (mySession != _sessionId) return;
-
-        // Persist + mark ready. Server guarantees every requested id is
-        // present, but we still defensively handle gaps.
-        var ready = 0;
-        var missing = 0;
-        for (final a in batch) {
-          final summary = results[a.id];
-          if (summary != null && summary.trim().isNotEmpty) {
-            _state[a.id] = SummaryArticleState.ready(summary);
-            unawaited(repository.setSummaryShort(a.id, summary));
-            ready++;
-          } else {
-            _state[a.id] = const SummaryArticleState.error(
-                'Could not generate summary');
-            missing++;
-          }
-        }
-        notifyListeners();
-        _maybeUpdateForegroundNotification();
-        batchSw.stop();
-        // Per-batch success log so the Telegram digest shows the
-        // distribution of batch sizes / latencies / partial misses in
-        // production. Throttled implicitly by batch count (~25 per 200
-        // articles), so well under the logger's queue cap.
-        TLog.i(
-          'NewsSummarize',
-          'batch #$batchIndex ✓ session#$mySession size=${batch.length} ready=$ready missing=$missing attempt=$attempt ${batchSw.elapsedMilliseconds}ms',
-        );
-        return;
-      } catch (e) {
-        lastError = e;
-
-        if (_isCancelled(e)) {
-          // Either the user closed the reader explicitly OR the lifecycle
-          // handler proactively cancelled because we resumed from a long
-          // background. In the latter case the resume handler has already
-          // re-queued this batch; in the former we drop quietly.
-          TLog.d(
-            'NewsSummarize',
-            'batch #$batchIndex cancelled mid-flight (session#$mySession attempt=$attempt) — dropping',
-          );
-          _activeCount = (_activeCount - 1).clamp(0, kMaxConcurrent);
-          _activeTokens.remove(batchIndex);
-          _maybeFinishSession();
+      final batchSw = Stopwatch()..start();
+      Object? lastError;
+      for (var attempt = 1; attempt <= kMaxAttempts; attempt++) {
+        if (mySession != _sessionId) {
+          TLog.d('NewsSummarize',
+              'batch #$batchIndex superseded (session#$mySession != #$_sessionId)');
           return;
         }
 
-        final retryable = _isRetryable(e);
-        TLog.w('NewsSummarize',
-            'batch #$batchIndex attempt $attempt/$kMaxAttempts failed (retryable=$retryable): ${e.toString().split('\n').first}',
-            error: e);
-        if (!retryable || attempt >= kMaxAttempts) break;
-      } finally {
-        _activeTokens.remove(batchIndex);
-      }
-    }
+        final token = CancelToken();
+        _activeTokens[batchIndex] = token;
 
-    // Final failure — surface error to every article in the batch with a
-    // friendly message; the UI exposes a tap-to-retry pill.
-    batchSw.stop();
-    final msg = _userFacingError(lastError);
-    // Error-level so this flushes to Telegram immediately. Includes the
-    // batch shape so on-call can correlate with backend `/summarize-articles-batch`
-    // logs from the same minute.
-    TLog.e(
-      'NewsSummarize',
-      'batch #$batchIndex ✗ session#$mySession size=${batch.length} attempts=$kMaxAttempts ${batchSw.elapsedMilliseconds}ms — surfacing "$msg" to UI',
-      error: lastError,
-    );
-    if (mySession == _sessionId) {
-      for (final a in batch) {
-        _state[a.id] = SummaryArticleState.error(msg);
-      }
-      notifyListeners();
-      _maybeUpdateForegroundNotification();
-    }
+        try {
+          if (attempt > 1) {
+            // Exponential backoff: 500 ms → 1 s → 2 s. Fast enough to feel
+            // responsive in the UI, slow enough to dodge a brief upstream blip.
+            final delayMs = 500 * (1 << (attempt - 2));
+            await Future<void>.delayed(Duration(milliseconds: delayMs));
+            if (mySession != _sessionId) return;
+          }
 
-    _activeCount = (_activeCount - 1).clamp(0, kMaxConcurrent);
-    _drainQueue(mySession);
+          final results = await service.summarizeBatch(
+            articles: batch,
+            liteModel: _liteModel,
+            cancelToken: token,
+          );
+
+          if (mySession != _sessionId) return;
+
+          // Persist + mark ready. Server guarantees every requested id is
+          // present, but we still defensively handle gaps.
+          var ready = 0;
+          var missing = 0;
+          for (final a in batch) {
+            final summary = results[a.id];
+            if (summary != null && summary.trim().isNotEmpty) {
+              _state[a.id] = SummaryArticleState.ready(summary);
+              unawaited(repository.setSummaryShort(a.id, summary));
+              ready++;
+            } else {
+              _state[a.id] = const SummaryArticleState.error(
+                  'Could not generate summary');
+              missing++;
+            }
+          }
+          notifyListeners();
+          _maybeUpdateForegroundNotification();
+          batchSw.stop();
+          // Per-batch success log so the Telegram digest shows the
+          // distribution of batch sizes / latencies / partial misses in
+          // production. Throttled implicitly by batch count (~25 per 200
+          // articles), so well under the logger's queue cap.
+          TLog.i(
+            'NewsSummarize',
+            'batch #$batchIndex ✓ session#$mySession size=${batch.length} ready=$ready missing=$missing attempt=$attempt ${batchSw.elapsedMilliseconds}ms',
+          );
+          return;
+        } catch (e) {
+          lastError = e;
+
+          if (_isCancelled(e)) {
+            // Either the user closed the reader explicitly OR the lifecycle
+            // handler proactively cancelled because we resumed from a long
+            // background. In the latter case the resume handler has already
+            // re-queued this batch; in the former we drop quietly.
+            TLog.d(
+              'NewsSummarize',
+              'batch #$batchIndex cancelled mid-flight (session#$mySession attempt=$attempt) — dropping',
+            );
+            return;
+          }
+
+          final retryable = _isRetryable(e);
+          TLog.w('NewsSummarize',
+              'batch #$batchIndex attempt $attempt/$kMaxAttempts failed (retryable=$retryable): ${e.toString().split('\n').first}',
+              error: e);
+          if (!retryable || attempt >= kMaxAttempts) break;
+        } finally {
+          _activeTokens.remove(batchIndex);
+        }
+      }
+
+      // Final failure — surface error to every article in the batch with a
+      // friendly message; the UI exposes a tap-to-retry pill.
+      batchSw.stop();
+      final msg = _userFacingError(lastError);
+      // Error-level so this flushes to Telegram immediately. Includes the
+      // batch shape so on-call can correlate with backend `/summarize-articles-batch`
+      // logs from the same minute.
+      TLog.e(
+        'NewsSummarize',
+        'batch #$batchIndex ✗ session#$mySession size=${batch.length} attempts=$kMaxAttempts ${batchSw.elapsedMilliseconds}ms — surfacing "$msg" to UI',
+        error: lastError,
+      );
+      if (mySession == _sessionId) {
+        for (final a in batch) {
+          _state[a.id] = SummaryArticleState.error(msg);
+        }
+        notifyListeners();
+        _maybeUpdateForegroundNotification();
+      }
+    } finally {
+      _releaseSlot(mySession);
+    }
   }
 
   void _cancelAllActive(String reason) {
@@ -774,7 +787,7 @@ class NewsSummarizeStore extends ChangeNotifier with WidgetsBindingObserver {
   Future<FlutterLocalNotificationsPlugin> _ensureFln() async {
     if (_flnPlugin != null) return _flnPlugin!;
     _flnPlugin = FlutterLocalNotificationsPlugin();
-    const android = AndroidInitializationSettings('@mipmap/ic_launcher');
+    const android = AndroidInitializationSettings('ic_notification');
     await _flnPlugin!
         .initialize(const InitializationSettings(android: android));
     return _flnPlugin!;
@@ -793,6 +806,7 @@ class NewsSummarizeStore extends ChangeNotifier with WidgetsBindingObserver {
         channelDescription: _kFlnChannelDesc,
         importance: Importance.high,
         priority: Priority.high,
+        icon: 'ic_notification',
         category: AndroidNotificationCategory.message,
         color: ui.Color(0xFF8B5CF6),
         ledColor: ui.Color(0xFF8B5CF6),

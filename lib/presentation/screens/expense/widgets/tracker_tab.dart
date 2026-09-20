@@ -11,9 +11,11 @@ import '../../../../core/services/expense_composition.dart';
 import '../../../../core/services/telegram_logger.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/utils/currency_formatter.dart';
+import '../../../../core/utils/expense_logged_at.dart';
 import '../../../../domain/entities/expense_entities.dart';
 import './budget_ring.dart';
 import './expense_item.dart';
+import './expense_merge_bar.dart';
 
 /// Main expense tracker view (aligned with [docs/figma_source/TrackerTab.tsx], with
 /// analysis periods Today / 7D / 1M / 6M / All per product spec).
@@ -35,6 +37,9 @@ class TrackerTab extends StatefulWidget {
     required this.onOpenTimeframe,
     this.onOpenDay,
     this.onOpenCategory,
+    this.onMergeExpenses,
+    this.onMergeSelectionChanged,
+    this.clock,
   });
 
   final List<ExpenseData> expenses;
@@ -61,8 +66,15 @@ class TrackerTab extends StatefulWidget {
   /// (heat-calendar tap). Does not open add-expense.
   final void Function(DateTime day)? onOpenDay;
 
-  /// Pie / legend drill: same period as [onOpenTimeframe], filtered to [category].
   final void Function(int index, String category)? onOpenCategory;
+
+  /// Long-press merge of two or more tracker rows. Null keeps the existing
+  /// swipe-only row (tests and older call sites).
+  final void Function(List<ExpenseData> selected)? onMergeExpenses;
+  final ValueChanged<int>? onMergeSelectionChanged;
+
+  /// Test hook. Production always uses the device clock via [DateTime.now].
+  final DateTime? clock;
 
   @override
   State<TrackerTab> createState() => _TrackerTabState();
@@ -78,18 +90,77 @@ class _TrackerTabState extends State<TrackerTab> {
   ];
 
   late final PageController _analysisPageController;
+  late final ScrollController _scrollCtrl;
   int _analysisIndex = 0;
   int _analysisDir = 1;
+  final Set<String> _selectedIds = <String>{};
+
+  bool get _selecting => _selectedIds.isNotEmpty;
   @override
   void initState() {
     super.initState();
     _analysisPageController = PageController(initialPage: _analysisIndex);
+    _scrollCtrl = ScrollController();
   }
 
   @override
   void dispose() {
     _analysisPageController.dispose();
+    _scrollCtrl.dispose();
     super.dispose();
+  }
+
+  @override
+  void didUpdateWidget(covariant TrackerTab oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (_selectedIds.isEmpty) return;
+    final live = widget.expenses.map((e) => e.id).toSet();
+    final next = _selectedIds.intersection(live);
+    if (next.length != _selectedIds.length) {
+      _selectedIds
+        ..clear()
+        ..addAll(next);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _emitSelection();
+      });
+    }
+  }
+
+  void _emitSelection() {
+    widget.onMergeSelectionChanged?.call(_selectedIds.length);
+  }
+
+  void _clearSelection() {
+    if (_selectedIds.isEmpty) return;
+    setState(_selectedIds.clear);
+    _emitSelection();
+  }
+
+  void _enterSelection(ExpenseData e) {
+    if (widget.onMergeExpenses == null) return;
+    setState(() {
+      _selectedIds.add(e.id);
+    });
+    _emitSelection();
+  }
+
+  void _toggleSelection(ExpenseData e) {
+    setState(() {
+      if (_selectedIds.contains(e.id)) {
+        _selectedIds.remove(e.id);
+      } else {
+        _selectedIds.add(e.id);
+      }
+    });
+    _emitSelection();
+  }
+
+  List<ExpenseData> _selectedExpenses() {
+    final byId = {for (final e in widget.expenses) e.id: e};
+    return _selectedIds
+        .map((id) => byId[id])
+        .whereType<ExpenseData>()
+        .toList(growable: false);
   }
 
   DateTime _parseDate(String raw) => safeParseDate(raw);
@@ -109,12 +180,8 @@ class _TrackerTabState extends State<TrackerTab> {
       .toList(growable: false);
 
   List<ExpenseData> _expensesInCurrentMonth(DateTime now) {
-    final start = DateTime(now.year, now.month, 1);
     return _spend.where((e) {
-      final d = _parseDate(e.date);
-      return !d.isBefore(start) &&
-          d.year == now.year &&
-          d.month == now.month;
+      return sameCalendarMonth(_parseDate(e.date), now);
     }).toList();
   }
 
@@ -142,7 +209,9 @@ class _TrackerTabState extends State<TrackerTab> {
     final nextMonthStart = DateTime(now.year, now.month + 1, 1);
     switch (index) {
       case 0:
-        return _inRange(DateTime(now.year, now.month, now.day), tomorrow);
+        return _spend
+            .where((e) => sameCalendarDay(_parseDate(e.date), now))
+            .toList();
       case 1:
         final start = DateTime(now.year, now.month, now.day)
             .subtract(const Duration(days: 6));
@@ -367,7 +436,7 @@ class _TrackerTabState extends State<TrackerTab> {
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).extension<AppColors>()!;
-    final now = DateTime.now();
+    final now = widget.clock ?? DateTime.now();
     final monthList = _expensesInCurrentMonth(now);
     final monthSpent = _sumAmounts(monthList);
     final cardTheme = _balanceCardTheme(
@@ -389,10 +458,8 @@ class _TrackerTabState extends State<TrackerTab> {
     for (final e in monthList) {
       highestMonth = math.max(highestMonth, e.amount.toDouble());
     }
-    final todayStart = DateTime(now.year, now.month, now.day);
     final todayExpenses = _spend
-        .where((e) => !_parseDate(e.date).isBefore(todayStart) &&
-            _parseDate(e.date).isBefore(todayStart.add(const Duration(days: 1))))
+        .where((e) => sameCalendarDay(_parseDate(e.date), now))
         .toList();
     final txToday = todayExpenses.length;
     final todaySpent = _sumAmounts(todayExpenses);
@@ -434,8 +501,10 @@ class _TrackerTabState extends State<TrackerTab> {
       TLog.w('Tracker', 'composition failed (non-fatal)', error: e);
     }
 
-    return SingleChildScrollView(
-      padding: const EdgeInsets.only(bottom: 120),
+    final scroll = SingleChildScrollView(
+      key: const ValueKey('tracker-main-scroll'),
+      controller: _scrollCtrl,
+      padding: EdgeInsets.only(bottom: _selecting ? 200 : 120),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -562,8 +631,42 @@ class _TrackerTabState extends State<TrackerTab> {
               onEdit: widget.onEditExpense,
               onDelete: widget.onDeleteExpense,
               onViewAll: () => widget.onOpenTimeframe(4),
+              now: now,
+              selectionMode: _selecting,
+              selectedIds: _selectedIds,
+              onLongPress: widget.onMergeExpenses == null
+                  ? null
+                  : _enterSelection,
+              onToggleSelect: _toggleSelection,
+              onExitSelection: widget.onMergeExpenses == null
+                  ? null
+                  : _clearSelection,
             ),
           ),
+        ],
+      ),
+    );
+
+    final selected = _selectedExpenses();
+    final total = selected.fold<double>(0, (s, e) => s + e.amount);
+    return ExpenseSelectionScope(
+      active: _selecting,
+      onCancel: _clearSelection,
+      child: Stack(
+        children: [
+          scroll,
+          if (_selecting)
+            Positioned(
+              left: 12,
+              right: 12,
+              bottom: 20,
+              child: ExpenseMergeActionBar(
+                selectedCount: selected.length,
+                total: total,
+                onMerge: () => widget.onMergeExpenses?.call(selected),
+                onCancel: _clearSelection,
+              ),
+            ),
         ],
       ),
     );
@@ -1744,6 +1847,12 @@ class _RecentTransactionsSection extends StatelessWidget {
     required this.onEdit,
     required this.onDelete,
     required this.onViewAll,
+    required this.now,
+    this.selectionMode = false,
+    this.selectedIds = const <String>{},
+    this.onLongPress,
+    this.onToggleSelect,
+    this.onExitSelection,
   });
 
   final AppColors colors;
@@ -1757,10 +1866,18 @@ class _RecentTransactionsSection extends StatelessWidget {
   final void Function(ExpenseData expense) onEdit;
   final void Function(String id) onDelete;
   final VoidCallback onViewAll;
+  final DateTime now;
+  final bool selectionMode;
+  final Set<String> selectedIds;
+  final void Function(ExpenseData expense)? onLongPress;
+  final void Function(ExpenseData expense)? onToggleSelect;
+  final VoidCallback? onExitSelection;
 
   /// Calendar-day grouping key so we render one date header per day.
-  String _dayKey(DateTime d) =>
-      '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+  String _dayKey(DateTime d) {
+    final l = expenseLocal(d);
+    return '${l.year}-${l.month.toString().padLeft(2, '0')}-${l.day.toString().padLeft(2, '0')}';
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1815,7 +1932,7 @@ class _RecentTransactionsSection extends StatelessWidget {
           Padding(
             padding: EdgeInsets.only(left: 4, top: lastKey == null ? 0 : 8, bottom: 6),
             child: Text(
-              formatRelativeTime(dt).toUpperCase(),
+              formatCalendarDayLabel(dt, now: now).toUpperCase(),
               style: GoogleFonts.plusJakartaSans(
                 fontSize: 9,
                 fontWeight: FontWeight.w700,
@@ -1831,9 +1948,17 @@ class _RecentTransactionsSection extends StatelessWidget {
         Padding(
           padding: const EdgeInsets.only(bottom: 8),
           child: ExpenseItem(
+            key: ValueKey('expense-row-${e.id}'),
             expense: e,
             onEdit: () => onEdit(e),
             onDelete: () => onDelete(e.id),
+            selectionMode: selectionMode,
+            selected: selectedIds.contains(e.id),
+            onLongPress:
+                onLongPress == null ? null : () => onLongPress!(e),
+            onToggleSelect:
+                onToggleSelect == null ? null : () => onToggleSelect!(e),
+            onExitSelection: onLongPress == null ? null : onExitSelection,
           ),
         ),
       );
@@ -1902,7 +2027,7 @@ class _RecentTransactionsSection extends StatelessWidget {
         Padding(
           padding: const EdgeInsets.only(left: 16),
           child: Text(
-            '← swipe to edit / delete',
+            '← ${selectionMode ? 'swipe back to exit · tap to select' : 'swipe to edit / delete'}',
             style: GoogleFonts.plusJakartaSans(
               fontSize: 9,
               color: colors.text5,

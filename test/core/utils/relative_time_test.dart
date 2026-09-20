@@ -13,13 +13,37 @@ void main() {
   });
 
   test('recent past uses relative phrasing', () {
-    final now = DateTime.now();
-    expect(formatRelativeTime(now.subtract(const Duration(seconds: 10))),
+    final now = DateTime(2026, 9, 17, 15, 0);
+    expect(formatRelativeTime(now.subtract(const Duration(seconds: 10)), now: now),
         'Just now');
-    expect(formatRelativeTime(now.subtract(const Duration(minutes: 5))),
+    expect(formatRelativeTime(now.subtract(const Duration(minutes: 5)), now: now),
         '5 min ago');
     expect(
-        formatRelativeTime(now.subtract(const Duration(hours: 3))), '3 hr ago');
+        formatRelativeTime(now.subtract(const Duration(hours: 3)), now: now),
+        '3 hr ago');
+  });
+
+  test('previous calendar day is Yesterday even within 24 hours', () {
+    final now = DateTime(2026, 9, 17, 13, 29);
+    final yesterdayAfternoon = DateTime(2026, 9, 16, 13, 37);
+    expect(formatRelativeTime(yesterdayAfternoon, now: now), 'Yesterday');
+    expect(formatCalendarDayLabel(yesterdayAfternoon, now: now), 'Yesterday');
+    expect(
+      formatCalendarDayLabel(DateTime(2026, 9, 17, 8, 0), now: now),
+      'Today',
+    );
+  });
+
+  test('same calendar day still uses hour-ago phrasing', () {
+    final now = DateTime(2026, 9, 17, 13, 29);
+    expect(
+      formatRelativeTime(DateTime(2026, 9, 17, 10, 29), now: now),
+      '3 hr ago',
+    );
+    expect(
+      formatCalendarDayLabel(DateTime(2026, 9, 17, 10, 29), now: now),
+      'Today',
+    );
   });
 
   test('yesterday and a few days ago', () {

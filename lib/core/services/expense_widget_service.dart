@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui' show Color;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -7,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../domain/entities/expense_entities.dart';
 import '../platform/platform_capabilities.dart';
 import '../theme/app_colors.dart';
+import '../utils/expense_logged_at.dart';
 import 'telegram_logger.dart';
 
 /// Pure, immutable snapshot of everything the native Expense widget renders.
@@ -23,6 +25,7 @@ class ExpenseWidgetData {
     required this.topCatEmoji,
     required this.topCatAmount,
     required this.topCatColor,
+    this.pieSlices = const [],
   });
 
   final double todayTotal;
@@ -33,6 +36,24 @@ class ExpenseWidgetData {
   final String topCatEmoji;
   final double topCatAmount;
   final String topCatColor;
+
+  /// Top month categories for the widget donut (max 4: three named + Other).
+  final List<ExpenseWidgetPieSlice> pieSlices;
+}
+
+@immutable
+class ExpenseWidgetPieSlice {
+  const ExpenseWidgetPieSlice({
+    required this.name,
+    required this.emoji,
+    required this.amount,
+    required this.color,
+  });
+
+  final String name;
+  final String emoji;
+  final double amount;
+  final String color;
 }
 
 /// Writes today's expense summary to SharedPreferences so the native
@@ -45,15 +66,15 @@ class ExpenseWidgetData {
 ///   3. [refreshOnAppStart] is called during app init so the widget gets
 ///      fresh data even if the user hasn't opened the expense tab yet.
 ///
-/// Retry strategy: [_triggerNativeRefreshWithRetry] tries up to 3 times with
-/// exponential backoff (500ms → 1s → 2s). This covers the startup race where
-/// the MethodChannel may not be ready yet.
+/// Retry strategy: [_triggerNativeRefreshWithRetry] tries up to 6 times with
+/// exponential backoff. This covers the audio_service startup race where
+/// Dart can run before MainActivity binds the MethodChannel.
 class ExpenseWidgetService {
   ExpenseWidgetService._();
   static final instance = ExpenseWidgetService._();
 
   static const _channel = MethodChannel('app.ainexus.ai_nexus/expense_widget');
-  static const _maxRetries = 3;
+  static const _maxRetries = 6;
 
   int _lastHash = 0;
   Timer? _debounce;
@@ -65,13 +86,11 @@ class ExpenseWidgetService {
     required double monthBudget,
   }) {
     if (!PlatformCapabilities.canUseExpenseWidget) return;
-    double amountSum = 0;
-    var catHash = 0;
-    for (final e in expenses) {
-      amountSum += e.amount;
-      catHash = Object.hash(catHash, e.id, e.category);
-    }
-    final hash = Object.hash(expenses.length, monthBudget, amountSum, catHash);
+    final hash = snapshotHash(
+      expenses: expenses,
+      monthBudget: monthBudget,
+      now: DateTime.now(),
+    );
     if (hash == _lastHash) return;
     _lastHash = hash;
 
@@ -79,6 +98,42 @@ class ExpenseWidgetService {
     _debounce = Timer(const Duration(milliseconds: 300), () {
       _doUpdate(expenses: expenses, monthBudget: monthBudget);
     });
+  }
+
+  /// Write the widget snapshot immediately (no debounce). Used after a local
+  /// add / edit / delete so the home-screen tile matches the DB even if no UI
+  /// listener is mounted (SMS auto-log, timeframe screen, background sync).
+  Future<void> pushNow({
+    required List<Expense> expenses,
+    required double monthBudget,
+  }) async {
+    if (!PlatformCapabilities.canUseExpenseWidget) return;
+    _lastHash = snapshotHash(
+      expenses: expenses,
+      monthBudget: monthBudget,
+      now: DateTime.now(),
+    );
+    _debounce?.cancel();
+    await _doUpdate(expenses: expenses, monthBudget: monthBudget);
+  }
+
+  /// Identity of everything the widget can show. Local calendar day is
+  /// included so midnight rolls "today" to ₹0 even when the expense list
+  /// itself did not change.
+  @visibleForTesting
+  static int snapshotHash({
+    required List<Expense> expenses,
+    required double monthBudget,
+    DateTime? now,
+  }) {
+    final n = now ?? DateTime.now();
+    final dayKey =
+        '${n.year.toString().padLeft(4, '0')}-${n.month.toString().padLeft(2, '0')}-${n.day.toString().padLeft(2, '0')}';
+    var h = Object.hash(expenses.length, monthBudget, dayKey);
+    for (final e in expenses) {
+      h = Object.hash(h, e.id, e.amount, e.category, e.date);
+    }
+    return h;
   }
 
   /// Lightweight startup call: if the stored date is stale, immediately
@@ -118,7 +173,8 @@ class ExpenseWidgetService {
           ..add(prefs.setString('expense_widget_top_cat_name', ''))
           ..add(prefs.setString('expense_widget_top_cat_emoji', ''))
           ..add(prefs.setString('expense_widget_top_cat_amount', '0.00'))
-          ..add(prefs.setString('expense_widget_top_cat_color', ''));
+          ..add(prefs.setString('expense_widget_top_cat_color', ''))
+          ..add(prefs.setString('expense_widget_pie', ''));
       }
 
       await Future.wait(writes);
@@ -141,7 +197,7 @@ class ExpenseWidgetService {
   /// Rules (mirror the in-app expense totals):
   ///  - Investments are excluded from every total (wealth-building, not spend).
   ///  - Rows with an unparseable [Expense.date] are skipped.
-  ///  - "Today" is `[todayStart, tomorrowStart)`; "month" is `>= monthStart`.
+  ///  - "Today" / "month" use the device local calendar day of each stamp.
   ///  - The top category is the single biggest month spend; ties keep the first
   ///    seen at the winning amount (a later equal amount does not replace it).
   ///  - A blank category is bucketed as `Others`.
@@ -150,11 +206,6 @@ class ExpenseWidgetService {
     required List<Expense> expenses,
     required DateTime now,
   }) {
-    final todayStart = DateTime(now.year, now.month, now.day);
-    final tomorrowStart = todayStart.add(const Duration(days: 1));
-    final monthStart = DateTime(now.year, now.month, 1);
-    final nextMonthStart = DateTime(now.year, now.month + 1, 1);
-
     double todayTotal = 0;
     int todayCount = 0;
     double monthSpent = 0;
@@ -163,16 +214,13 @@ class ExpenseWidgetService {
 
     for (final e in expenses) {
       if (isNonSpendCategory(e.category)) continue;
-      final d = DateTime.tryParse(e.date);
-      if (d == null) continue;
-
-      if (!d.isBefore(monthStart) && d.isBefore(nextMonthStart)) {
+      if (expenseIsoInLocalMonth(e.date, now)) {
         monthSpent += e.amount;
         monthCount++;
         final cat = e.category.trim().isEmpty ? 'Others' : e.category.trim();
         monthByCategory[cat] = (monthByCategory[cat] ?? 0) + e.amount;
       }
-      if (!d.isBefore(todayStart) && d.isBefore(tomorrowStart)) {
+      if (expenseIsoOnLocalDay(e.date, now)) {
         todayTotal += e.amount;
         todayCount++;
       }
@@ -202,8 +250,65 @@ class ExpenseWidgetService {
       topCatEmoji: topCatEmoji,
       topCatAmount: topCatAmount,
       topCatColor: topCatColor,
+      pieSlices: buildPieSlices(monthByCategory),
     );
   }
+
+  /// At most four donut slices: the three biggest categories, then Other.
+  /// Four or fewer categories are shown in full (no Other bucket).
+  @visibleForTesting
+  static List<ExpenseWidgetPieSlice> buildPieSlices(
+    Map<String, double> monthByCategory, {
+    int maxNamed = 3,
+    int maxSlices = 4,
+  }) {
+    final ranked = monthByCategory.entries
+        .where((e) => e.value.isFinite && e.value > 0)
+        .toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+    if (ranked.isEmpty) return const [];
+
+    final takeNamed =
+        ranked.length <= maxSlices ? ranked.length : maxNamed;
+    final slices = <ExpenseWidgetPieSlice>[];
+    for (var i = 0; i < takeNamed; i++) {
+      final e = ranked[i];
+      slices.add(ExpenseWidgetPieSlice(
+        name: e.key,
+        emoji: AppColors.categoryIcons[e.key] ?? '📦',
+        amount: e.value,
+        color: _hex(AppColors.categoryColors[e.key] ?? AppColors.categoryOthers),
+      ));
+    }
+    if (ranked.length > maxSlices) {
+      var rest = 0.0;
+      for (var i = takeNamed; i < ranked.length; i++) {
+        rest += ranked[i].value;
+      }
+      if (rest > 0) {
+        slices.add(ExpenseWidgetPieSlice(
+          name: 'Other',
+          emoji: AppColors.categoryIcons['Others'] ?? '📦',
+          amount: rest,
+          color: _hex(AppColors.categoryOthers),
+        ));
+      }
+    }
+    return slices;
+  }
+
+  /// Record-separator payload for the native donut (no JSON on the widget).
+  /// Fields are name / emoji / #RRGGBB / amount, joined with unit separator
+  /// `\u001f`; slices joined with record separator `\u001e`.
+  @visibleForTesting
+  static String encodePiePayload(List<ExpenseWidgetPieSlice> slices) {
+    return slices
+        .map((s) => '${_safePieField(s.name)}\u001f${_safePieField(s.emoji)}\u001f${_safePieField(s.color)}\u001f${s.amount.toStringAsFixed(2)}')
+        .join('\u001e');
+  }
+
+  static String _safePieField(String s) =>
+      s.replaceAll('\u001f', ' ').replaceAll('\u001e', ' ');
 
   Future<void> _doUpdate({
     required List<Expense> expenses,
@@ -223,6 +328,7 @@ class ExpenseWidgetService {
         prefs.setString('expense_widget_top_cat_emoji', data.topCatEmoji),
         prefs.setString('expense_widget_top_cat_amount', data.topCatAmount.toStringAsFixed(2)),
         prefs.setString('expense_widget_top_cat_color', data.topCatColor),
+        prefs.setString('expense_widget_pie', encodePiePayload(data.pieSlices)),
         prefs.setString('expense_widget_update_date', _todayDateString()),
       ]);
 
@@ -243,12 +349,22 @@ class ExpenseWidgetService {
         TLog.i('ExpWidget', 'Native refresh succeeded on attempt $attempt ($reason)');
       }
     }).catchError((Object e) {
-      if (attempt < _maxRetries) {
+      final startupRace = reason.startsWith('startup');
+      final shouldRetryMissingPlugin = e is MissingPluginException && startupRace;
+      if (attempt < _maxRetries && (shouldRetryMissingPlugin || e is! MissingPluginException)) {
         final delay = Duration(milliseconds: 500 * (1 << (attempt - 1)));
-        TLog.w('ExpWidget',
-            'Native refresh attempt $attempt/$_maxRetries failed ($reason), retry in ${delay.inMilliseconds}ms',
-            error: e);
+        TLog.d(
+          'ExpWidget',
+          'Native refresh attempt $attempt/$_maxRetries ($reason), retry in ${delay.inMilliseconds}ms',
+        );
         Timer(delay, () => _triggerNativeRefreshWithRetry(reason, attempt + 1));
+      } else if (e is MissingPluginException) {
+        // Home-screen widget redraw only. In-app expenses are unaffected.
+        // audio_service starts Dart before MainActivity binds this channel.
+        TLog.w(
+          'ExpWidget',
+          'Home-screen widget redraw skipped ($reason) — in-app expenses still work',
+        );
       } else {
         TLog.e('ExpWidget',
             'Native refresh failed after $_maxRetries attempts ($reason)',

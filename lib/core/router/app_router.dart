@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import '../../presentation/screens/auth/login_screen.dart';
 import '../../presentation/screens/landing/landing_screen.dart';
 import '../../presentation/widgets/app_shell.dart';
+import '../../presentation/screens/watch/watch_navigator.dart';
 import '../auth/auth_service.dart';
 
 late final GoRouter appRouter;
@@ -13,6 +14,7 @@ void initializeRouter() {
     initialLocation:
         AuthService.instance.isAuthenticated ? '/' : '/login',
     refreshListenable: AuthService.instance.authState,
+    observers: [WatchNavigator.observer],
     redirect: (context, state) {
       final loggedIn = AuthService.instance.isAuthenticated;
       final onLogin = state.matchedLocation == '/login';

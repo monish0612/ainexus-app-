@@ -24,9 +24,12 @@ import '../../../core/services/telegram_logger.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../data/services/tutor_ai_service.dart';
 import '../../../domain/entities/tutor_entities.dart';
+import '../../widgets/block_selectable.dart';
 import '../../widgets/provider_picker.dart';
 import '../../widgets/voice_input_button.dart';
 import '../../screens/settings/settings_controller.dart';
+import '../news/news_reader_text_scale.dart';
+import 'search_answer_text_scale.dart';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  CHAT MESSAGE (private, search-scoped)
@@ -181,7 +184,7 @@ class SearchFollowUpStore with WidgetsBindingObserver {
   static Future<FlutterLocalNotificationsPlugin> _ensureNotifPlugin() async {
     if (_notifPlugin != null) return _notifPlugin!;
     _notifPlugin = FlutterLocalNotificationsPlugin();
-    const android = AndroidInitializationSettings('@mipmap/ic_launcher');
+    const android = AndroidInitializationSettings('ic_notification');
     await _notifPlugin!.initialize(
       const InitializationSettings(android: android),
     );
@@ -199,6 +202,7 @@ class SearchFollowUpStore with WidgetsBindingObserver {
         channelDescription: _kAiChannelDesc,
         importance: Importance.low,
         priority: Priority.low,
+        icon: 'ic_notification',
         ongoing: true,
         autoCancel: false,
         showProgress: true,
@@ -229,6 +233,7 @@ class SearchFollowUpStore with WidgetsBindingObserver {
         channelDescription: _kAiChannelDesc,
         importance: Importance.high,
         priority: Priority.high,
+        icon: 'ic_notification',
         category: AndroidNotificationCategory.message,
         color: ui.Color(0xFF4285F4),
       );
@@ -398,6 +403,28 @@ class SearchFollowUpStore with WidgetsBindingObserver {
   bool hasPending(String query) => _pendingAiMsgs.containsKey(query);
 
   List<_ChatMessage> getCached(String query) => _cache[query] ?? const [];
+
+  /// Completed + in-flight turns for the OS share sheet. Loading and
+  /// error rows are still included so [articleShareQaFromMessages] can
+  /// drop them the same way news share does.
+  List<FollowUpMessage> shareMessages(String query) {
+    final list = _cache[query];
+    if (list == null || list.isEmpty) return const [];
+    return [
+      for (final m in list)
+        FollowUpMessage(
+          role: m.role,
+          text: m.text,
+          isLoading: m.isLoading,
+          isError: m.isError,
+          model: m.model,
+          sources: [
+            for (final s in m.sources)
+              FollowUpSourceRef(url: s.url, title: s.title),
+          ],
+        ),
+    ];
+  }
 
   // ── Fire-and-forget AI request ───────────────────────────────────────────
 
@@ -728,6 +755,26 @@ class SearchFollowUpStore with WidgetsBindingObserver {
     for (final q in pendingQueries) {
       _releaseCoordSlot(q);
     }
+  }
+
+  /// Widget-test helper: drop a finished transcript so the chat sheet
+  /// opens with user + assistant bubbles and does not auto-retry.
+  @visibleForTesting
+  void debugSeedTranscript(
+    String query, {
+    required List<({String id, String role, String text})> turns,
+  }) {
+    _cache[query] = [
+      for (final t in turns)
+        _ChatMessage(id: t.id, role: t.role, text: t.text),
+    ];
+  }
+
+  @visibleForTesting
+  void debugResetForTests() {
+    clearAll();
+    _listeners.clear();
+    _consolidatingQueries.clear();
   }
 }
 
@@ -1632,6 +1679,10 @@ class _SearchFollowUpChatState extends ConsumerState<_SearchFollowUpChat>
               ],
             ),
           ),
+          const Padding(
+            padding: EdgeInsets.only(right: 4),
+            child: SearchAnswerTextSizeControl(),
+          ),
           if (_sending)
             const Padding(
               padding: EdgeInsets.only(right: 4),
@@ -1852,13 +1903,15 @@ class _SearchFollowUpChatState extends ConsumerState<_SearchFollowUpChat>
                     color: const Color(0xFF4285F4).withValues(alpha: 0.2),
                   ),
                 ),
-                child: SelectableText(
+                child: ArticleSelectionScope(
+                  child: BlockSelectableText(
                   msg.text,
                   style: GoogleFonts.plusJakartaSans(
                     fontSize: 14,
                     height: 1.6,
                     color: colors.text,
                   ),
+                ),
                 ),
               ),
             ),
@@ -1899,18 +1952,19 @@ class _SearchFollowUpChatState extends ConsumerState<_SearchFollowUpChat>
                     ),
                   ),
                   child: isError
-                      ? SelectableText(
+                      ? ArticleSelectionScope(
+                          child: BlockSelectableText(
                           msg.text,
                           style: GoogleFonts.plusJakartaSans(
                             fontSize: 14,
                             height: 1.7,
                             color: const Color(0xFFFF6B6B),
                           ),
+                        ),
                         )
-                      : SelectionArea(
-                          child: MarkdownBody(
+                      : ArticleReaderProse(
+                          child: BlockSelectableMarkdown(
                             data: msg.text,
-                            selectable: false,
                             onTapLink: (_, href, __) async {
                               if (href == null || href.isEmpty) return;
                               final uri = Uri.tryParse(href);

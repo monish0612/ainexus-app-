@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Picker-only snapshot. Pixel inflates previewLayout without onUpdate.
+     Keep this shallow (one LinearLayout + ImageView/TextView) and 44dp tall
+     so the picker shows a search bar, not a thick card. Live UI is widget_search. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="@dimen/widget_search_bar_height"
+    android:background="@drawable/widget_search_bar_bg"
+    android:gravity="center_vertical"
+    android:orientation="horizontal"
+    android:paddingStart="14dp"
+    android:paddingEnd="12dp">
+
+    <ImageView
+        android:layout_width="20dp"
+        android:layout_height="20dp"
+        android:contentDescription="@string/widget_search_label"
+        android:src="@drawable/ic_widget_globe"
+        android:tint="#8B93FF" />
+
+    <TextView
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="10dp"
+        android:layout_marginEnd="8dp"
+        android:layout_weight="1"
+        android:ellipsize="end"
+        android:fontFamily="sans-serif"
+        android:includeFontPadding="false"
+        android:maxLines="1"
+        android:text="@string/widget_search_hint_web"
+        android:textColor="#8B93A7"
+        android:textSize="14sp" />
+
+    <ImageView
+        android:layout_width="20dp"
+        android:layout_height="20dp"
+        android:contentDescription="@string/shortcut_search"
+        android:src="@drawable/ic_widget_search"
+        android:tint="#C5CAD6" />
+</LinearLayout>

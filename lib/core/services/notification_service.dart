@@ -11,7 +11,12 @@ import 'package:timezone/timezone.dart' as tz;
 import 'package:workmanager/workmanager.dart';
 
 import '../../data/local/database/app_database.dart';
+import '../../data/services/price_watch/watch_scheduler.dart';
+import '../../domain/entities/expense_entities.dart';
 import '../platform/platform_capabilities.dart';
+import '../utils/expense_logged_at.dart';
+import '../theme/app_colors.dart';
+import 'notification_tap.dart';
 import 'telegram_logger.dart';
 
 // ── Shared Constants ─────────────────────────────────────────────────────────
@@ -52,18 +57,8 @@ const _kSalaryChannelDesc =
 const _kSalaryNotifId = 9200;
 const _kSalaryLastMonthKey = 'last_salary_notif_month';
 
-// ── Category Emojis (Expense) ────────────────────────────────────────────────
-
-const _categoryEmojis = <String, String>{
-  'Food': '\u{1F37D}\u{FE0F}',
-  'Grocery': '\u{1F6D2}',
-  'Transport': '\u{1F697}',
-  'Entertainment': '\u{1F3AC}',
-  'Shopping': '\u{1F6CD}\u{FE0F}',
-  'Bills': '\u{1F4C4}',
-  'Health': '\u{1F48A}',
-  'Others': '\u{1F4E6}',
-};
+String _categoryEmoji(String category) =>
+    AppColors.categoryIcons[category] ?? AppColors.categoryIcons['Others']!;
 
 final _noExpenseMessages = [
   'Your wallet is quiet! Did you forget to log something?',
@@ -97,6 +92,13 @@ final _newsBodyTemplates = [
 // BACKGROUND CALLBACK — WorkManager entry point (runs in separate isolate)
 // ═══════════════════════════════════════════════════════════════════════════════
 
+/// Headless notification-action entry point. Required by
+/// flutter_local_notifications — omitting it crashes action taps (issue 1721).
+/// "Done" is cancelled natively via `cancelNotification`. "Add Expense" uses
+/// `showsUserInterface: true` and is handled on the UI isolate.
+@pragma('vm:entry-point')
+void notificationTapBackground(NotificationResponse response) {}
+
 @pragma('vm:entry-point')
 void notificationCallbackDispatcher() {
   Workmanager().executeTask((taskName, inputData) async {
@@ -110,6 +112,8 @@ void notificationCallbackDispatcher() {
       } else if (taskName == _kSalaryTask) {
         await _SalaryBot.execute();
         _TaskScheduler.scheduleNextSalary();
+      } else if (taskName == kWatchTask) {
+        await runWatchBackgroundCheck();
       }
     } catch (e, st) {
       TLog.e('Notif', 'Background task "$taskName" crashed', error: e, st: st);
@@ -235,22 +239,26 @@ class _ExpenseDataFetcher {
     final db = AppDatabase.background();
     try {
       final now = DateTime.now();
-      final todayStart = DateTime(now.year, now.month, now.day);
-      final tomorrowStart = todayStart.add(const Duration(days: 1));
 
       final allExpenses = await db.select(db.expenses).get();
-      final today = allExpenses.where((e) {
-        final d = DateTime.tryParse(e.date);
-        if (d == null) return false;
-        return !d.isBefore(todayStart) && d.isBefore(tomorrowStart);
-      }).toList();
+      final today = allExpenses
+          .where((e) => expenseIsoOnLocalDay(e.date, now))
+          .toList();
 
-      final total = today.fold<double>(0, (s, e) => s + e.amount);
-      final count = today.length;
-
+      var spendCount = 0;
+      var movedCount = 0;
       final byCategory = <String, double>{};
+      var spendTotal = 0.0;
+      var movedTotal = 0.0;
       for (final e in today) {
-        byCategory[e.category] = (byCategory[e.category] ?? 0) + e.amount;
+        if (isNonSpendCategory(e.category)) {
+          movedCount++;
+          movedTotal += e.amount;
+        } else {
+          spendCount++;
+          spendTotal += e.amount;
+          byCategory[e.category] = (byCategory[e.category] ?? 0) + e.amount;
+        }
       }
 
       final budgetRow = await (db.select(db.budgetEntries)
@@ -264,10 +272,12 @@ class _ExpenseDataFetcher {
           .getSingleOrNull();
 
       return _DailySummary(
-        total: total,
-        count: count,
+        total: spendTotal,
+        count: spendCount,
         budget: budgetRow?.amount,
         categoryBreakdown: byCategory,
+        movedTotal: movedTotal,
+        movedCount: movedCount,
       );
     } finally {
       await db.close();
@@ -303,14 +313,20 @@ class _DailySummary {
     required this.count,
     required this.budget,
     required this.categoryBreakdown,
+    this.movedTotal = 0,
+    this.movedCount = 0,
   });
 
   final double total;
   final int count;
   final double? budget;
   final Map<String, double> categoryBreakdown;
+  final double movedTotal;
+  final int movedCount;
 
-  bool get hasExpenses => count > 0;
+  bool get hasSpend => count > 0;
+  bool get hasMoved => movedCount > 0;
+  bool get hasExpenses => hasSpend || hasMoved;
   bool get hasBudget => budget != null && budget! > 0;
 
   int? get budgetProgressPercent {
@@ -378,7 +394,7 @@ class _NotificationUI {
 
   static Future<FlutterLocalNotificationsPlugin> _backgroundFln() async {
     final fln = FlutterLocalNotificationsPlugin();
-    const android = AndroidInitializationSettings('@mipmap/ic_launcher');
+    const android = AndroidInitializationSettings('ic_notification');
     await fln.initialize(const InitializationSettings(android: android));
     return fln;
   }
@@ -392,13 +408,19 @@ class _NotificationUI {
     final fln = plugin ?? await _backgroundFln();
 
     final title = summary.hasExpenses
-        ? '\u{1F4B0} Today\'s Financial Snapshot'
-        : '\u{1F4C9} No Expenses Logged Today';
+        ? 'Today\'s Financial Snapshot'
+        : 'No expenses logged today';
 
-    final body = _buildExpenseBody(summary);
+    final body = _buildExpenseBody(summary, html: false);
+    final htmlBody = _buildExpenseBody(summary, html: true);
 
-    final showProgress = summary.hasExpenses && summary.hasBudget;
+    final showProgress = summary.hasSpend && summary.hasBudget;
     final progress = summary.budgetProgressPercent ?? 0;
+    final summaryLine = summary.hasSpend
+        ? '${summary.count} transaction${summary.count == 1 ? '' : 's'}'
+        : summary.hasMoved
+            ? 'Investments / loans today'
+            : 'Tap Add Expense to log';
 
     final details = AndroidNotificationDetails(
       _kExpenseChannelId,
@@ -406,13 +428,15 @@ class _NotificationUI {
       channelDescription: _kExpenseChannelDesc,
       importance: Importance.high,
       priority: Priority.high,
+      icon: 'ic_notification',
       styleInformation: BigTextStyleInformation(
-        body,
+        htmlBody,
+        htmlFormatBigText: true,
         contentTitle: title,
-        summaryText: summary.hasExpenses
-            ? '${summary.count} transaction${summary.count == 1 ? '' : 's'}'
-            : 'Tap to log your expenses',
+        summaryText: summaryLine,
+        htmlFormatContent: true,
       ),
+      subText: summaryLine,
       showProgress: showProgress,
       maxProgress: 100,
       progress: progress,
@@ -421,17 +445,24 @@ class _NotificationUI {
       ledOnMs: 1000,
       ledOffMs: 500,
       enableLights: true,
+      onlyAlertOnce: true,
+      autoCancel: true,
       category: AndroidNotificationCategory.reminder,
       visibility: NotificationVisibility.public,
       actions: <AndroidNotificationAction>[
         const AndroidNotificationAction(
-          'add_expense',
-          '\u2795 Add Expense',
+          kNotifActionAddExpense,
+          'Add Expense',
+          icon: DrawableResourceAndroidBitmap('ic_notification_add'),
+          titleColor: _kAccent,
           showsUserInterface: true,
+          cancelNotification: true,
         ),
         const AndroidNotificationAction(
-          'dismiss',
+          kNotifActionDismiss,
           'Done',
+          icon: DrawableResourceAndroidBitmap('ic_notification_done'),
+          showsUserInterface: false,
           cancelNotification: true,
         ),
       ],
@@ -442,48 +473,63 @@ class _NotificationUI {
       title,
       body,
       NotificationDetails(android: details),
-      payload: 'expense_tab',
+      payload: kNotifPayloadExpenseTab,
     );
   }
 
-  static String _buildExpenseBody(_DailySummary summary) {
+  static String _buildExpenseBody(_DailySummary summary, {required bool html}) {
+    String bold(String s) => html ? '<b>$s</b>' : s;
+    final br = html ? '<br/>' : '\n';
+
     if (!summary.hasExpenses) {
       return _noExpenseMessages[Random().nextInt(_noExpenseMessages.length)];
     }
 
-    final total = _fmt.format(summary.total);
-    final count = summary.count;
-    final buf = StringBuffer()
-      ..write('You\'ve spent $total across $count ')
-      ..write(count == 1 ? 'transaction' : 'transactions')
-      ..write(' today.');
+    final buf = StringBuffer();
+    if (summary.hasSpend) {
+      final total = _fmt.format(summary.total);
+      final count = summary.count;
+      buf.write('You\'ve spent ${bold(total)} across $count ');
+      buf.write(count == 1 ? 'transaction' : 'transactions');
+      buf.write(' today.');
 
-    if (summary.hasBudget) {
-      final pct = summary.budgetProgressPercent!;
-      final budgetStr = _fmt.format(summary.budget!);
-      buf.write('\n\u{1F4CA} Budget used: $pct% of $budgetStr');
-      if (pct >= 90) {
-        buf.write(' \u26A0\u{FE0F} Almost maxed out!');
-      } else if (pct >= 70) {
-        buf.write(' \u2014 getting close.');
+      if (summary.hasBudget) {
+        final pct = summary.budgetProgressPercent!;
+        final budgetStr = _fmt.format(summary.budget!);
+        buf.write('$br\u{1F4CA} Budget used: ${bold('$pct%')} of $budgetStr');
+        if (pct >= 90) {
+          buf.write(' \u26A0\u{FE0F} Almost maxed out!');
+        } else if (pct >= 75) {
+          buf.write(' \u2014 getting close.');
+        }
+      }
+
+      final sorted = summary.categoryBreakdown.entries.toList()
+        ..sort((a, b) => b.value.compareTo(a.value));
+
+      if (sorted.isNotEmpty) {
+        final top = sorted.first;
+        final emoji = _categoryEmoji(top.key);
+        buf.write(
+          '$br$emoji ${top.key} was your biggest spend (${bold(_fmt.format(top.value))})',
+        );
+      }
+
+      if (sorted.length > 1) {
+        final second = sorted[1];
+        final emoji2 = _categoryEmoji(second.key);
+        buf.write(
+          '$br$emoji2 ${second.key}: ${bold(_fmt.format(second.value))}',
+        );
       }
     }
 
-    final sorted = summary.categoryBreakdown.entries.toList()
-      ..sort((a, b) => b.value.compareTo(a.value));
-
-    if (sorted.isNotEmpty) {
-      final top = sorted.first;
-      final emoji = _categoryEmojis[top.key] ?? '\u{1F4B0}';
+    if (summary.hasMoved) {
+      if (buf.isNotEmpty) buf.write(br);
       buf.write(
-        '\n$emoji ${top.key} was your biggest spend (${_fmt.format(top.value)})',
+        'Moved ${_fmt.format(summary.movedTotal)} into Investment/Loan '
+        '(not counted as spend).',
       );
-    }
-
-    if (sorted.length > 1) {
-      final second = sorted[1];
-      final emoji2 = _categoryEmojis[second.key] ?? '\u{1F4B0}';
-      buf.write('\n$emoji2 ${second.key}: ${_fmt.format(second.value)}');
     }
 
     return buf.toString();
@@ -522,6 +568,7 @@ class _NotificationUI {
       channelDescription: _kNewsChannelDesc,
       importance: Importance.high,
       priority: Priority.high,
+      icon: 'ic_notification',
       styleInformation: BigTextStyleInformation(
         body,
         contentTitle: title,
@@ -536,12 +583,12 @@ class _NotificationUI {
       visibility: NotificationVisibility.public,
       actions: <AndroidNotificationAction>[
         const AndroidNotificationAction(
-          'open_news',
+          kNotifActionOpenNews,
           '\u{1F4F0} Read Now',
           showsUserInterface: true,
         ),
         const AndroidNotificationAction(
-          'dismiss',
+          kNotifActionDismiss,
           'Later',
           cancelNotification: true,
         ),
@@ -576,6 +623,7 @@ class _NotificationUI {
       channelDescription: _kSalaryChannelDesc,
       importance: Importance.high,
       priority: Priority.high,
+      icon: 'ic_notification',
       styleInformation: BigTextStyleInformation(
         body,
         contentTitle: title,
@@ -590,12 +638,12 @@ class _NotificationUI {
       visibility: NotificationVisibility.secret,
       actions: <AndroidNotificationAction>[
         const AndroidNotificationAction(
-          'enter_salary',
+          kNotifActionEnterSalary,
           '\u{1F4B0} Enter salary',
           showsUserInterface: true,
         ),
         const AndroidNotificationAction(
-          'dismiss',
+          kNotifActionDismiss,
           'Later',
           cancelNotification: true,
         ),
@@ -715,12 +763,34 @@ String _todayDateString() {
 /// Consumed by AppShell to navigate to the correct tab.
 final notificationPayloadStream = StreamController<String>.broadcast();
 
+/// Last route published while AppShell may not yet be listening (login gate,
+/// cold start). AppShell drains this on mount so Add Expense never no-ops.
+String? _queuedNotificationRoute;
+
+void publishNotificationRoute(String route) {
+  if (!notificationPayloadStream.isClosed &&
+      notificationPayloadStream.hasListener) {
+    notificationPayloadStream.add(route);
+    _queuedNotificationRoute = null;
+    return;
+  }
+  _queuedNotificationRoute = route;
+}
+
+String? takeQueuedNotificationRoute() {
+  final p = _queuedNotificationRoute;
+  _queuedNotificationRoute = null;
+  return p;
+}
+
 class NotificationService {
   NotificationService._();
   static final instance = NotificationService._();
 
   final _fln = FlutterLocalNotificationsPlugin();
   void Function(String? payload)? _onTap;
+
+  FlutterLocalNotificationsPlugin get plugin => _fln;
 
   Future<void> initialize({
     required void Function(String? payload) onTap,
@@ -737,10 +807,11 @@ class NotificationService {
 
     tz.initializeTimeZones();
 
-    const android = AndroidInitializationSettings('@mipmap/ic_launcher');
+    const android = AndroidInitializationSettings('ic_notification');
     await _fln.initialize(
       const InitializationSettings(android: android),
       onDidReceiveNotificationResponse: _handleResponse,
+      onDidReceiveBackgroundNotificationResponse: notificationTapBackground,
     );
 
     final androidPlugin = _fln.resolvePlatformSpecificImplementation<
@@ -761,26 +832,18 @@ class NotificationService {
 
     final launchDetails = await _fln.getNotificationAppLaunchDetails();
     if (launchDetails?.didNotificationLaunchApp ?? false) {
-      final payload = launchDetails!.notificationResponse?.payload;
-      if (payload != null) _onTap?.call(payload);
+      final response = launchDetails!.notificationResponse;
+      if (response != null) _handleResponse(response);
     }
   }
 
   void _handleResponse(NotificationResponse response) {
-    final payload = response.payload;
-    final actionId = response.actionId;
-    if (actionId == 'add_expense' ||
-        actionId == 'enter_salary' ||
-        payload == 'expense_tab') {
-      _onTap?.call('expense_tab');
-    } else if (actionId == 'open_news' || payload == 'news_tab') {
-      _onTap?.call('news_tab');
-    } else if (payload != null && payload.isNotEmpty) {
-      // Forward any other payload verbatim (e.g. tutor_tab, news_summary).
-      // The main.dart handler decides which strings are valid before routing
-      // them onto the broadcast stream.
-      _onTap?.call(payload);
-    }
+    final tap = resolveNotificationTap(
+      actionId: response.actionId,
+      payload: response.payload,
+    );
+    if (tap.dismissOnly || tap.route == null) return;
+    _onTap?.call(tap.route);
   }
 
   /// Schedule both daily expense (9 PM) and news (5 slots) tasks.
@@ -824,6 +887,7 @@ class NotificationService {
       existingWorkPolicy: ExistingWorkPolicy.replace,
       constraints: Constraints(networkType: NetworkType.not_required),
     );
+    await scheduleWatchChecks();
   }
 
   @Deprecated('Use scheduleAll() instead')
@@ -838,7 +902,8 @@ class NotificationService {
   /// Fire a test notification immediately (debug only).
   Future<void> debugFireNow({bool news = false, bool salary = false}) async {
     if (!PlatformCapabilities.canUseNotifications) return;
-    TLog.i('Notif',
+    TLog.i(
+        'Notif',
         'DEBUG: firing ${salary ? 'salary' : news ? 'news' : 'expense'} notification');
     if (salary) {
       await _NotificationUI.showSalary(plugin: _fln);

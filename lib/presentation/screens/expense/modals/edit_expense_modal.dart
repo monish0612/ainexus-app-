@@ -9,6 +9,8 @@ import 'package:lucide_icons/lucide_icons.dart';
 import '../../../../core/services/credit_card_forecast_engine.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/utils/currency_formatter.dart';
+import '../../../../core/utils/expense_logged_at.dart';
+import '../../../../data/services/expense_category_memory.dart';
 import '../../../../domain/entities/expense_entities.dart';
 import '../../settings/settings_controller.dart' show Bank, kCardTypeCredit;
 import '../widgets/expense_date_picker.dart';
@@ -20,6 +22,7 @@ Future<void> showEditExpenseModal(
   BuildContext context, {
   required Expense expense,
   required void Function(Expense updated) onUpdate,
+  void Function(String description, String category)? onTeachAI,
   List<String>? banks,
   List<Bank>? bankConfigs,
 }) {
@@ -35,6 +38,7 @@ Future<void> showEditExpenseModal(
       banks: names,
       bankConfigs: bankConfigs ?? const [],
       onUpdate: onUpdate,
+      onTeachAI: onTeachAI,
     ),
   );
 }
@@ -54,12 +58,14 @@ class _EditExpenseSheet extends StatefulWidget {
     required this.banks,
     this.bankConfigs = const [],
     required this.onUpdate,
+    this.onTeachAI,
   });
 
   final Expense expense;
   final List<String> banks;
   final List<Bank> bankConfigs;
   final void Function(Expense updated) onUpdate;
+  final void Function(String description, String category)? onTeachAI;
 
   @override
   State<_EditExpenseSheet> createState() => _EditExpenseSheetState();
@@ -76,6 +82,7 @@ class _EditExpenseSheetState extends State<_EditExpenseSheet>
   late DateTime _selectedDate;
   var _showCategoryPicker = false;
   bool _hasAttemptedSubmit = false;
+  var _hasLearned = false;
   late final AnimationController _shakeCtrl;
 
   @override
@@ -98,24 +105,19 @@ class _EditExpenseSheetState extends State<_EditExpenseSheet>
     _category = expenseCategories.contains(e.category)
         ? e.category
         : expenseCategories.last;
-    _selectedDate = dateOnly(DateTime.tryParse(e.date) ?? DateTime.now());
+    final parsed = DateTime.tryParse(e.date) ?? DateTime.now();
+    _selectedDate = dateOnly(expenseLocal(parsed));
   }
 
   /// Preserve the original time-of-day when the calendar day is unchanged;
-  /// otherwise anchor the new day to local noon so it lands inside that day.
+  /// when the user picks a new day, stamp that day with the edit clock so
+  /// the Tracker row shows the edited date/time instead of a dummy noon.
   String _resolvedDateIso() {
     final original = DateTime.tryParse(widget.expense.date) ?? DateTime.now();
-    if (original.year == _selectedDate.year &&
-        original.month == _selectedDate.month &&
-        original.day == _selectedDate.day) {
+    if (sameCalendarDay(original, _selectedDate)) {
       return widget.expense.date;
     }
-    return DateTime(
-      _selectedDate.year,
-      _selectedDate.month,
-      _selectedDate.day,
-      12,
-    ).toIso8601String();
+    return expenseTimestampOnPickedDay(_selectedDate).toIso8601String();
   }
 
   @override
@@ -227,6 +229,32 @@ class _EditExpenseSheetState extends State<_EditExpenseSheet>
   bool get _descError =>
       _hasAttemptedSubmit && _descCtrl.text.trim().isEmpty;
 
+  bool get _smsOrigin => ExpenseCategoryMemory.isSmsOrigin(widget.expense);
+
+  bool get _showWand {
+    if (_hasLearned || widget.onTeachAI == null) return false;
+    if (_category == 'Others') return false;
+    final desc = _descCtrl.text.trim();
+    if (!ExpenseCategoryMemory.isTeachable(desc)) return false;
+    if (_smsOrigin) return true;
+    if (_category != widget.expense.category) return true;
+    if (widget.expense.category == 'Others') return true;
+    return false;
+  }
+
+  void _persistLearning(String desc, String category) {
+    widget.onTeachAI?.call(desc, category);
+  }
+
+  void _teachAi() {
+    final d = _descCtrl.text.trim();
+    if (d.isEmpty || _hasLearned || widget.onTeachAI == null) return;
+    if (_category == 'Others') return;
+    HapticFeedback.mediumImpact();
+    _persistLearning(d, _category);
+    setState(() => _hasLearned = true);
+  }
+
   void _save() {
     final n = double.tryParse(_amountCtrl.text.replaceAll(',', ''));
     final desc = _descCtrl.text.trim();
@@ -235,6 +263,15 @@ class _EditExpenseSheetState extends State<_EditExpenseSheet>
       HapticFeedback.heavyImpact();
       _shakeCtrl.forward(from: 0);
       return;
+    }
+    if (!_hasLearned &&
+        widget.onTeachAI != null &&
+        _smsOrigin &&
+        _category != widget.expense.category &&
+        _category != 'Others' &&
+        ExpenseCategoryMemory.isTeachable(desc)) {
+      _persistLearning(desc, _category);
+      _hasLearned = true;
     }
     widget.onUpdate(
       widget.expense.copyWith(
@@ -462,50 +499,181 @@ class _EditExpenseSheetState extends State<_EditExpenseSheet>
                       ),
                     ),
                     const SizedBox(height: 8),
-                    Material(
-                      color: colors.bg2,
-                      borderRadius: BorderRadius.circular(16),
-                      child: InkWell(
-                        borderRadius: BorderRadius.circular(16),
-                        onTap: () => setState(
-                          () => _showCategoryPicker = !_showCategoryPicker,
-                        ),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 14,
-                          ),
-                          decoration: BoxDecoration(
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: Material(
+                            color: colors.bg2,
                             borderRadius: BorderRadius.circular(16),
-                            border: Border.all(color: colors.border),
+                            child: InkWell(
+                              borderRadius: BorderRadius.circular(16),
+                              onTap: () => setState(
+                                () => _showCategoryPicker = !_showCategoryPicker,
+                              ),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                  vertical: 14,
+                                ),
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(16),
+                                  border: Border.all(color: colors.border),
+                                ),
+                                child: Row(
+                                  children: [
+                                    Text(
+                                      AppColors.categoryIcons[_category] ??
+                                          '📦',
+                                      style: const TextStyle(fontSize: 20),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: Text(
+                                        _category,
+                                        style: textTheme.titleSmall?.copyWith(
+                                          color: AppColors
+                                                  .categoryColors[_category] ??
+                                              AppColors.accent,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ),
+                                    if (_hasLearned) ...[
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 8,
+                                          vertical: 4,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: const Color(0x2E818CF8),
+                                          borderRadius:
+                                              BorderRadius.circular(8),
+                                        ),
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            const Icon(
+                                              LucideIcons.brain,
+                                              size: 8,
+                                              color: Color(0xFF818CF8),
+                                            ),
+                                            const SizedBox(width: 4),
+                                            Text(
+                                              'AI Learned ✓',
+                                              style:
+                                                  GoogleFonts.plusJakartaSans(
+                                                fontSize: 9,
+                                                fontWeight: FontWeight.w700,
+                                                color: const Color(0xFF818CF8),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      const SizedBox(width: 6),
+                                    ],
+                                    Icon(
+                                      LucideIcons.chevronDown,
+                                      size: 14,
+                                      color: colors.text4,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                        if (_showWand) ...[
+                          const SizedBox(width: 8),
+                          Material(
+                            color: const Color(0x337C3AED),
+                            borderRadius: BorderRadius.circular(16),
+                            child: InkWell(
+                              borderRadius: BorderRadius.circular(16),
+                              onTap: _teachAi,
+                              child: Container(
+                                width: 58,
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 12),
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(16),
+                                  border: Border.all(
+                                    color: const Color(0x807C3AED),
+                                    width: 1.5,
+                                  ),
+                                ),
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(
+                                      LucideIcons.wand2,
+                                      size: 16,
+                                      color: Color(0xFFA78BFA),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      'TEACH AI',
+                                      style: GoogleFonts.plusJakartaSans(
+                                        fontSize: 8,
+                                        fontWeight: FontWeight.w800,
+                                        color: const Color(0xFFA78BFA),
+                                        letterSpacing: 0.3,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                    if (_showWand)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 6),
+                        child: Text(
+                          _smsOrigin
+                              ? '🪄 Teach AI so the next auto-detect for this shop uses $_category'
+                              : '🪄 Tap Teach AI to remember this correction for similar expenses',
+                          style: GoogleFonts.plusJakartaSans(
+                            fontSize: 10,
+                            color: colors.text4,
+                          ),
+                        ),
+                      ),
+                    if (_hasLearned)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: const Color(0x1A818CF8),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: const Color(0x40818CF8)),
                           ),
                           child: Row(
                             children: [
-                              Text(
-                                AppColors.categoryIcons[_category] ?? '📦',
-                                style: const TextStyle(fontSize: 20),
+                              const Icon(
+                                LucideIcons.brain,
+                                size: 12,
+                                color: Color(0xFF818CF8),
                               ),
-                              const SizedBox(width: 12),
+                              const SizedBox(width: 8),
                               Expanded(
                                 child: Text(
-                                  _category,
-                                  style: textTheme.titleSmall?.copyWith(
-                                    color: AppColors.categoryColors[_category] ??
-                                        AppColors.accent,
+                                  'Next similar SMS will use $_category',
+                                  style: GoogleFonts.plusJakartaSans(
+                                    fontSize: 12,
                                     fontWeight: FontWeight.w600,
+                                    color: const Color(0xFFA5B4FC),
                                   ),
                                 ),
-                              ),
-                              Icon(
-                                LucideIcons.chevronDown,
-                                size: 14,
-                                color: colors.text4,
                               ),
                             ],
                           ),
                         ),
                       ),
-                    ),
                     if (_showCategoryPicker) ...[
                       const SizedBox(height: 12),
                       GridView.builder(
@@ -530,6 +698,9 @@ class _EditExpenseSheetState extends State<_EditExpenseSheet>
                               borderRadius: BorderRadius.circular(16),
                               onTap: () {
                                 setState(() {
+                                  if (_hasLearned && cat != _category) {
+                                    _hasLearned = false;
+                                  }
                                   _category = cat;
                                   _showCategoryPicker = false;
                                 });

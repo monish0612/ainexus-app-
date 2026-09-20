@@ -117,4 +117,54 @@ class SearchWidgetLogicTest {
             SearchWidgetLogic.toggleRequestCode(42, "expense")
         )
     }
+
+    // ── layout / provider contract (visual polish must not break taps) ───────
+
+    @Test
+    fun liveLayout_keepsLoadBearingIds() {
+        val xml = readModuleFile("src/main/res/layout/widget_search.xml")
+        assertTrue(xml.contains("android:id=\"@+id/widget_search_root\""))
+        assertTrue(xml.contains("android:id=\"@+id/widget_search_globe\""))
+        assertTrue(xml.contains("android:id=\"@+id/widget_search_hint\""))
+        assertTrue(xml.contains("android:id=\"@+id/widget_search_go\""))
+        assertTrue(xml.contains("@string/widget_search_hint_web"))
+        assertTrue(xml.contains("@dimen/widget_search_bar_height"))
+    }
+
+    @Test
+    fun provider_stillLaunchesWebSearchFromRootOnly() {
+        val kt = readModuleFile(
+            "src/main/kotlin/app/ainexus/ai_nexus/SearchWidgetProvider.kt"
+        )
+        assertTrue(kt.contains("R.layout.widget_search"))
+        assertTrue(kt.contains("R.id.widget_search_root"))
+        assertTrue(kt.contains("SearchWidgetLogic.MODE_WEB"))
+        assertTrue(kt.contains("SearchWidgetLogic.launchExtras(MODE_WEB)"))
+        assertTrue(kt.contains("SearchWidgetLogic.searchRequestCode(appWidgetId, MODE_WEB)"))
+        assertTrue(kt.contains("FLAG_ACTIVITY_NEW_TASK"))
+        assertTrue(kt.contains("FLAG_UPDATE_CURRENT"))
+        assertTrue(kt.contains("FLAG_IMMUTABLE"))
+    }
+
+    @Test
+    fun providerInfo_keepsFourByOneSearchContract() {
+        val xml = readModuleFile("src/main/res/xml/widget_search_info.xml")
+        assertTrue(xml.contains("android:initialLayout=\"@layout/widget_search\""))
+        assertTrue(xml.contains("android:previewLayout=\"@layout/widget_search_preview\""))
+        assertTrue(xml.contains("android:targetCellWidth=\"4\""))
+        assertTrue(xml.contains("android:targetCellHeight=\"1\""))
+        assertTrue(xml.contains("android:resizeMode=\"horizontal\""))
+        assertTrue(xml.contains("android:updatePeriodMillis=\"0\""))
+    }
+
+    private fun readModuleFile(relative: String): String {
+        val candidates = listOf(
+            java.io.File(relative),
+            java.io.File("android/app/$relative"),
+            java.io.File("ai_nexus/android/app/$relative"),
+        )
+        val file = candidates.firstOrNull { it.exists() }
+        assertTrue("Missing $relative (cwd=${java.io.File(".").absolutePath})", file != null)
+        return file!!.readText()
+    }
 }

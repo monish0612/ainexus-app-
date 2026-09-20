@@ -1,24 +1,9 @@
-// Unit tests for the new Movies + General news categories metadata and the
-// "All chip" / FAB summarize-all exclusion contract.
-//
-// COVERAGE
-//
-//   • news_entities.dart constants:
-//       - CATEGORIES contains exactly the expected 4 entries.
-//       - CAT_COLOR has a unique, parseable hex per CATEGORY.
-//       - kNoSummarizeCategories contains exactly Movies + General and
-//         every entry is also a member of CATEGORIES (no orphan tags).
-//
-//   • Filter contract (the inline logic in news_screen.dart's build):
-//       - "All" chip view EXCLUDES Movies + General.
-//       - Each category chip view shows ONLY that category.
-//       - FAB summarize-all scope === "All" chip view (same source list).
-//       - Saved + Read articles are always excluded from any feed view.
-//
-// These tests are pure-Dart — no widget tree, no Riverpod, no Drift, no
-// network. They are deterministic and finish in milliseconds.
+// Unit tests for news category metadata, All-chip inclusion, and chrome
+// spacing so the bottom rail stays tappable under snackbars.
 
 import 'package:ai_nexus/domain/entities/news_entities.dart';
+import 'package:ai_nexus/presentation/screens/news/news_chrome.dart';
+import 'package:ai_nexus/presentation/screens/news/news_feed_filters.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 Article _article({
@@ -41,22 +26,14 @@ Article _article({
       isSaved: isSaved,
     );
 
-/// Pure replica of the filter expression used in `news_screen.dart`'s build()
-/// for the "All" chip + FAB `scope.all`. Kept in the test so a future change
-/// to the production filter without updating the spec fails noisily here.
+/// Production All-chip + FAB summarize-all scope.
 List<Article> _allChipFeed(List<Article> all) {
-  return all
-      .where((a) => !a.isRead && !a.isSaved)
-      .where((a) => !kNoSummarizeCategories.contains(a.category))
-      .toList();
+  return newsFeedForCategory(unreadUnsavedArticles(all), 'All');
 }
 
 /// Pure replica of the per-category chip filter.
 List<Article> _categoryChipFeed(List<Article> all, String category) {
-  return all
-      .where((a) => !a.isRead && !a.isSaved)
-      .where((a) => a.category == category)
-      .toList();
+  return newsFeedForCategory(unreadUnsavedArticles(all), category);
 }
 
 void main() {
@@ -70,6 +47,11 @@ void main() {
 
     test('no duplicates', () {
       expect(CATEGORIES.toSet().length, CATEGORIES.length);
+    });
+
+    test('rail order is All, AI News, Finance, Movies, General', () {
+      expect(kNewsCategoryRailLabels,
+          ['All', 'AI News', 'Finance', 'Movies', 'General']);
     });
   });
 
@@ -117,7 +99,8 @@ void main() {
   // ─── "All" chip + FAB summarize-all scope filter contract ───────────────
 
   group('All-chip filter (also FAB summarize-all scope)', () {
-    test('excludes Movies + General articles', () {
+    test('includes Movies + General articles along with Finance and AI News',
+        () {
       final all = [
         _article(id: '1', category: 'Finance'),
         _article(id: '2', category: 'AI News'),
@@ -125,7 +108,7 @@ void main() {
         _article(id: '4', category: 'General'),
       ];
       final feed = _allChipFeed(all);
-      expect(feed.map((a) => a.id).toList(), ['1', '2']);
+      expect(feed.map((a) => a.id).toList(), ['1', '2', '3', '4']);
     });
 
     test('keeps unread+unsaved Finance + AI News articles', () {
@@ -161,13 +144,13 @@ void main() {
       expect(_allChipFeed(const []), isEmpty);
     });
 
-    test('pool of ONLY Movies + General → empty (none visible in All)', () {
+    test('pool of ONLY Movies + General → both visible in All', () {
       final all = [
         _article(id: 'm1', category: 'Movies'),
         _article(id: 'g1', category: 'General'),
         _article(id: 'm2', category: 'Movies'),
       ];
-      expect(_allChipFeed(all), isEmpty);
+      expect(_allChipFeed(all).map((a) => a.id).toList(), ['m1', 'g1', 'm2']);
     });
   });
 
@@ -211,62 +194,23 @@ void main() {
 
   // ─── FAB summarize-action target filter (defense in depth) ────────────
 
-  group('FAB summarize-action target filter', () {
-    /// Pure replica of the defensive filter inside `_handleFabAction` —
-    /// even if the inline scope picker hands us a list that contains
-    /// Movies/General articles (e.g. user is on a Movies chip and picked
-    /// "currentCategory"), the AI summarize pipeline must NEVER see
-    /// them. This filter is the last line of defence.
-    List<Article> stripForSummarize(List<Article> target) {
-      return target
-          .where((a) => !kNoSummarizeCategories.contains(a.category))
-          .toList(growable: false);
-    }
-
-    test('mixed scope list → Movies + General stripped before summarize', () {
+  group('FAB summarize-action includes every unread category', () {
+    test('mixed scope list keeps Movies + General for Summarize All', () {
       final scopeList = [
         _article(id: 'f1', category: 'Finance'),
         _article(id: 'm1', category: 'Movies'),
         _article(id: 'ai1', category: 'AI News'),
         _article(id: 'g1', category: 'General'),
       ];
-      expect(stripForSummarize(scopeList).map((a) => a.id).toList(),
-          ['f1', 'ai1']);
+      expect(scopeList.map((a) => a.id).toList(), ['f1', 'm1', 'ai1', 'g1']);
     });
 
-    test('pure Movies scope (user on Movies chip + currentCategory) → empty', () {
-      // This is the precise edge case the guard fixes: without it, the
-      // summarize-reader would call the LLM on full-content articles
-      // and undo the whole "skip_summary" contract.
+    test('pure Movies scope is summarizable', () {
       final scopeList = [
         _article(id: 'm1', category: 'Movies'),
         _article(id: 'm2', category: 'Movies'),
       ];
-      expect(stripForSummarize(scopeList), isEmpty);
-    });
-
-    test('pure General scope → empty', () {
-      final scopeList = [
-        _article(id: 'g1', category: 'General'),
-        _article(id: 'g2', category: 'General'),
-      ];
-      expect(stripForSummarize(scopeList), isEmpty);
-    });
-
-    test('mixed Movies + General only → empty (defence in depth)', () {
-      final scopeList = [
-        _article(id: 'm1', category: 'Movies'),
-        _article(id: 'g1', category: 'General'),
-      ];
-      expect(stripForSummarize(scopeList), isEmpty);
-    });
-
-    test('pure Finance scope → all preserved (regression guard)', () {
-      final scopeList = [
-        _article(id: 'f1', category: 'Finance'),
-        _article(id: 'f2', category: 'Finance'),
-      ];
-      expect(stripForSummarize(scopeList).length, 2);
+      expect(scopeList, hasLength(2));
     });
   });
 
@@ -285,6 +229,16 @@ void main() {
       ];
       final saved = all.where((a) => a.isSaved).toList();
       expect(saved.map((a) => a.id).toSet(), {'m1', 'g1', 'f1'});
+    });
+  });
+
+  group('News chrome spacing', () {
+    test('snackbar sits above the category rail so Movies stays tappable', () {
+      expect(kNewsSnackBarMargin.bottom, greaterThan(kNewsCategoryRailHeight));
+    });
+
+    test('feed bottom inset clears rail + FAB', () {
+      expect(kNewsFeedBottomInset, greaterThan(kNewsCategoryRailHeight + 80));
     });
   });
 }

@@ -112,4 +112,24 @@ void main() {
     expect(_has(_period(all, 'week'), 'bad'), isFalse);
     expect(_has(_period(all, 'all'), 'bad'), isTrue);
   });
+
+  test('previous matching week does not overlap the current week', () {
+    final current = _e('now', _now);
+    final prior = _e('prior', _now.subtract(const Duration(days: 10)));
+    final all = [current, prior];
+    expect(_has(_period(all, 'week'), 'now'), isTrue);
+    expect(_has(_period(all, 'week'), 'prior'), isFalse);
+    final prev = expensesInPreviousInsightPeriod(all, 'week', _now);
+    expect(_has(prev, 'prior'), isTrue);
+    expect(_has(prev, 'now'), isFalse);
+  });
+
+  test('calendar-month spend ignores rolling windows and non-spend', () {
+    final all = [
+      _e('thisMonth', DateTime(2026, 7, 2)),
+      _e('lastMonth', DateTime(2026, 6, 20)),
+      _e('inv', DateTime(2026, 7, 3), category: 'Investment'),
+    ];
+    expect(calendarMonthSpend(all, _now), 100);
+  });
 }

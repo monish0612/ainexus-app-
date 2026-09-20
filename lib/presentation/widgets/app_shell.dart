@@ -9,16 +9,23 @@ import '../../core/auth/auth_service.dart';
 import '../../core/platform/platform_capabilities.dart';
 import '../../core/services/expense_widget_service.dart';
 import '../../core/services/notification_service.dart';
+import '../../core/services/notification_tap.dart';
 import '../../core/services/process_text_service.dart';
 import '../../core/services/telegram_logger.dart';
 import '../../core/theme/app_colors.dart';
+import '../../core/utils/tidy_url.dart';
+import '../../core/utils/time_greeting.dart';
+import '../../data/services/price_watch/store_url.dart';
+import '../../data/services/sms_auto_expense/sms_auto_expense_service.dart';
 import '../screens/expense/expense_screen.dart';
+import '../screens/news/news_controller.dart';
 import '../screens/news/news_screen.dart';
 import '../screens/tutor/dictionary_lookup_screen.dart';
 import '../screens/tutor/rephrase_lookup_screen.dart';
 import '../screens/tutor/search_lookup_screen.dart';
 import '../screens/tutor/tutor_screen.dart';
 import '../screens/cloud/cloud_screen.dart';
+import '../screens/watch/watch_providers.dart';
 import 'bottom_nav.dart';
 
 final currentTabProvider = StateProvider<int>((ref) => 0);
@@ -103,11 +110,19 @@ class _AppShellState extends ConsumerState<AppShell>
   static const _shortcutChannel =
       MethodChannel('app.ainexus.ai_nexus/shortcuts');
   StreamSubscription<String>? _notifSub;
+  Timer? _clockTick;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      // Kick News bootstrap while the user is still on Expenses so the
+      // feed is already painted (and an RSS refresh is in flight) by the
+      // time they tap the News tab.
+      ref.read(newsControllerProvider);
+    });
 
     // ProcessTextService.initialize already no-ops on web (kIsWeb guard
     // inside the service); keeping the call here unconditional preserves
@@ -132,26 +147,41 @@ class _AppShellState extends ConsumerState<AppShell>
       });
     }
 
-    _notifSub = notificationPayloadStream.stream.listen((payload) {
-      if (payload == 'expense_tab') {
-        ref.read(currentTabProvider.notifier).state = 0;
-      } else if (payload == 'news_tab' || payload == 'news_summary') {
-        // 'news_summary' is the deep-link payload from the For You catch-up
-        // completion notification. Switching to the News tab is enough — the
-        // News screen has its own listener that re-opens the reader bound
-        // to the live session when it sees the payload bubble through the
-        // broadcast stream a second time (this listener does NOT consume it).
-        ref.read(currentTabProvider.notifier).state = 1;
-      } else if (payload == 'tutor_tab') {
-        ref.read(currentTabProvider.notifier).state = 2;
-      }
-    });
+    _notifSub = notificationPayloadStream.stream.listen(_applyNotificationPayload);
+    _scheduleClockTick();
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _checkForProcessedText();
       _checkForSharedText();
       _checkForShortcut();
+      final queued = takeQueuedNotificationRoute();
+      if (queued != null) _applyNotificationPayload(queued);
     });
+  }
+
+  void _applyNotificationPayload(String payload) {
+    if (payload == kNotifPayloadExpenseAdd) {
+      ref.read(currentTabProvider.notifier).state = 0;
+      ref.read(pendingExpenseAddProvider.notifier).state = true;
+      return;
+    }
+    if (payload == kNotifPayloadExpenseTab) {
+      ref.read(currentTabProvider.notifier).state = 0;
+      return;
+    }
+    if (payload == kNotifPayloadNewsTab || payload == 'news_summary') {
+      ref.read(currentTabProvider.notifier).state = 1;
+      return;
+    }
+    if (payload == kNotifPayloadTutorTab) {
+      ref.read(currentTabProvider.notifier).state = 2;
+      return;
+    }
+    if (payload.startsWith('watch:')) {
+      final id = payload.substring('watch:'.length);
+      if (!mounted) return;
+      openWatch(context, ref, productId: id);
+    }
   }
 
   Future<void> _checkForShortcut() async {
@@ -216,9 +246,27 @@ class _AppShellState extends ConsumerState<AppShell>
 
   @override
   void dispose() {
+    _clockTick?.cancel();
     _notifSub?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
+  }
+
+  void _scheduleClockTick() {
+    _clockTick?.cancel();
+    final now = DateTime.now();
+    final next = nextUiClockTick(now);
+    final wait = next.difference(now) + const Duration(seconds: 1);
+    _clockTick = Timer(wait, () {
+      _bumpClockDay();
+      _scheduleClockTick();
+    });
+  }
+
+  void _bumpClockDay() {
+    if (!mounted) return;
+    ref.read(clockDayEpochProvider.notifier).state++;
+    unawaited(ExpenseWidgetService.instance.refreshOnAppStart());
   }
 
   @override
@@ -228,10 +276,12 @@ class _AppShellState extends ConsumerState<AppShell>
       _checkForProcessedText();
       _checkForSharedText();
       _checkForShortcut();
+      unawaited(ref.read(smsAutoExpenseProvider.notifier).drainOnResume());
+      unawaited(ref.read(newsControllerProvider.notifier).ensureFresh(force: true));
+      _bumpClockDay();
+      _scheduleClockTick();
     }
   }
-
-  static final _urlPattern = RegExp(r'https?://\S+', caseSensitive: false);
 
   Future<void> _checkForProcessedText() async {
     final text = await ProcessTextService.getProcessedText();
@@ -271,7 +321,8 @@ class _AppShellState extends ConsumerState<AppShell>
     _chooserVisible = true;
     final colors = Theme.of(context).extension<AppColors>()!;
     final hasImage = imagePath != null && imagePath.isNotEmpty;
-    final hasUrl = text != null && _urlPattern.hasMatch(text);
+    final hasUrl = text != null && TidyUrl.extractSharedUrl(text) != null;
+    final hasWatch = text != null && isWatchShareCandidate(text);
 
     showModalBottomSheet<String>(
       context: context,
@@ -281,6 +332,7 @@ class _AppShellState extends ConsumerState<AppShell>
         text: text,
         hasImage: hasImage,
         hasUrl: hasUrl,
+        hasWatch: hasWatch,
         colors: colors,
       ),
     ).then((feature) {
@@ -288,6 +340,9 @@ class _AppShellState extends ConsumerState<AppShell>
       if (feature == null || !mounted) return;
 
       switch (feature) {
+        case 'watch':
+          final url = text != null ? (extractHttpUrl(text) ?? text) : '';
+          openWatch(context, ref, seedUrl: url);
         case 'expense':
           ref.read(currentTabProvider.notifier).state = 0;
           if (hasImage) {
@@ -299,9 +354,8 @@ class _AppShellState extends ConsumerState<AppShell>
             ref.read(pendingExpenseTextProvider.notifier).state = text;
           }
         case 'summarizer':
-          final url = text != null
-              ? _urlPattern.firstMatch(text)?.group(0) ?? text
-              : '';
+          final url = text != null ? TidyUrl.normalizeForSummarize(text) : '';
+          if (url.isEmpty) return;
           ref.read(currentTabProvider.notifier).state = 2;
           Future.delayed(const Duration(milliseconds: 200), () {
             activeTutorSubtabSwitcher?.call(0);
@@ -385,6 +439,10 @@ class _AppShellState extends ConsumerState<AppShell>
         monthBudget: ref.read(currentBudgetProvider),
       );
     });
+    ref.listen(smsOpenExpenseTabTickProvider, (prev, next) {
+      if (prev == next) return;
+      ref.read(currentTabProvider.notifier).state = 0;
+    });
     ref.listen(currentBudgetProvider, (_, budget) {
       final expenses = ref.read(expensesStreamProvider).valueOrNull;
       if (expenses == null) return;
@@ -392,6 +450,18 @@ class _AppShellState extends ConsumerState<AppShell>
         expenses: expenses,
         monthBudget: budget,
       );
+    });
+    ref.listen(clockDayEpochProvider, (_, __) {
+      final expenses = ref.read(expensesStreamProvider).valueOrNull;
+      if (expenses == null) return;
+      ExpenseWidgetService.instance.scheduleUpdate(
+        expenses: expenses,
+        monthBudget: ref.read(currentBudgetProvider),
+      );
+    });
+    ref.listen(currentTabProvider, (prev, next) {
+      if (next != 1) return;
+      unawaited(ref.read(newsControllerProvider.notifier).ensureFresh(force: true));
     });
 
     return Scaffold(
@@ -636,12 +706,14 @@ class _ShareChooser extends StatefulWidget {
     this.text,
     required this.hasImage,
     required this.hasUrl,
+    required this.hasWatch,
     required this.colors,
   });
 
   final String? text;
   final bool hasImage;
   final bool hasUrl;
+  final bool hasWatch;
   final AppColors colors;
 
   @override
@@ -743,6 +815,44 @@ class _ShareChooserState extends State<_ShareChooser>
               ),
             ),
             const SizedBox(height: 20),
+            if (widget.hasWatch)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
+                child: Material(
+                  color: const Color(0xFFF59E0B).withValues(alpha: 0.14),
+                  borderRadius: BorderRadius.circular(16),
+                  child: InkWell(
+                    onTap: () => Navigator.of(context).pop('watch'),
+                    borderRadius: BorderRadius.circular(16),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 12,
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(
+                            Icons.local_offer_outlined,
+                            color: Color(0xFFF59E0B),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              'Watch this price',
+                              style: GoogleFonts.plusJakartaSans(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w700,
+                                color: c.text,
+                              ),
+                            ),
+                          ),
+                          Icon(Icons.chevron_right, color: c.text3),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 14),
               child: Row(
@@ -864,9 +974,8 @@ class _ShareOptionState extends State<_ShareOption>
           ),
         ),
         child: GestureDetector(
-          onTapDown: widget.enabled
-              ? (_) => setState(() => _scale = 0.92)
-              : null,
+          onTapDown:
+              widget.enabled ? (_) => setState(() => _scale = 0.92) : null,
           onTapUp: widget.enabled
               ? (_) {
                   setState(() => _scale = 1.0);

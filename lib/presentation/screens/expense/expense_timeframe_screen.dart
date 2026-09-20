@@ -6,22 +6,29 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:lucide_icons/lucide_icons.dart';
+import 'package:uuid/uuid.dart';
 
 import '../../../core/auth/auth_service.dart';
 import '../../../core/di/injection.dart';
 import '../../../core/services/expense_insight_engine.dart';
+import '../../../core/services/expense_merge.dart';
 import '../../../core/services/insight_grounding.dart';
 import '../../../core/services/telegram_logger.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/utils/currency_formatter.dart';
+import '../../../core/utils/expense_logged_at.dart';
 import '../../../data/repositories/expense_repository.dart';
+import '../../../data/services/sms_auto_expense/sms_auto_expense_service.dart';
 import '../../../domain/entities/expense_entities.dart';
 import '../../../domain/entities/expense_insight.dart';
 import '../settings/settings_controller.dart';
+import 'expense_learnings_provider.dart';
 import 'modals/edit_expense_modal.dart';
 import 'modals/expense_ai_ask_sheet.dart';
+import 'modals/merge_expenses_modal.dart';
 import 'widgets/ai_recommendation_card.dart';
 import 'widgets/expense_item.dart';
+import 'widgets/expense_merge_bar.dart';
 
 /// Identifies a slice of spending history opened from the Tracker's
 /// "Spending Analysis" section. [startIso] is an inclusive lower bound on the
@@ -150,6 +157,9 @@ class _ExpenseTimeframeScreenState
   // Generative AI recommendation (only when opened from "Ask AI").
   GroundedRecommendation? _recommendation;
   bool _insightLoading = false;
+  final Set<String> _selectedIds = <String>{};
+
+  bool get _selecting => _selectedIds.isNotEmpty;
 
   @override
   void initState() {
@@ -184,6 +194,7 @@ class _ExpenseTimeframeScreenState
   Future<void> _reset() async {
     setState(() {
       _items.clear();
+      _selectedIds.clear();
       _offset = 0;
       _hasMore = true;
       _hasError = false;
@@ -354,13 +365,90 @@ class _ExpenseTimeframeScreenState
     _reset();
   }
 
+  void _clearSelection() {
+    if (_selectedIds.isEmpty) return;
+    setState(_selectedIds.clear);
+  }
+
+  void _enterSelection(Expense e) {
+    setState(() => _selectedIds.add(e.id));
+  }
+
+  void _toggleSelection(Expense e) {
+    setState(() {
+      if (_selectedIds.contains(e.id)) {
+        _selectedIds.remove(e.id);
+      } else {
+        _selectedIds.add(e.id);
+      }
+    });
+  }
+
+  List<Expense> _selectedExpenses() {
+    final byId = {for (final e in _items) e.id: e};
+    return _selectedIds
+        .map((id) => byId[id])
+        .whereType<Expense>()
+        .toList(growable: false);
+  }
+
+  Future<void> _mergeSelected() async {
+    final selected = _selectedExpenses();
+    if (selected.length < 2) return;
+    final ExpenseMergePlan plan;
+    try {
+      plan = planExpenseMerge(selected);
+    } on ExpenseMergeException catch (e) {
+      _toast(e.message, warn: true);
+      return;
+    }
+    final merged = await showMergeExpensesModal(
+      context,
+      plan: plan,
+      mergedId: const Uuid().v4(),
+      bankConfigs: ref.read(settingsProvider).banks,
+    );
+    if (merged == null || !mounted) return;
+    final sms = ref.read(smsAutoExpenseProvider.notifier);
+    for (final id in plan.sourceIds) {
+      sms.noteUserEditing(id);
+    }
+    try {
+      final synced = await ref.read(expenseRepositoryProvider).mergeExpenses(
+        sourceIds: plan.sourceIds,
+        merged: merged,
+      );
+      unawaited(
+        ref.read(learningsProvider.notifier).learnFromDescription(
+          merged.description,
+          merged.category,
+        ),
+      );
+      if (!mounted) return;
+      _clearSelection();
+      await _reset();
+      if (!synced) _toast('Saved locally — sync pending', warn: true);
+    } catch (err) {
+      TLog.e('ExpenseTimeframe', 'Merge failed', error: err);
+      if (mounted) _toast('Could not merge expenses', warn: true);
+    }
+  }
+
   // ── Mutations (edit / delete) ──────────────────────────────────────────────
 
   void _editExpense(Expense e) {
+    ref.read(smsAutoExpenseProvider.notifier).noteUserEditing(e.id);
     showEditExpenseModal(
       context,
       expense: e,
       bankConfigs: ref.read(settingsProvider).banks,
+      onTeachAI: (description, category) {
+        unawaited(
+          ref
+              .read(learningsProvider.notifier)
+              .learnFromDescription(description, category),
+        );
+      },
       onUpdate: (updated) {
         // 1) Reflect the edit in the list IMMEDIATELY (zero perceived latency).
         if (mounted) {
@@ -477,7 +565,7 @@ class _ExpenseTimeframeScreenState
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).extension<AppColors>()!;
-    return Scaffold(
+    final scaffold = Scaffold(
       backgroundColor: colors.bg,
       body: SafeArea(
         bottom: false,
@@ -486,7 +574,13 @@ class _ExpenseTimeframeScreenState
             _Header(
               colors: colors,
               timeframe: widget.timeframe,
-              onClose: () => Navigator.of(context).maybePop(),
+              onClose: () {
+                if (_selecting) {
+                  _clearSelection();
+                } else {
+                  Navigator.of(context).maybePop();
+                }
+              },
             ),
             // Everything below the header scrolls together, so the (often tall)
             // AI insight card and summary hero scroll away to give the matched
@@ -563,6 +657,33 @@ class _ExpenseTimeframeScreenState
         ),
       ),
     );
+
+    final selected = _selectedExpenses();
+    final total = selected.fold<double>(0, (s, e) => s + e.amount);
+    return ExpenseSelectionScope(
+      active: _selecting,
+      onCancel: _clearSelection,
+      child: Stack(
+        children: [
+          scaffold,
+          if (_selecting)
+            Positioned(
+              left: 12,
+              right: 12,
+              bottom: 12,
+              child: SafeArea(
+                top: false,
+                child: ExpenseMergeActionBar(
+                  selectedCount: selected.length,
+                  total: total,
+                  onMerge: _mergeSelected,
+                  onCancel: _clearSelection,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
   }
 
   Widget _buildBodySliver(AppColors colors) {
@@ -583,7 +704,7 @@ class _ExpenseTimeframeScreenState
     }
 
     return SliverPadding(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 120),
+      padding: EdgeInsets.fromLTRB(16, 8, 16, _selecting ? 200 : 120),
       sliver: SliverList(
         delegate: SliverChildBuilderDelegate(
           (context, rawIndex) {
@@ -612,6 +733,11 @@ class _ExpenseTimeframeScreenState
                 onEdit: () => _editExpense(e),
                 onDelete: () => _deleteExpense(e),
                 onTap: () => _showDetail(e),
+                selectionMode: _selecting,
+                selected: _selectedIds.contains(e.id),
+                onLongPress: () => _enterSelection(e),
+                onToggleSelect: () => _toggleSelection(e),
+                onExitSelection: _clearSelection,
               ),
             );
             if (!showHeader) return child;
@@ -1791,7 +1917,7 @@ class _ExpenseDetailSheet extends StatelessWidget {
                       child: Text(
                         dt == null
                             ? e.date
-                            : '${formatDate(e.date)} · ${formatTime(e.date)}',
+                            : formatExpenseWhen(e.date, comments: e.comments),
                         style: GoogleFonts.plusJakartaSans(
                           fontSize: 13,
                           fontWeight: FontWeight.w600,

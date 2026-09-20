@@ -7,6 +7,7 @@ import 'package:lucide_icons/lucide_icons.dart';
 
 import '../../../core/auth/auth_service.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../widgets/nexus_brand_mark.dart';
 import 'login_copy.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -203,7 +204,6 @@ class _LoginScreenState extends State<LoginScreen>
           fit: StackFit.expand,
           children: [
             FadeTransition(opacity: _orbFade, child: const _OrbsLayer()),
-
             SafeArea(
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 32),
@@ -221,7 +221,7 @@ class _LoginScreenState extends State<LoginScreen>
                             opacity: _logoFade,
                             child: ScaleTransition(
                               scale: _pulseScale,
-                              child: const _MiniOrb(),
+                              child: const NexusBrandMark(size: 80),
                             ),
                           ),
                           const SizedBox(height: 28),
@@ -270,7 +270,8 @@ class _LoginScreenState extends State<LoginScreen>
                           FadeTransition(
                             opacity: _subtitleFade,
                             child: Text(
-                              LoginCopy.subtitle(sessionExpired: _sessionExpired),
+                              LoginCopy.subtitle(
+                                  sessionExpired: _sessionExpired),
                               textAlign: TextAlign.center,
                               style: GoogleFonts.plusJakartaSans(
                                 fontSize: 14,
@@ -329,8 +330,8 @@ class _LoginScreenState extends State<LoginScreen>
                                           size: 19,
                                           color: colors.text4,
                                         ),
-                                        onPressed: () =>
-                                            setState(() => _obscure = !_obscure),
+                                        onPressed: () => setState(
+                                            () => _obscure = !_obscure),
                                       ),
                                     ),
                                   ),
@@ -393,8 +394,7 @@ class _LoginScreenState extends State<LoginScreen>
                           FadeTransition(
                             opacity: _footerFade,
                             child: Padding(
-                              padding:
-                                  EdgeInsets.only(bottom: 16 + bottomPad),
+                              padding: EdgeInsets.only(bottom: 16 + bottomPad),
                               child: Row(
                                 mainAxisAlignment: MainAxisAlignment.center,
                                 children: [
@@ -604,10 +604,12 @@ class _SignInButtonState extends State<_SignInButton>
         onTapDown: _onDown,
         onTapUp: _onUp,
         onTapCancel: _onCancel,
-        onTap: widget.loading ? null : () {
-          HapticFeedback.mediumImpact();
-          widget.onTap();
-        },
+        onTap: widget.loading
+            ? null
+            : () {
+                HapticFeedback.mediumImpact();
+                widget.onTap();
+              },
         child: Container(
           width: double.infinity,
           height: 52,
@@ -733,41 +735,9 @@ class _BlurOrb extends StatelessWidget {
           shape: BoxShape.circle,
           gradient: RadialGradient(
             colors: colors,
-            stops: colors.length == 3
-                ? const [0.0, 0.45, 1.0]
-                : const [0.0, 1.0],
+            stops:
+                colors.length == 3 ? const [0.0, 0.45, 1.0] : const [0.0, 1.0],
           ),
-        ),
-      ),
-    );
-  }
-}
-
-// ── Mini hero orb (branding) ────────────────────────────────────────────────
-
-class _MiniOrb extends StatelessWidget {
-  const _MiniOrb();
-  static const double _size = 80;
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: _size,
-      height: _size,
-      child: Container(
-        decoration: const BoxDecoration(
-          shape: BoxShape.circle,
-          gradient: RadialGradient(
-            colors: [Color(0xFF1A4A9E), AppColors.accent, AppColors.accentCyan],
-            stops: [0.0, 0.55, 1.0],
-          ),
-          boxShadow: [
-            BoxShadow(color: Color(0x550D59F2), blurRadius: 28),
-            BoxShadow(color: Color(0x3322D3EE), blurRadius: 20, spreadRadius: -4),
-          ],
-        ),
-        child: const Center(
-          child: Icon(LucideIcons.sparkles, size: 30, color: Color(0xE6FFFFFF)),
         ),
       ),
     );

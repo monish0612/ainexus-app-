@@ -5,6 +5,7 @@ import '../../../../../core/constants/app_constants.dart';
 import '../../../../../core/theme/app_colors.dart';
 import '../../../../../presentation/screens/cloud/stats/nas_stats_screen.dart';
 import '../../../../../presentation/screens/cloud/stats/vps_stats_screen.dart';
+import '../../../../../presentation/screens/watch/watch_navigator.dart';
 
 /// The "Stats" entry point that lives above the Cloud tab bar.
 ///
@@ -97,6 +98,12 @@ class _StatsLauncherState extends State<StatsLauncher>
           runSpacing: 8,
           children: [
             _StatsPill(open: _open, onTap: _toggle),
+            _DestinationChip(
+              label: 'Watch',
+              icon: Icons.local_offer_outlined,
+              tint: const Color(0xFFF59E0B),
+              onTap: () => WatchNavigator.open(context),
+            ),
             if (_open) ...[
               _StaggeredChip(
                 controller: _controller,

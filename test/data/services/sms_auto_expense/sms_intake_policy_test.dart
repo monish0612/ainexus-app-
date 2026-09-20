@@ -170,13 +170,13 @@ void main() {
   });
 
   group('expense day', () {
-    test('nearby bank date is kept at local noon', () {
+    test('nearby bank date keeps the SMS arrival clock, not noon', () {
       final received = DateTime(2026, 9, 10, 15, 28);
       final day = SmsIntakePolicy.expenseDay(
         DateTime(2026, 9, 10),
         received,
       );
-      expect(day, DateTime(2026, 9, 10, 12));
+      expect(day, DateTime(2026, 9, 10, 15, 28));
     });
 
     test('wild dd/mm misread falls back to received day so Today still shows it',
@@ -186,7 +186,16 @@ void main() {
         DateTime(2026, 10, 9),
         received,
       );
-      expect(day, DateTime(2026, 9, 10, 12));
+      expect(day, DateTime(2026, 9, 10, 15, 28));
+    });
+
+    test('bank ISO clock is kept on the trusted calendar day', () {
+      final received = DateTime(2026, 9, 10, 15, 28);
+      final day = SmsIntakePolicy.expenseDay(
+        DateTime(2026, 9, 10, 11, 4, 9),
+        received,
+      );
+      expect(day, DateTime(2026, 9, 10, 11, 4, 9));
     });
   });
 }

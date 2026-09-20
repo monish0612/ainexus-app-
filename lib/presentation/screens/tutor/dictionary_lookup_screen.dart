@@ -13,6 +13,7 @@ import '../../../core/services/telegram_logger.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../data/local/database/app_database.dart';
 import '../../../domain/entities/tutor_entities.dart';
+import '../../widgets/block_selectable.dart';
 import '../settings/settings_controller.dart';
 
 /// Lightweight full-screen dictionary lookup pushed on top of an article.
@@ -280,7 +281,8 @@ class _DictionaryLookupScreenState
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Container(
+          ArticleSelectionScope(
+            child: Container(
             decoration: BoxDecoration(
               color: colors.bg1,
               borderRadius: BorderRadius.circular(16),
@@ -306,7 +308,7 @@ class _DictionaryLookupScreenState
                       Row(
                         children: [
                           Expanded(
-                            child: Text(
+                            child: BlockSelectableText(
                               r.word,
                               style: GoogleFonts.plusJakartaSans(
                                 fontSize: 28,
@@ -316,7 +318,8 @@ class _DictionaryLookupScreenState
                               ),
                             ),
                           ),
-                          IconButton(
+                          NonSelectableChrome(
+                            child: IconButton(
                             onPressed: () => _copy(
                               '${r.word} — ${r.definition}',
                             ),
@@ -329,6 +332,7 @@ class _DictionaryLookupScreenState
                               size: 16,
                               color: colors.text3,
                             ),
+                          ),
                           ),
                         ],
                       ),
@@ -392,7 +396,7 @@ class _DictionaryLookupScreenState
                         ),
                       ),
                       const SizedBox(height: 8),
-                      SelectableText(
+                      BlockSelectableText(
                         r.definition,
                         style: GoogleFonts.plusJakartaSans(
                           fontSize: 15,
@@ -486,7 +490,7 @@ class _DictionaryLookupScreenState
                                   ),
                                   const SizedBox(width: 10),
                                   Expanded(
-                                    child: SelectableText(
+                                    child: BlockSelectableText(
                                       r.examples[i],
                                       style: GoogleFonts.plusJakartaSans(
                                         fontSize: 14,
@@ -521,7 +525,7 @@ class _DictionaryLookupScreenState
                           ),
                         ),
                         const SizedBox(height: 8),
-                        SelectableText(
+                        BlockSelectableText(
                           r.usageGuide,
                           style: GoogleFonts.plusJakartaSans(
                             fontSize: 14,
@@ -535,7 +539,8 @@ class _DictionaryLookupScreenState
                 ],
 
                 Divider(height: 1, color: colors.border2),
-                Padding(
+                NonSelectableChrome(
+                  child: Padding(
                   padding: const EdgeInsets.all(16),
                   child: _SaveButton(
                     saved: _saved,
@@ -544,8 +549,10 @@ class _DictionaryLookupScreenState
                     onSave: _saveWord,
                   ),
                 ),
+                ),
               ],
             ),
+          ),
           ),
         ],
       ),

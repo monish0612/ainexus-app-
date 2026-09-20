@@ -18,9 +18,11 @@ import '../../../data/services/google_drive_service.dart';
 import '../../../data/services/nas_files_service.dart';
 import '../../../domain/entities/nas_file.dart';
 import '../../providers/cloud_destination_provider.dart';
+import '../../providers/profile_photo_provider.dart';
 import '../../widgets/compact_header.dart';
 import '../settings/settings_modal.dart';
 import 'stats/widgets/stats_launcher.dart';
+import '../notes/notes_launcher.dart';
 import 'widgets/destination_switch.dart';
 
 // ── UI Models ────────────────────────────────────────────────────────────────
@@ -1504,11 +1506,13 @@ class _CloudScreenState extends ConsumerState<CloudScreen>
       children: [
         CompactHeader(
           title: 'Cloud',
+          photoPath: ref.watch(profilePhotoPathProvider),
           onAvatarTap: () => showSettingsModal(context, ref),
         ),
         // Above the TabBar rather than inside a tab, so it stays reachable from
         // both Files and History instead of scrolling away with the file list.
         const StatsLauncher(),
+        const NotesLauncher(),
         // Pinned above the tabs, never in a menu. The whole point is that the
         // answer to "where is this about to go?" is on screen at the instant
         // the upload button is tapped, without having to remember it.

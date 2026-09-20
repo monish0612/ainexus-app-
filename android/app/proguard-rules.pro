@@ -1,4 +1,7 @@
 -keep class app.ainexus.ai_nexus.sms.** { *; }
+-keep class app.ainexus.ai_nexus.ExpenseWidget** { *; }
+-keep class app.ainexus.ai_nexus.SearchWidget** { *; }
+-keep class app.ainexus.ai_nexus.WidgetBootReceiver { *; }
 -keep class com.ryanheise.** { *; }
 -keep class com.google.mlkit.vision.text.** { *; }
 -keep class com.google.mlkit.vision.text.chinese.** { *; }

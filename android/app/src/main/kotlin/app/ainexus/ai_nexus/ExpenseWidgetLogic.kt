@@ -45,7 +45,9 @@ object ExpenseWidgetLogic {
 
     /**
      * Compact Indian-locale currency: `₹999`, `₹12,345`, `₹1.2L`, `₹3Cr`.
-     * Keeps output short so it can never overflow the widget's hero/stat slots.
+     * Shared by the hero (today) and the donut hole (month) so a lakh-scale
+     * amount like 120345 becomes `₹1.2L` — never a full `₹1,20,345` that
+     * would paint over the ring.
      */
     fun formatInrCompact(value: Double, negative: Boolean = false): String {
         val sign = if (negative) "-" else ""
@@ -243,5 +245,126 @@ object ExpenseWidgetLogic {
         } catch (e: NumberFormatException) {
             null
         }
+    }
+
+    // ── Spend-mix donut ──────────────────────────────────────────────────────
+
+    /** One category (or Other) slice persisted by Flutter for the widget donut. */
+    data class PieSlice(
+        val name: String,
+        val emoji: String,
+        val colorHex: String,
+        val amount: Double,
+    )
+
+    /** Slice plus the arc it occupies, starting at 12 o'clock (−90°). */
+    data class PieSweep(
+        val slice: PieSlice,
+        val startAngle: Float,
+        val sweep: Float,
+        val percent: Int,
+    )
+
+    /**
+     * Parses the Flutter `expense_widget_pie` payload. Records are `\u001e`-
+     * separated; fields inside a record are `\u001f`-separated:
+     * `name, emoji, #RRGGBB, amount`. Caps at 4 slices; skips junk.
+     */
+    fun parsePiePayload(raw: String?): List<PieSlice> {
+        if (raw.isNullOrBlank()) return emptyList()
+        return raw.split('\u001e').mapNotNull { rec ->
+            if (rec.isBlank()) return@mapNotNull null
+            val p = rec.split('\u001f')
+            if (p.size < 4) return@mapNotNull null
+            val amount = p[3].trim().toDoubleOrNull() ?: return@mapNotNull null
+            if (!amount.isFinite() || amount <= 0.0) return@mapNotNull null
+            val name = p[0].trim()
+            if (name.isEmpty()) return@mapNotNull null
+            PieSlice(
+                name = name,
+                emoji = p[1].trim(),
+                colorHex = p[2].trim(),
+                amount = amount,
+            )
+        }.take(4)
+    }
+
+    /** Single-slice fallback so an older snapshot without a pie payload still draws. */
+    fun pieFallbackFromTop(
+        name: String,
+        emoji: String,
+        colorHex: String,
+        amount: Double,
+    ): List<PieSlice> {
+        if (name.isBlank() || !amount.isFinite() || amount <= 0.0) return emptyList()
+        return listOf(PieSlice(name.trim(), emoji, colorHex, amount))
+    }
+
+    /** Month-stale widgets get no mix; otherwise parse, then fall back to top cat. */
+    fun effectivePie(
+        payload: String?,
+        isMonthStale: Boolean,
+        fallbackName: String,
+        fallbackEmoji: String,
+        fallbackColor: String,
+        fallbackAmount: Double,
+    ): List<PieSlice> {
+        if (isMonthStale) return emptyList()
+        val parsed = parsePiePayload(payload)
+        if (parsed.isNotEmpty()) return parsed
+        return pieFallbackFromTop(fallbackName, fallbackEmoji, fallbackColor, fallbackAmount)
+    }
+
+    /**
+     * Largest-remainder percents that always sum to 100 (or all zeros).
+     * A single positive amount is 100 even if other zeros are present.
+     */
+    fun piePercents(amounts: List<Double>): List<Int> {
+        if (amounts.isEmpty()) return emptyList()
+        if (amounts.any { !it.isFinite() }) return List(amounts.size) { 0 }
+        val total = amounts.sum()
+        if (!total.isFinite() || total <= 0.0) return List(amounts.size) { 0 }
+        if (amounts.size == 1) return listOf(100)
+        val exact = amounts.map { it / total * 100.0 }
+        val floors = exact.map { kotlin.math.floor(it).toInt() }.toMutableList()
+        var rem = 100 - floors.sum()
+        val order = exact.indices.sortedWith(
+            compareByDescending<Int> { exact[it] - floors[it] }.thenBy { it }
+        )
+        var i = 0
+        while (rem > 0 && order.isNotEmpty()) {
+            floors[order[i % order.size]]++
+            rem--
+            i++
+        }
+        return floors
+    }
+
+    /**
+     * Arc list for the donut. One slice is a seamless 360° ring; multiple
+     * slices share a 3° gap so the ring reads as separate chips, not a blob.
+     */
+    fun pieSweeps(slices: List<PieSlice>): List<PieSweep> {
+        val positive = slices.filter { it.amount.isFinite() && it.amount > 0.0 }.take(4)
+        if (positive.isEmpty()) return emptyList()
+        val percents = piePercents(positive.map { it.amount })
+        if (positive.size == 1) {
+            return listOf(PieSweep(positive[0], -90f, 360f, 100))
+        }
+        val gap = 3.0f
+        val usable = (360f - gap * positive.size).coerceAtLeast(1f)
+        var cursor = -90f
+        return positive.mapIndexed { i, slice ->
+            val sweep = (usable * (percents[i] / 100f)).coerceAtLeast(1.4f)
+            val item = PieSweep(slice, cursor, sweep, percents[i])
+            cursor += sweep + gap
+            item
+        }
+    }
+
+    /** Compact legend: `₹1,200 · 42%` (or `· <1%` when remainder rounded to 0). */
+    fun legendLine(amount: Double, percent: Int): String {
+        val pct = if (percent < 1) "<1%" else "$percent%"
+        return "${formatInrCompact(amount)} · $pct"
     }
 }

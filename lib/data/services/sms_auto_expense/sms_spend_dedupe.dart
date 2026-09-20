@@ -1,3 +1,4 @@
+import '../../../core/utils/expense_logged_at.dart';
 import '../../../domain/entities/expense_entities.dart';
 import 'sms_intake_policy.dart';
 import 'sms_models.dart';
@@ -24,25 +25,6 @@ class SmsSpendDedupe {
 
   static bool amountsMatch(double a, double b) =>
       (a - b).abs() <= amountEpsilon;
-
-  static const _months = {
-    'Jan': 1,
-    'Feb': 2,
-    'Mar': 3,
-    'Apr': 4,
-    'May': 5,
-    'Jun': 6,
-    'Jul': 7,
-    'Aug': 8,
-    'Sep': 9,
-    'Oct': 10,
-    'Nov': 11,
-    'Dec': 12,
-  };
-
-  static final _stamp = RegExp(
-    r'Auto Detected · (\d{1,2}) ([A-Za-z]{3}) (\d{4}), (\d{1,2}):(\d{2}) (AM|PM)',
-  );
 
   /// Incoming SMS may fill in a blank Others row. Never rewrite a category
   /// the user already picked in the editor (Others → Medical must stick).
@@ -79,24 +61,8 @@ class SmsSpendDedupe {
     return false;
   }
 
-  static DateTime? parseStamp(String comments, String description) {
-    final hay = '$comments $description';
-    final m = _stamp.firstMatch(hay);
-    if (m == null) return null;
-    final day = int.tryParse(m.group(1)!) ?? 1;
-    final month = _months[m.group(2)!];
-    final year = int.tryParse(m.group(3)!) ?? 0;
-    var hour = int.tryParse(m.group(4)!) ?? 0;
-    final minute = int.tryParse(m.group(5)!) ?? 0;
-    final ampm = m.group(6)!;
-    if (month == null || year <= 0) return null;
-    if (ampm == 'AM') {
-      if (hour == 12) hour = 0;
-    } else if (hour != 12) {
-      hour += 12;
-    }
-    return DateTime(year, month, day, hour, minute);
-  }
+  static DateTime? parseStamp(String comments, String description) =>
+      parseAutoDetectedStamp('$comments $description');
 
   static SmsDedupeHit? match({
     required ParsedSmsDebit incoming,

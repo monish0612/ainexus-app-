@@ -1,14 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Inner search pill: a slightly lifted dark capsule with a subtle
-     indigo-tinted border so it glows against the AMOLED card. -->
+<!-- True capsule: radius = half of the 44dp bar. Hairline only — no sheen
+     slab, so the widget reads as a search box instead of a thick card. -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android"
     android:shape="rectangle">
-    <gradient
-        android:angle="90"
-        android:startColor="#121218"
-        android:endColor="#0B0B11" />
-    <corners android:radius="26dp" />
+    <solid android:color="#F21A1A22" />
+    <corners android:radius="@dimen/widget_search_bar_radius" />
     <stroke
         android:width="1dp"
-        android:color="#2B2B45" />
+        android:color="#3D3D4A" />
 </shape>

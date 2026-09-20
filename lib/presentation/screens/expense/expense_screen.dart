@@ -1,31 +1,43 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:lucide_icons/lucide_icons.dart';
+import 'package:uuid/uuid.dart';
 
+import '../../../core/auth/auth_service.dart';
 import '../../../core/di/injection.dart';
+import '../../../core/services/expense_merge.dart';
 import '../../../core/services/expense_widget_service.dart';
 import '../../../core/services/process_text_service.dart';
 import '../../../core/services/telegram_logger.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../data/repositories/expense_repository.dart';
-import '../../../domain/entities/expense_entities.dart';
-import '../../widgets/compact_header.dart';
+import '../../../data/services/sms_auto_expense/sms_auto_expense_service.dart';
+import '../../providers/profile_photo_provider.dart';
 import '../settings/settings_controller.dart';
 import '../settings/settings_modal.dart';
+import '../watch/watch_navigator.dart';
+import '../watch/watch_providers.dart';
+import '../../../domain/entities/expense_entities.dart';
+import '../../widgets/expense_home_header.dart';
 import 'expense_timeframe_screen.dart';
 import 'widgets/tracker_tab.dart';
 import 'widgets/insights_tab.dart';
 import 'widgets/nuke_easter_egg.dart';
 import 'widgets/expense_item.dart';
 import 'modals/add_expense_modal.dart';
+import 'modals/merge_expenses_modal.dart';
 import 'modals/expense_ai_ask_sheet.dart';
 import 'modals/set_budget_modal.dart';
 import 'modals/edit_expense_modal.dart';
 import 'modals/expense_trend_modal.dart';
 import 'modals/budget_history_modal.dart';
+import 'expense_learnings_provider.dart';
+
+export 'expense_learnings_provider.dart' show learningsProvider, LearningsCtrl;
 
 // ---------------------------------------------------------------------------
 // Repository-backed providers (data survives restarts)
@@ -45,50 +57,9 @@ final currentBudgetProvider = Provider<double>((ref) {
   return history.isNotEmpty ? history.first.amount : 0;
 });
 
-final learningsProvider =
-    StateNotifierProvider<_LearningsCtrl, CategoryLearning>((ref) {
-  return _LearningsCtrl(ref);
-});
-
-class _LearningsCtrl extends StateNotifier<CategoryLearning> {
-  _LearningsCtrl(this._ref) : super({}) {
-    _load();
-  }
-
-  final Ref _ref;
-
-  Future<void> _load() async {
-    try {
-      final repo = _ref.read(expenseRepositoryProvider);
-      // Load local first, then merge from server in background
-      state = await repo.getLearnings();
-      repo.syncLearningsFromServer().then((_) async {
-        state = await repo.getLearnings();
-      });
-    } catch (e) {
-      TLog.w('Learnings', 'Failed to load learnings', error: e);
-    }
-  }
-
-  Future<void> learnFromDescription(
-    String description,
-    String category,
-  ) async {
-    final repo = _ref.read(expenseRepositoryProvider);
-    final words = description
-        .toLowerCase()
-        .split(RegExp(r'[\s,\-_/]+'))
-        .where((w) => w.length > 3);
-    final updated = Map<String, String>.from(state);
-    for (final word in words) {
-      updated[word] = category;
-      await repo.saveLearning(word, category);
-      // Sync each learning to server (fire-and-forget)
-      repo.syncLearning(word, category);
-    }
-    state = updated;
-  }
-}
+/// Bumped on app resume and at local midnight / greeting boundaries so
+/// Tracker "today" and the header greeting cannot stay frozen overnight.
+final clockDayEpochProvider = StateProvider<int>((ref) => 0);
 
 // ---------------------------------------------------------------------------
 // Screen
@@ -104,11 +75,19 @@ class ExpenseScreen extends ConsumerStatefulWidget {
 class _ExpenseScreenState extends ConsumerState<ExpenseScreen>
     with SingleTickerProviderStateMixin {
   late final TabController _tabCtrl;
+  int _mergeSelectionCount = 0;
 
   @override
   void initState() {
     super.initState();
     _tabCtrl = TabController(length: 2, vsync: this);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (ref.read(pendingExpenseAddProvider)) {
+        ref.read(pendingExpenseAddProvider.notifier).state = false;
+        _openAddExpenseFromWidget();
+      }
+    });
     Future.microtask(() async {
       // Honour a cross-device nuke FIRST: if another device reset the data, wipe
       // ours before we push anything — otherwise draining a stale offline queue
@@ -116,6 +95,12 @@ class _ExpenseScreenState extends ConsumerState<ExpenseScreen>
       await ref.read(resetSyncServiceProvider).applyRemoteResetIfNeeded();
 
       final repo = ref.read(expenseRepositoryProvider);
+      // Drain queued offline expense writes BEFORE pulling, matching salary.
+      try {
+        await repo.drainSyncQueue();
+      } catch (e) {
+        TLog.e('Expense', 'Expense drainSyncQueue failed', error: e);
+      }
       repo.syncFromServer();
       repo.syncBudgetFromServer();
       repo.retryPendingClears();
@@ -275,11 +260,19 @@ class _ExpenseScreenState extends ConsumerState<ExpenseScreen>
   }
 
   void _openEditExpenseModal(ExpenseData data) {
+    ref.read(smsAutoExpenseProvider.notifier).noteUserEditing(data.id);
     final expense = _fromExpenseData(data);
     showEditExpenseModal(
       context,
       expense: expense,
       bankConfigs: ref.read(settingsProvider).banks,
+      onTeachAI: (description, category) {
+        unawaited(
+          ref
+              .read(learningsProvider.notifier)
+              .learnFromDescription(description, category),
+        );
+      },
       onUpdate: (updated) async {
         final sw = Stopwatch()..start();
         try {
@@ -299,6 +292,51 @@ class _ExpenseScreenState extends ConsumerState<ExpenseScreen>
         }
       },
     );
+  }
+
+  Future<void> _mergeSelected(List<ExpenseData> selected) async {
+    if (selected.length < 2) return;
+    final sources = selected.map(_fromExpenseData).toList();
+    final ExpenseMergePlan plan;
+    try {
+      plan = planExpenseMerge(sources);
+    } on ExpenseMergeException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.message)),
+      );
+      return;
+    }
+    final merged = await showMergeExpensesModal(
+      context,
+      plan: plan,
+      mergedId: const Uuid().v4(),
+      bankConfigs: ref.read(settingsProvider).banks,
+    );
+    if (merged == null || !mounted) return;
+    final sms = ref.read(smsAutoExpenseProvider.notifier);
+    for (final id in plan.sourceIds) {
+      sms.noteUserEditing(id);
+    }
+    try {
+      final synced = await ref.read(expenseRepositoryProvider).mergeExpenses(
+        sourceIds: plan.sourceIds,
+        merged: merged,
+      );
+      unawaited(
+        ref.read(learningsProvider.notifier).learnFromDescription(
+          merged.description,
+          merged.category,
+        ),
+      );
+      if (!mounted) return;
+      if (!synced) _showSyncError();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not merge: $e')),
+      );
+    }
   }
 
   Future<void> _deleteExpense(String id) async {
@@ -354,7 +392,7 @@ class _ExpenseScreenState extends ConsumerState<ExpenseScreen>
     }
   }
 
-  void _openTimeframe(int index) {
+  void _openTimeframe(int index, {String? category}) {
     final now = DateTime.now();
     // Exclusive upper bounds ([start, end)) so future-dated entries (e.g. a
     // next-month bill) stay out of Today/7D/1M/6M and only appear under "All".
@@ -391,9 +429,39 @@ class _ExpenseScreenState extends ConsumerState<ExpenseScreen>
     showExpenseTimeframeScreen(
       context,
       ExpenseTimeframe(
-        label: label,
+        label: category == null || category.isEmpty
+            ? label
+            : '$label · $category',
         startIso: start?.toIso8601String(),
         endIso: end?.toIso8601String(),
+        seedCategory: category,
+      ),
+    );
+  }
+
+  void _openDay(DateTime day) {
+    final start = DateTime(day.year, day.month, day.day);
+    final end = start.add(const Duration(days: 1));
+    const months = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
+    showExpenseTimeframeScreen(
+      context,
+      ExpenseTimeframe(
+        label: '${start.day} ${months[start.month - 1]}',
+        startIso: start.toIso8601String(),
+        endIso: end.toIso8601String(),
       ),
     );
   }
@@ -616,26 +684,36 @@ class _ExpenseScreenState extends ConsumerState<ExpenseScreen>
 
     final colors = Theme.of(context).extension<AppColors>()!;
 
+    // Forces a rebuild after midnight / resume so TODAY'S SPENDING uses
+    // today's calendar day even when the expenses stream did not emit.
+    ref.watch(clockDayEpochProvider);
+
     final expensesAsync = ref.watch(expensesStreamProvider);
-    final expenses = expensesAsync.valueOrNull ?? [];
+    final expenses = expensesAsync.valueOrNull;
     final budget = ref.watch(currentBudgetProvider);
     final budgetHistory =
         ref.watch(budgetHistoryStreamProvider).valueOrNull ?? [];
     final learnings = ref.watch(learningsProvider);
 
-    final expenseData = _toExpenseData(expenses);
+    final expenseData = _toExpenseData(expenses ?? const []);
 
-    // Push today's summary to the home-screen expense widget (debounced, skip-if-unchanged)
-    ExpenseWidgetService.instance.scheduleUpdate(
-      expenses: expenses,
-      monthBudget: budget,
-    );
+    // Only push when the stream has a real snapshot. `?? []` during the first
+    // loading frame would briefly zero the home-screen widget.
+    if (expenses != null) {
+      ExpenseWidgetService.instance.scheduleUpdate(
+        expenses: expenses,
+        monthBudget: budget,
+      );
+    }
 
     return Column(
       children: [
-        CompactHeader(
-          title: 'Expense',
+        ExpenseHomeHeader(
+          name: AuthService.instance.firstName,
+          photoPath: ref.watch(profilePhotoPathProvider),
           onAvatarTap: () => showSettingsModal(context, ref),
+          watchBadge: ref.watch(watchUnreadProvider).valueOrNull ?? 0,
+          onWatchTap: () => WatchNavigator.open(context),
         ),
         Container(
           color: colors.headerBg,
@@ -677,9 +755,16 @@ class _ExpenseScreenState extends ConsumerState<ExpenseScreen>
                     onSetBudget: _openSetBudgetModal,
                     onUpdateLearnings: () {},
                     onEditExpense: _openEditExpenseModal,
-                    onShowTrend: _openTrendModal,
                     onShowBudgetHistory: _openBudgetHistoryModal,
                     onOpenTimeframe: _openTimeframe,
+                    onOpenDay: _openDay,
+                    onOpenCategory: (index, category) =>
+                        _openTimeframe(index, category: category),
+                    onMergeExpenses: _mergeSelected,
+                    onMergeSelectionChanged: (count) {
+                      if (_mergeSelectionCount == count) return;
+                      setState(() => _mergeSelectionCount = count);
+                    },
                   ),
                   InsightsTab(
                     expenses: expenseData,
@@ -687,6 +772,7 @@ class _ExpenseScreenState extends ConsumerState<ExpenseScreen>
                     onEasterEgg: _handleEasterEgg,
                     onOpenInvestments: _openInvestments,
                     onOpenLoans: _openLoans,
+                    onShowTrend: _openTrendModal,
                   ),
                 ],
               ),
@@ -698,11 +784,12 @@ class _ExpenseScreenState extends ConsumerState<ExpenseScreen>
                   builder: (context, child) {
                     final onTracker =
                         _tabCtrl.index == 0 && !_tabCtrl.indexIsChanging;
+                    final showFab = onTracker && _mergeSelectionCount == 0;
                     return AnimatedOpacity(
-                      opacity: onTracker ? 1.0 : 0.0,
+                      opacity: showFab ? 1.0 : 0.0,
                       duration: const Duration(milliseconds: 200),
                       child: IgnorePointer(
-                        ignoring: !onTracker,
+                        ignoring: !showFab,
                         child: child,
                       ),
                     );
@@ -718,11 +805,12 @@ class _ExpenseScreenState extends ConsumerState<ExpenseScreen>
                   builder: (context, child) {
                     final onTracker =
                         _tabCtrl.index == 0 && !_tabCtrl.indexIsChanging;
+                    final showFab = onTracker && _mergeSelectionCount == 0;
                     return AnimatedOpacity(
-                      opacity: onTracker ? 1.0 : 0.0,
+                      opacity: showFab ? 1.0 : 0.0,
                       duration: const Duration(milliseconds: 200),
                       child: IgnorePointer(
-                        ignoring: !onTracker,
+                        ignoring: !showFab,
                         child: child,
                       ),
                     );

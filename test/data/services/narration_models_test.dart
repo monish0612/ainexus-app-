@@ -1,4 +1,5 @@
 import 'package:ai_nexus/data/services/narration_models.dart';
+import 'package:ai_nexus/data/services/narration_playback.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -29,6 +30,7 @@ void main() {
     expect(deleted.canReplay, isTrue);
     expect(deleted.useOnDevice, isFalse);
     expect(deleted.isReady, isFalse);
+    expect(shouldEnsureBeforePlay(deleted), isTrue);
 
     final generating = NarrationJob.fromJson({'status': 'GENERATING'});
     expect(generating.isPreparing, isTrue);

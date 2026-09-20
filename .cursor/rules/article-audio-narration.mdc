@@ -1,0 +1,448 @@
+---
+description: Implementation spec (v2) for the Article-to-Audio narration feature. Corrected against a live Coolify audit performed 12 Sep 2026 — read the whole thing before writing any code, especially §0 and §0.1, which override earlier assumptions.
+alwaysApply: true
+---
+
+# Article-to-Audio Narration Feature — Implementation Spec v2
+### (Corrected against a live Coolify/VPS audit, 12 Sep 2026 — supersedes the earlier draft)
+
+You are implementing a complete feature end-to-end: article text → deep-voice narrated
+explainer audio → background/lock-screen playback in a Flutter app → guaranteed cleanup
+after listening. Treat the deletion subsystem with the same rigor as you would payment
+code — "without fail" is a hard requirement, not a suggestion.
+
+A prior version of this spec assumed things about the VPS that turned out to be false. A
+Coolify audit was run and found the real state. **Everything in §0 below is settled
+ground truth from that audit — do not re-derive or second-guess it, but DO re-verify
+anything time-sensitive (free RAM, port availability) immediately before you deploy,
+since numbers may have shifted since the audit.**
+
+---
+
+## 0. Ground truth from the live audit (12 Sep 2026) — do not re-derive
+
+**VPS:** Hostinger KVM2, Coolify `4.0.0-beta.468`. 2 vCPU, **7.8 GB RAM** (not 8 — use
+7.8 in all sizing math), **95.8 GB disk / 85.6 GB free** (disk is not a constraint
+anywhere in this feature). At audit time: 29% RAM used (~2.3 GB by 15 existing
+containers + OS), 5.5 GB free, CPU 8%, load 0.19 — essentially idle.
+
+**What's actually running (nothing about this feature needs to touch these):**
+`ainexus` API x2 (Node, port 3000), `ainexus-web` (port 8080, domain monishlabs.com),
+`ainexus-litellm` (port 4000 — cloud LLM proxy to Gemini/Groq), `stt-gateway` (host
+8090→container 8080), `nas-gateway`, Postgres 16, `redis:7.2` (already in use by
+LiteLLM).
+
+**What does NOT exist (contrary to the earlier draft of this spec):**
+- **Kokoro is not deployed anywhere.** It exists only as unused code in the `narrator/`
+  repo directory (int8 ONNX TTS + a Gemini explainer path) — zero Coolify resource. You
+  cannot "extend an existing service" here; you are deploying it for real, for the first
+  time.
+- **No local LLM exists at all** — no Ollama, no llama.cpp, no Qwen container of any
+  kind. This is a genuinely clean slate for §0.1/§1 below.
+- **There is no separate "article-summarization-service" container.** News
+  summarization goes through the existing `ainexus-litellm` proxy
+  (`/api/v1/ai/summarize-articles-batch`, default `news_summarize_provider = litellm`,
+  `gemini-direct.js` as the Google transport). **This path is untouched, out of scope,
+  hard boundary** — same rule as stated earlier in this project: do not modify, redirect,
+  or point anything at this integration. It stays exactly as it is.
+- **"Narrator v2" is not a running system to extend.** It's unshipped repo code. This
+  build is its actual first deployment — treat it as such, not as two parallel systems.
+  There is one system of record here: the services defined in §1 below.
+
+**Flutter app, current reality:**
+- Articles currently narrate via **on-device `NativeTtsEngine`** (wrapped by
+  `ArticleTtsService`) — not Kokoro, not any server call.
+- `just_audio` is present in `pubspec.yaml` but **never imported/used** anywhere.
+- **No `audio_service` integration exists.** The only foreground service today is
+  `dataSync` (via `flutter_foreground_task`), used for something unrelated to audio —
+  **do not touch, repurpose, or replace this FGS.** The new `mediaPlayback` FGS this
+  feature needs is an *addition*, running alongside it, not a replacement.
+
+**Constraints this creates:**
+- Host ports **8080** (Traefik dashboard + `ainexus-web`) and **8090** (stt-gateway's
+  host mapping) are taken. New internal service ports must avoid these numbers even
+  though container-internal ports don't strictly need to be globally unique — do it
+  anyway to avoid any confusion when reading configs later.
+- The existing `redis:7.2` is shared production infrastructure for LiteLLM, running
+  `noeviction` eviction policy. **Do not deploy a second Redis container** — reuse this
+  one via a dedicated DB index (e.g. DB 1, not DB 0) and a key prefix (e.g.
+  `narration:`), and set explicit TTLs on every key this feature writes, so nothing
+  accumulates indefinitely on a shared instance that won't evict for you.
+- Coolify here is `4.0.0-beta.468`, **not 4.2+**. Deploy triggers are still GET-style on
+  this version — do not apply the "4.2 made deploy POST-only" assumption from any prior
+  research; verify the actual behavior against this specific version if in doubt.
+- The Coolify MCP tool `create_dockerimage_application` (or the equivalent raw API call)
+  **does not accept `limits_memory` in the creation call itself** on this Coolify
+  version. A memory cap requires a separate follow-up update call. **Apply that cap
+  immediately after creation, before the container sees any real load** — an uncapped
+  LLM container is exactly how you OOM the other 15 containers already running
+  production traffic on this box.
+
+---
+
+## 0.1 The one architecture change this audit forces: on-demand LLM loading
+
+**The problem:** the original plan kept both a local LLM (~4 GB resident) and a Kokoro
+TTS process (~1.5-2 GB resident, using the generic community image) always warm at the
+same time. Added to the ~2.3 GB already used by existing containers, that's ~7.8-8.3 GB
+minimum — before any Coolify build burst, before any of this box's other 15 containers
+so much as blip. It does not fit with any real safety margin. (This is the same shape of
+problem that got 8B rejected earlier for RAM reasons — a 4B LLM plus a second always-on
+TTS process has the same footprint issue.)
+
+**The fix:** the LLM does not need to be resident when nothing is happening — and for a
+personal, async, cache-and-serve pipeline, nothing is happening most of the time. Switch
+the local LLM runtime from raw `llama-server` to **Ollama**, which supports automatic
+idle unload via `OLLAMA_KEEP_ALIVE` (e.g. `5m` — stays warm across a batch of
+back-to-back articles, then fully unloads ~5 minutes after the last request). This is a
+genuine architecture change from the earlier draft, made because the real numbers
+demanded it, not a preference swap.
+
+**Recomputed RAM budget:**
+| State | Existing containers | narration-tts (Kokoro, always warm) | narration-orchestrator | narration-llm (Ollama) | Total | Free (of 7.8 GB) |
+|---|---|---|---|---|---|---|
+| **Idle** (typical) | ~2.3 GB | ~1 GB | ~0.4 GB | 0 (unloaded) | **~3.7 GB** | **~4.1 GB** |
+| **Actively generating** (brief burst) | ~2.3 GB | ~1 GB | ~0.4 GB | ~3.3 GB | **~7.0 GB** | **~0.8 GB** |
+
+Idle state has real headroom for Coolify builds and normal fluctuation in the other 15
+containers. The active-burst state is tight but transient (a minute or two per article,
+not sustained) and non-blocking (nobody is waiting on it synchronously). Kokoro and the
+LLM still never run concurrently within a job (§2's sequential design is unchanged) —
+that's what keeps the active-burst number from being even higher.
+
+**Model swapping stays just as easy, arguably easier:** upgrading later is
+`ollama pull <new-model>` (or importing a new GGUF via a Modelfile) plus one env var
+change — no manual GGUF file management required the way raw llama-server needs.
+
+**Verify before relying on this:**
+- Confirm Qwen3.5-4B is available directly in Ollama's model library, or import the
+  already-verified GGUF (`unsloth/Qwen3.5-4B-GGUF`, `Qwen3.5-4B-Q4_K_M.gguf`, ~2.74 GB,
+  Apache-2.0) via a Modelfile (`FROM ./Qwen3.5-4B-Q4_K_M.gguf`) if it isn't. Some Ollama
+  versions support pulling a Hugging Face GGUF directly (`ollama pull
+  hf.co/unsloth/Qwen3.5-4B-GGUF:Q4_K_M`) — check the installed version's support before
+  assuming either path.
+- **Do not assume this VPS can reach huggingface.co.** The audit explicitly did not test
+  this. Build it as a self-healing check, not a one-time assumption: on container start,
+  check a mounted volume path first for the GGUF; if present, use it and skip the network
+  entirely; if absent, attempt the HF pull; if that also fails, halt cleanly with a clear
+  Telegram alert naming the exact file/path needed, rather than crash-looping
+  indefinitely. **Concrete fallback method: plain `scp`/`rsync` over SSH to place the
+  2.74 GB GGUF onto the mounted volume** — no paid service, no extra tooling. If you
+  already have SSH access to this VPS, attempt this automatically as part of the
+  fallback; if not, this is a single one-time manual command for the user to run, after
+  which the file lives permanently on the volume and this path never needs to trigger
+  again.
+- After first deploy, measure **actual** resident memory with `docker stats` (not the
+  estimate above) before finalizing the memory limit — set the real cap from measured
+  behavior, not the projection.
+
+---
+
+## 0.2 Immediate pre-flight (do this right before deploying, not from memory of the audit)
+
+1. Re-check current free RAM (`GET /api/v1/cloud/stats` or equivalent) — the 5.5 GB free
+   figure is from the audit date, not necessarily today.
+2. Re-confirm the Coolify version hasn't changed (affects deploy-verb assumptions in §5).
+3. Confirm the exact port(s) the existing in-repo Kokoro int8 ONNX code is already
+   written to listen on (check the repo — don't invent a new one if it already has one),
+   and confirm it doesn't collide with 8080/8090/3000/4000.
+4. If anything here has changed since 12 Sep 2026, treat this section — not the numbers
+   above — as authoritative, and flag the discrepancy before proceeding.
+
+---
+
+## 0.3 Admission control (the concrete fix for the tight active-burst margin)
+
+Rather than trading away context size or article length for more static headroom, make
+the tight moment self-protecting: **check real conditions before launching a job, don't
+just hope the design-time estimate holds.**
+
+- **Single-flight enforcement:** the arq worker processes narration jobs with
+  **concurrency = 1**, system-wide, always — an enforced setting, not an assumption based
+  on single-user behavior. A burst of newly-ingested articles queues cleanly instead of
+  ever running two jobs' RAM footprints at once.
+- **Pre-launch RAM gate:** immediately before starting the LLM step of any job, check
+  current free RAM (VPS stats endpoint or `/proc/meminfo`). If free RAM is below a safety
+  floor (e.g. 1 GB — comfortably above the ~0.8 GB tightest-case margin from §0.1), defer
+  the job with exponential backoff (30s, 60s, 120s...) rather than launching into a
+  moment when, say, a Coolify build is also in flight. Only alert via Telegram if
+  deferred more than twice in a row — routine single defers shouldn't be noisy.
+- **Circuit breaker:** if `narration-llm` or `narration-tts` fail 3 times in a row across
+  *different* articles (not retries of the same one), stop attempting server-side
+  generation for a cooldown period (e.g. 15 minutes) and route those articles straight to
+  the on-device fallback (§1.14) instead of continuing to hammer an unhealthy service.
+  One Telegram alert when the breaker trips, one when it resets — not one per suppressed
+  attempt underneath.
+
+This turns "is 0.8 GB enough" from a static bet into a monitored, self-throttling system
+that degrades gracefully (defer, then fall back) rather than risking an OOM.
+
+---
+
+## 1. Locked architecture decisions
+
+1. **Two new services, one retired concept:** `narration-tts` (Kokoro, built from the
+   existing in-repo int8 ONNX code — not the external `kokoro-fastapi-cpu` image, which
+   is heavier and unnecessary now that working code already exists) and
+   `narration-llm` (Ollama + Qwen3.5-4B, idle-unloading per §0.1). "Narrator v2" as a
+   separate concept is retired — these two services plus the orchestrator below are its
+   real, first deployment.
+2. **`narration-orchestrator`:** FastAPI + Redis (shared instance, dedicated DB index +
+   key prefix — see §0) + arq worker + reaper. Must include `ffmpeg` in its image for
+   `ffprobe`/`silencedetect`/Opus encoding (nothing provides this yet since the
+   orchestrator doesn't exist).
+3. **Voice:** `am_onyx` primary (confirmed present in the existing Kokoro v1 voice set).
+   Alt/blend options as previously specified remain valid.
+4. **No celebrity voice cloning, ever.**
+5. **Storage: ephemeral local NVMe only.** No Google Drive. Disk is not the constraint on
+   this box (85.6 GB free) — the 48-hour reaper is about RAM/inode hygiene and genuine
+   cleanup discipline, not disk space.
+6. **Two independent "speed" concepts:** server-side synthesis speed (Kokoro, fixed
+   `speed=0.9`) vs. client-side playback speed (Flutter, `just_audio.setSpeed()`,
+   0.5x-2.0x, pitch-corrected, user-adjustable in real time). Do not conflate them.
+7. **Script length:** hard cap 600s/10 min, enforced by measuring actual rendered audio
+   duration (ffprobe) — never trust the LLM's word count alone. Target ~1,300-1,450
+   words at 150 wpm baseline as the generation guide.
+8. **Audio format:** Opus, mono, 32 kbps default, optional 48 kbps "HD" tier. 24 kHz
+   source (Kokoro's native rate).
+9. **Caching key:** `sha256(normalized_article_text + voice + speed + model_version +
+   audio_format + bitrate)`, stored in the shared Redis under the `narration:` prefix /
+   DB 1, with an explicit TTL as a safety net (see §0).
+10. **Deletion trigger:** client fires a completion webhook at ≥95% playback progress.
+11. **Reaper job is mandatory:** scheduled hourly, TTL 48h, catches anything the webhook
+    ever misses — see §3 (unchanged from the original design).
+12. **Do not touch the existing cloud LiteLLM/Gemini summarization path.** It is
+    completely out of scope for this feature — confirmed twice now, once by the user
+    directly and once by the audit. `narration-llm` serves ONLY this feature's explainer
+    generation step.
+13. **AI News category-aware comparison logic** (§2.x below) is unchanged from the
+    earlier design — still a two-call relevance-check-then-generate pattern, now pointed
+    at the Ollama endpoint instead of a raw llama-server endpoint.
+14. **Resilience: on-device TTS fallback.** If the server-side pipeline fails or times
+    out for a given article, fall back to the existing `ArticleTtsService` /
+    `NativeTtsEngine` reading the raw article text on-device, rather than leaving the
+    user with no audio at all. Lower quality, but always available — genuinely "robust"
+    means having this fallback, not just retrying the primary path harder.
+15. **Admission control is enforced, not assumed (§0.3):** single-flight job
+    concurrency, a pre-launch RAM gate, and a circuit breaker into the on-device
+    fallback are concrete, coded behaviors — this is what keeps the tight active-burst
+    RAM margin from §0.1 safe in practice.
+
+---
+
+## 2. Backend pipeline
+
+### 2.1 Request flow
+
+**Trigger timing is what makes this "ultra fast" in practice:** the primary trigger is
+**article ingestion**, not the user tapping play. As soon as a new article lands in the
+feed, kick off generation immediately in the background — by the time the user actually
+opens the app, it's very likely already cached and playback is instant. **On-demand
+generation (the user opens an article that hasn't been pre-generated yet — a backlog
+item, or a tap that beat the ingestion job) is the fallback path, not the primary one,**
+and when it happens the Flutter UI must show a clear "preparing your audio…" state (§6)
+rather than a frozen or blank screen — this is the one path where the user can actually
+feel the Ollama cold-load plus generation latency, so make it feel intentional.
+
+```
+Article ingested (category known) → orchestrator
+  1. cache_key = sha256(normalized_text + voice + speed + model_version + format + bitrate)
+  2. Redis GET (DB 1, "narration:" prefix) cache_key
+     - HIT and file still on disk → done, instant
+     - MISS → acquire a short-TTL Redis lock on cache_key, enqueue arq job
+  3. arq job:
+     a. IF category == "AI News": relevance-check call to narration-llm (Ollama),
+        then explainer-generation call informed by that result (§2.x)
+        ELSE: plain layman's-explainer call, no comparison logic
+     b. Enforce word cap: measure output, one targeted "compress to N words" pass if over
+     c. narration-tts (Kokoro) synthesis → Opus 32k (+48k if HD requested)
+     d. ffprobe duration check — bump synthesis speed slightly (≤1.1) and re-render once
+        if over 600s, else log to Telegram (should be rare if word-budgeting works)
+     e. QA gate: ffmpeg silencedetect + astats
+     f. Store file on NVMe (content-addressed path); write Redis entry (with TTL):
+        {file_path, hd_file_path?, duration_s, wpm, article_text_path, status, created_at}
+     g. IF pipeline fails at any step or exceeds a timeout → fall back to marking the
+        article for on-device TTS instead of retrying indefinitely
+  4. Client polls/subscribes → gets a streaming URL when ready
+  → GET /audio/{cache_key}.opus — HTTP Range/206 support required
+```
+
+If a user opens an article whose background pre-generation hasn't finished yet, the app
+shows the loading state from §6 and the same cache-key lookup simply resolves once the
+in-flight job completes — the Redis lock from step 2 guarantees no duplicate job ever
+gets launched for the same article.
+
+### 2.2 Explainer prompt pattern (word-budget control)
+Unchanged from the earlier design: use structural constraints (paragraph/sentence-count
+guidance) rather than trusting exact word-count instructions, measure actual output, and
+do one targeted compression pass if over budget rather than regenerating blind.
+
+### 2.x Category-aware comparison logic ("AI News" only)
+Unchanged logic from the earlier design — two-step relevance-check-then-generate pattern
+comparing AI News articles to RPA/UiPath concepts only when a genuine parallel exists,
+with the same few-shot examples as before. The only change is the target endpoint: both
+calls go to `narration-llm`'s Ollama-served OpenAI-compatible endpoint instead of a raw
+llama-server endpoint. Every other category uses the plain explainer prompt, no
+comparison instruction at all.
+
+### 2.3 Resource discipline
+- LLM and TTS steps run **sequentially per job**, never concurrently — unchanged, and
+  now even more important given the tighter active-burst RAM budget in §0.1.
+- Cap ONNX Runtime thread count explicitly for `narration-tts`.
+- Never synthesize on-request in a hot path — always async via arq, serve the cached
+  file. This is what makes the occasional multi-second Ollama cold-load acceptable.
+
+---
+
+## 3. Deletion & reaper subsystem — build this like it must never fail silently
+
+Unchanged from the earlier design: retry-and-verify (5 attempts, fast exponential
+backoff with jitter), race-safe via a short-TTL Redis lock per cache_key, idempotent
+("already gone" counts as success), and a mandatory hourly reaper with a 48h TTL that
+independently guarantees cleanup regardless of whether the client's completion webhook
+ever arrives. Deletes cover: primary + HD audio files, any temp/partial artifacts, the
+article/script text, and the Redis cache entry (now specifically the `narration:`-prefixed
+key in DB 1 — do not touch any other keys in the shared Redis instance). On exhausted
+retries: Telegram alert (🚨), persistent failure log, retried again on the next reaper
+pass — never a silent drop.
+
+---
+
+## 4. Telegram logging
+
+Unchanged event set from the earlier design (synthesis success/failure, deletion
+success/failure/retry-exhaustion, reaper summaries, unhandled exceptions), with one
+addition given the tighter RAM budget:
+- **⚠️ RAM pressure alert:** if `narration-llm`'s measured resident memory during an
+  active job exceeds a defined threshold (e.g. 90% of its cap), or if the box's overall
+  free RAM drops below a safety floor (e.g. 500 MB) during a job, alert immediately. This
+  budget is tighter than the original design assumed, so visibility into real usage
+  matters more here than it would on a roomier box.
+
+Alongside Telegram (for human-visible alerts), have the orchestrator write structured
+JSON logs for every pipeline event too. Telegram is for "notice this now" — structured
+logs are for "debug this later." Don't rely on Telegram's message history as the only
+record of what happened.
+
+---
+
+## 5. Coolify deployment (corrected for `4.0.0-beta.468`)
+
+- Auth: `Authorization: Bearer <id>|<secret>`, base URL `https://<host>/api/v1`. Confirm
+  token has `write` + `deploy` abilities.
+- **This Coolify version uses GET-style deploy triggers** (`GET /api/v1/deploy?uuid=...`)
+  — do not apply a "POST-only" assumption meant for 4.2+.
+- Create `narration-llm` (Ollama): `POST /api/v1/applications/dockerimage` with
+  `docker_registry_image_name: "ollama/ollama"`, a pinned tag, an internal port (Ollama's
+  default 11434 is fine — it doesn't collide with anything found in the audit), env vars
+  `OLLAMA_KEEP_ALIVE=5m`, `OLLAMA_HOST=0.0.0.0`. Ollama has no dedicated `/health` route —
+  configure Coolify's health/readiness check against `GET /api/tags` (lists loaded
+  models) instead. **The creation call will not accept
+  `limits_memory` on this Coolify version** — immediately follow up with an update call
+  to apply a memory cap (start conservative, e.g. 4-4.5 GB, then tune from measured
+  `docker stats` output) before any real load hits it.
+- Create `narration-tts` (Kokoro, built from the in-repo int8 ONNX code — write a
+  Dockerfile for it, since no external image applies here): internal port per the
+  existing code's default (check the repo — see §0.2), memory cap ~1.2 GB.
+- Create `narration-orchestrator` as a Coolify **Service** (`POST /api/v1/services`,
+  `docker_compose_raw` **base64-encoded** — plain YAML 422s), containing the FastAPI app
+  + arq worker, pointed at the existing shared Redis (DB 1, `narration:` prefix) rather
+  than defining a new Redis in the compose file. Memory cap ~0.75 GB.
+- None of these three services should publish a host port — internal Docker network only,
+  reached by service name (e.g. `http://narration-llm:11434`, `http://narration-tts:<port>`).
+- Stay under Coolify's 200 req/min API limit; batch env var writes where possible.
+- After each deployment, run a real smoke test (a genuine test article through the full
+  pipeline, confirm audio comes back and plays) before considering it done — not just a
+  "container is running" check.
+
+---
+
+## 6. Flutter: background playback, speed control, auto-advance, completed icon, fallback
+
+- Stack: `audio_service` + `just_audio` + `just_audio_background` — genuinely new
+  integration; `just_audio` is currently an unused dependency, `audio_service` doesn't
+  exist yet.
+- **Add** a new `mediaPlayback`-type foreground service for this feature. **Do not
+  touch, repurpose, or interfere with the existing `dataSync` FGS** (`flutter_foreground_task`) —
+  they coexist independently.
+- Playback speed: `just_audio.setSpeed()`, 0.5x-2.0x, pitch-corrected (verify no
+  chipmunk/slow-drawl artifacts at the extremes on a real device), persisted as a user
+  preference.
+- Auto-advance: dynamic `AudioHandler` queue fed from the backend, not a static
+  playlist. Playback completion fires both the next-track advance and the completion
+  webhook from §3 — same event, two effects.
+- **Loading state for on-demand generation:** when opening an article triggers a
+  cache-miss (§2.1's fallback path — pre-generation didn't finish in time, or a backlog
+  item), show a clear, pleasant "preparing your audio…" indicator rather than a frozen
+  or blank UI. This is the one path where generation latency is actually visible to the
+  user, so make it feel intentional rather than broken.
+- **Fallback:** if the orchestrator reports a failed/timed-out job for an article (or is
+  simply unreachable), the Flutter client falls back to invoking the existing
+  `ArticleTtsService`/`NativeTtsEngine` on-device path for that article instead of
+  showing no audio option. Surface this distinction subtly in the UI (e.g. a small
+  "on-device voice" indicator) so it's not confused with the narrated version.
+- "Completed" icon: filled checkmark badge over the play button at the 95% threshold,
+  title dimmed. **Recommended default** for the open question about post-completion
+  behavior: keep the article visible with the checkmark for a while (e.g. until it ages
+  out of the normal feed) rather than vanishing immediately when the underlying audio
+  file gets deleted — abrupt disappearance right as something finishes feels jarring.
+  This is a product-taste call, not a technical requirement — override it if you'd
+  rather it disappear immediately.
+
+---
+
+## 7. Testing
+
+- Structural/correctness: ffprobe duration cap, wpm sanity range, ffmpeg
+  silencedetect/astats artifact checks — unchanged from the earlier design.
+- **RAM validation (new, given how tight the budget is):** measure `narration-llm`'s
+  actual resident memory under a real synthesis job via `docker stats`, confirm it lands
+  near the ~3.3 GB estimate (not the un-idle-unloaded ~4 GB+ figure), confirm it actually
+  drops back down after `OLLAMA_KEEP_ALIVE` expires, and confirm the box survives a
+  Coolify build/redeploy of another service while a narration job is mid-flight (the
+  genuinely tightest moment in the whole design).
+- Deletion pipeline test: full cleanup verification, reaper catching missed webhooks,
+  retry/backoff/Telegram-alert behavior on simulated failure, idempotent double-delete —
+  unchanged from the earlier design.
+- Fallback test: force an orchestrator failure/timeout and confirm the Flutter client
+  correctly falls back to on-device TTS rather than showing nothing.
+- End-to-end on a real device: background playback survives screen lock, auto-advance,
+  speed control without pitch artifacts, lock-screen controls, completed icon timing.
+- Connectivity test: confirm (or refute) that the VPS can reach huggingface.co before
+  relying on Ollama's auto-pull; have the manual-GGUF-via-volume fallback ready either way.
+
+---
+
+## 8. Non-negotiables (summary)
+
+- Narration jobs run with **concurrency = 1, enforced**, with a pre-launch RAM gate and
+  a circuit breaker to the on-device fallback (§0.3) — never assume single-user behavior
+  alone keeps this safe.
+- Do not touch, modify, or replace the existing LiteLLM/Gemini summarization
+  integration, anywhere. `narration-llm` serves ONLY this feature's explainer step.
+- Do not deploy a second Redis container — reuse the existing one via a dedicated DB
+  index and key prefix, with TTLs as a safety net against its `noeviction` policy.
+- Do not publish a host port for any of the three new services — internal network only,
+  and avoid 8080/8090 specifically since those are already taken.
+- Apply a memory limit to `narration-llm` immediately after creation, before it sees any
+  real load — the creation call on this Coolify version does not accept it inline.
+- Do not touch or repurpose the existing `dataSync` foreground service — the new
+  `mediaPlayback` FGS is additive.
+- Deletion must never fail silently — exhausted retries mean a Telegram alert and a
+  persistent failure log, always, never a quiet drop.
+- No celebrity voice cloning. No Google Drive.
+- Do not trust LLM word-count instructions alone for the 10-minute cap — verify against
+  actual rendered audio duration.
+- Do not consider this feature done from emulator testing alone — verify real-device
+  background playback, lock-screen controls, and the on-device fallback path.
+
+---
+
+## 9. If anything here conflicts with what you find when you actually start building
+
+Flag it and propose a resolution before proceeding. This spec is already one correction
+cycle deep after a real audit contradicted the first draft — treat that as a reason for
+extra care here, not less. If live numbers (free RAM, port availability, Coolify
+version) have moved since 12 Sep 2026, the live numbers win; update your approach and
+say so rather than silently reconciling against this document's now-possibly-stale
+figures.

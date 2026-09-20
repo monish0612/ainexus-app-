@@ -7,6 +7,8 @@
 //      fraction, and never causes a horizontal overflow at any width.
 //   3. The TTS narration subtitle reads "On-device voice narration"
 //      (the stray "AI" wording was dropped).
+//   4. The listen / Play control sits directly under AI Summarize (or at the
+//      top of legacy summaries) so it is reachable without scrolling the body.
 //
 // The suite is intentionally adversarial: short bodies, empty bodies,
 // extremely long titles, the narrowest realistic phone (320 px) and a
@@ -18,6 +20,7 @@
 import 'package:ai_nexus/core/theme/app_colors.dart';
 import 'package:ai_nexus/domain/entities/news_entities.dart';
 import 'package:ai_nexus/presentation/screens/news/article_detail_modal.dart';
+import 'package:ai_nexus/presentation/screens/news/widgets/narration_listen_bar.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -128,10 +131,15 @@ Future<void> _scrollBy(WidgetTester tester, double dy) async {
 
 /// All RichText (rendered markdown + plain Text) flattened to a single
 /// string — lets us assert that a sentinel string appears nowhere on screen.
-String _allText(WidgetTester tester) => tester
-    .widgetList<RichText>(find.byType(RichText))
-    .map((r) => r.text.toPlainText())
-    .join(' || ');
+String _allText(WidgetTester tester) {
+  final rich = tester
+      .widgetList<RichText>(find.byType(RichText))
+      .map((r) => r.text.toPlainText());
+  final editable = tester
+      .widgetList<EditableText>(find.byType(EditableText))
+      .map((e) => e.controller.text);
+  return [...rich, ...editable].join(' || ');
+}
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -329,7 +337,8 @@ void main() {
       await _drain(tester);
     });
 
-    testWidgets('listen control sits below AI Summarize, not between title and body',
+    testWidgets(
+        'listen control sits below AI Summarize and above the article body',
         (tester) async {
       await _pump(
         tester,
@@ -345,19 +354,298 @@ void main() {
 
       expect(find.text('AI Summarize'), findsOneWidget);
       expect(find.text('Listen to Article'), findsOneWidget);
+      expect(find.byKey(const ValueKey('article-listen-bar')), findsOneWidget);
 
       final titleY = tester
           .getTopLeft(find.text('A reasonably sized article title for the reader'))
           .dy;
       final summarizeY = tester.getTopLeft(find.text('AI Summarize')).dy;
       final listenY = tester.getTopLeft(find.text('Listen to Article')).dy;
+      final bodyY = tester
+          .getTopLeft(find.textContaining('Picture a support inbox for a bank'))
+          .dy;
+      final originalY = tester.getTopLeft(find.text('Read Original Article')).dy;
+
       expect(titleY, lessThan(summarizeY),
           reason: 'Title must lead, then Summarize.');
       expect(summarizeY, lessThan(listenY),
-          reason: 'Listen must not sit in the hero above the article.');
-      final originalY = tester.getTopLeft(find.text('Read Original Article')).dy;
-      expect(listenY, lessThan(originalY),
-          reason: 'Listen sits above the original-article link, after the body.');
+          reason: 'Listen sits directly under AI Summarize.');
+      expect(listenY, lessThan(bodyY),
+          reason: 'Listen must sit above the article body so Play is reachable.');
+      expect(bodyY, lessThan(originalY));
+      expect(listenY, lessThan(originalY));
+      await _drain(tester);
+    });
+
+    testWidgets('phone viewport shows Listen under Summarize without scrolling',
+        (tester) async {
+      await _pump(
+        tester,
+        size: const Size(390, 844),
+        article: _article(
+          category: 'AI News',
+          isFullContent: true,
+          title: 'Short title',
+          summaryMarkdown: 'Opening sentence of the original article body.',
+        ),
+      );
+      await tester.pump();
+
+      final listen = tester.getRect(find.text('Listen to Article'));
+      expect(listen.top, greaterThan(0));
+      expect(listen.bottom, lessThan(844),
+          reason: 'Play must be on-screen on a typical phone, not below the fold.');
+      expect(
+        tester.getTopLeft(find.text('AI Summarize')).dy,
+        lessThan(listen.top),
+      );
+      await _drain(tester);
+    });
+
+    testWidgets('exactly one listen control — never duplicated at the footer',
+        (tester) async {
+      await _pump(
+        tester,
+        size: const Size(390, 2400),
+        article: _article(
+          category: 'AI News',
+          isFullContent: true,
+          summaryMarkdown:
+              'Body paragraph one.\n\nBody paragraph two that used to sit above Play.',
+        ),
+      );
+      await tester.pump();
+
+      expect(find.text('Listen to Article'), findsOneWidget);
+      expect(find.byKey(const ValueKey('article-listen-bar')), findsOneWidget);
+      await _drain(tester);
+    });
+
+    testWidgets('legacy Finance summary: Listen sits above the body, no Summarize CTA',
+        (tester) async {
+      await _pump(
+        tester,
+        size: const Size(390, 2400),
+        article: _article(
+          category: 'Finance',
+          summaryMarkdown:
+              '## Why this matters\n\nLEGACY-FINANCE-BODY that the listen bar must sit above.',
+        ),
+      );
+      await tester.pump();
+
+      expect(find.text('AI Summarize'), findsNothing);
+      expect(find.text('Listen to Summary'), findsOneWidget);
+      expect(find.text('Listen to Article'), findsNothing);
+
+      final listenY = tester.getTopLeft(find.text('Listen to Summary')).dy;
+      final bodyY =
+          tester.getTopLeft(find.textContaining('LEGACY-FINANCE-BODY')).dy;
+      expect(listenY, lessThan(bodyY));
+      await _drain(tester);
+    });
+
+    testWidgets('Movies: Listen sits under AI Summarize and above the review body',
+        (tester) async {
+      await _pump(
+        tester,
+        size: const Size(390, 2400),
+        article: _article(
+          category: 'Movies',
+          isFullContent: true,
+          summaryMarkdown:
+              'MOVIE-BODY-SENTINEL after Rocky, the director returns with DC.',
+        ),
+      );
+      await tester.pump();
+
+      expect(find.text('AI Summarize'), findsOneWidget);
+      expect(find.text('Listen to Article'), findsOneWidget);
+
+      final summarizeY = tester.getTopLeft(find.text('AI Summarize')).dy;
+      final listenY = tester.getTopLeft(find.text('Listen to Article')).dy;
+      final bodyY =
+          tester.getTopLeft(find.textContaining('MOVIE-BODY-SENTINEL')).dy;
+      expect(summarizeY, lessThan(listenY));
+      expect(listenY, lessThan(bodyY));
+      await _drain(tester);
+    });
+
+    testWidgets('cached AI Summary toggle keeps Listen above the summary body',
+        (tester) async {
+      await _pump(
+        tester,
+        size: const Size(390, 2400),
+        article: _article(
+          category: 'AI News',
+          isFullContent: true,
+          summaryMarkdown: 'FULL-BODY-SENTINEL original article paragraph.',
+          summaryShort: 'CACHED-SUMMARY-SENTINEL lede for the toggle.',
+        ),
+      );
+      await tester.pump();
+
+      await tester.tap(find.text('AI Summary'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 350));
+
+      expect(find.text('Listen to Article'), findsOneWidget);
+      final listenY = tester.getTopLeft(find.text('Listen to Article')).dy;
+      final summaryY =
+          tester.getTopLeft(find.textContaining('CACHED-SUMMARY-SENTINEL')).dy;
+      expect(listenY, lessThan(summaryY));
+      expect(find.text('FULL-BODY-SENTINEL original article paragraph.'),
+          findsNothing);
+      await _drain(tester);
+    });
+
+    testWidgets('narrow 320px phone: Listen under Summarize does not overflow',
+        (tester) async {
+      await _pump(
+        tester,
+        size: const Size(320, 2400),
+        article: _article(
+          category: 'AI News',
+          isFullContent: true,
+          title:
+              'A deliberately long article headline that should wrap across multiple lines',
+          summaryMarkdown: _longBody(),
+        ),
+      );
+      await tester.pump();
+
+      expect(find.text('AI Summarize'), findsOneWidget);
+      expect(find.text('Listen to Article'), findsOneWidget);
+      expect(
+        tester.getTopLeft(find.text('AI Summarize')).dy,
+        lessThan(tester.getTopLeft(find.text('Listen to Article')).dy),
+      );
+      expect(tester.takeException(), isNull,
+          reason: 'Listen card + summarize CTA must not overflow at 320px.');
+      await _drain(tester);
+    });
+
+    testWidgets('320x640 viewport can scroll a short way to reveal Play',
+        (tester) async {
+      await _pump(
+        tester,
+        size: const Size(320, 640),
+        article: _article(
+          category: 'AI News',
+          isFullContent: true,
+          title: 'Short title',
+          summaryMarkdown: 'Opening sentence of the original article body.',
+        ),
+      );
+      await tester.pump();
+
+      expect(find.text('AI Summarize'), findsOneWidget);
+      await tester.scrollUntilVisible(
+        find.text('Listen to Article', skipOffstage: false),
+        80,
+        scrollable: find.byType(Scrollable).first,
+      );
+      expect(find.text('Listen to Article'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await _drain(tester);
+    });
+
+    testWidgets('General: Listen sits under AI Summarize like other full-content',
+        (tester) async {
+      await _pump(
+        tester,
+        size: const Size(390, 2400),
+        article: _article(
+          category: 'General',
+          isFullContent: true,
+          summaryMarkdown: 'GENERAL-BODY-SENTINEL for the top listen placement.',
+        ),
+      );
+      await tester.pump();
+
+      expect(find.text('AI Summarize'), findsOneWidget);
+      expect(find.text('Listen to Article'), findsOneWidget);
+      expect(
+        tester.getTopLeft(find.text('AI Summarize')).dy,
+        lessThan(tester.getTopLeft(find.text('Listen to Article')).dy),
+      );
+      expect(
+        tester.getTopLeft(find.text('Listen to Article')).dy,
+        lessThan(
+          tester.getTopLeft(find.textContaining('GENERAL-BODY-SENTINEL')).dy,
+        ),
+      );
+      await _drain(tester);
+    });
+
+    testWidgets('download control sits next to Listen without overflowing 320px',
+        (tester) async {
+      await _pump(
+        tester,
+        size: const Size(320, 2400),
+        article: _article(
+          category: 'AI News',
+          isFullContent: true,
+          summaryMarkdown: 'Download-button body for the listen row.',
+        ),
+      );
+      await tester.pump();
+
+      expect(find.byKey(kNewsListenDownloadKey), findsOneWidget);
+      expect(find.text('Listen to Article'), findsOneWidget);
+      expect(find.byType(NewsListenPlayDisc), findsOneWidget);
+      expect(
+        tester.getTopLeft(find.byKey(kNewsListenDownloadKey)).dx,
+        lessThan(tester.getTopLeft(find.byType(NewsListenPlayDisc)).dx),
+      );
+      expect(tester.takeException(), isNull);
+      await _drain(tester);
+    });
+
+    testWidgets('download control is present for Movies and legacy Finance',
+        (tester) async {
+      await _pump(
+        tester,
+        size: const Size(390, 2400),
+        article: _article(
+          category: 'Movies',
+          isFullContent: true,
+          summaryMarkdown: 'Movie body for download placement.',
+        ),
+      );
+      await tester.pump();
+      expect(find.byKey(kNewsListenDownloadKey), findsOneWidget);
+
+      await _pump(
+        tester,
+        size: const Size(390, 2400),
+        article: _article(
+          category: 'Finance',
+          summaryMarkdown: '## Why\n\nLegacy finance summary for download.',
+        ),
+      );
+      await tester.pump();
+      expect(find.byKey(kNewsListenDownloadKey), findsOneWidget);
+      await _drain(tester);
+    });
+
+    testWidgets('empty speakable body does not crash the top listen slot',
+        (tester) async {
+      await _pump(
+        tester,
+        article: _article(
+          category: 'AI News',
+          excerpt: '',
+          isFullContent: true,
+          summaryMarkdown: null,
+          blocks: const [],
+        ),
+      );
+      await tester.pump();
+
+      expect(tester.takeException(), isNull);
+      expect(find.text('AI Summarize'), findsOneWidget);
+      expect(find.text('Save'), findsOneWidget);
       await _drain(tester);
     });
   });

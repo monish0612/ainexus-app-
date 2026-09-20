@@ -371,6 +371,36 @@ void main() {
       expect(find.text('AI News'), findsOneWidget);
     });
 
+    testWidgets('Finance chip: shows BOTH Summarize and swipe-to-delete tip',
+        (tester) async {
+      await _pumpFab(
+        tester,
+        activeCategory: 'Finance',
+        unreadCount: 8,
+        unreadCountInCategory: 3,
+      );
+      await _openSheet(tester);
+
+      expect(find.text('Summarize'), findsOneWidget);
+      expect(find.text('Clear All'), findsOneWidget);
+      expect(find.textContaining('Swipe a card left or right'), findsOneWidget);
+    });
+
+    testWidgets('AI News chip: shows BOTH Summarize and swipe-to-delete tip',
+        (tester) async {
+      await _pumpFab(
+        tester,
+        activeCategory: 'AI News',
+        unreadCount: 8,
+        unreadCountInCategory: 3,
+      );
+      await _openSheet(tester);
+
+      expect(find.text('Summarize'), findsOneWidget);
+      expect(find.textContaining('Swipe a card left or right'), findsOneWidget);
+      expect(find.text('Remove 3 articles from AI News'), findsNothing);
+    });
+
     testWidgets('regular subtitle reads "Mark N as read"', (tester) async {
       await _pumpFab(
         tester,
@@ -394,7 +424,11 @@ void main() {
       );
       await _openSheet(tester);
 
-      expect(find.text('Saved articles are never touched'), findsOneWidget);
+      expect(find.textContaining('Swipe a card left or right'), findsOneWidget);
+      expect(
+        find.textContaining('Saved articles are never touched'),
+        findsOneWidget,
+      );
     });
   });
 
@@ -484,6 +518,40 @@ void main() {
 
       expect(find.text('Remove 3 articles from Movies'), findsOneWidget);
       expect(find.textContaining('17'), findsNothing);
+    });
+  });
+
+  group('NewsActionFab — circular chrome', () {
+    testWidgets('collapsed FAB has no rectangular Ink plate on white',
+        (tester) async {
+      await _pumpFab(
+        tester,
+        activeCategory: 'All',
+        unreadCount: 1,
+        unreadCountInCategory: 1,
+      );
+      expect(find.byType(Ink), findsNothing);
+      expect(find.byType(InkWell), findsNothing);
+      expect(find.byIcon(LucideIcons.sparkles), findsOneWidget);
+      expect(find.text('1'), findsOneWidget);
+      await tester.tap(find.byIcon(LucideIcons.sparkles).hitTestable().first);
+      for (var i = 0; i < 8; i++) {
+        await tester.pump(const Duration(milliseconds: 50));
+      }
+      expect(find.text('Summarize'), findsOneWidget);
+    });
+
+    testWidgets('clearOnly eraser FAB also has no Ink plate', (tester) async {
+      await _pumpFab(
+        tester,
+        activeCategory: 'Movies',
+        unreadCount: 4,
+        unreadCountInCategory: 2,
+        clearOnly: true,
+      );
+      expect(find.byType(Ink), findsNothing);
+      expect(find.byIcon(LucideIcons.eraser), findsOneWidget);
+      expect(find.text('2'), findsOneWidget);
     });
   });
 }

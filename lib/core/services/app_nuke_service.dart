@@ -75,6 +75,7 @@ class AppNukeService {
     var localOk = true;
     try {
       await _db.wipeAllRows();
+      await _resetSync.wipeLocalProfilePhoto(pendingDelete: true);
       TLog.i(_tag, 'Local DB wiped — every table reset to 0 rows');
     } catch (e, st) {
       localOk = false;
@@ -122,6 +123,8 @@ class AppNukeService {
         NukeLine(label: 'News', emoji: '📰', count: c('News'), cloudSynced: cloud[6]),
         // Local-only: cloud files are Drive metadata; the nuke never touches Drive.
         NukeLine(label: 'Cloud files', emoji: '☁️', count: c('Cloud files')),
+        // Local-only price watches — no server copy.
+        NukeLine(label: 'Watch', emoji: '🏷️', count: c('Watch')),
       ],
     );
 

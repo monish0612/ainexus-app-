@@ -73,16 +73,15 @@ class NewsSummarizeService {
     TLog.d('NewsSummarize',
         '→ batch size=${articles.length} model=${payload['model'] ?? payload['liteModel'] ?? '(backend default)'}');
 
-    // 90 s headroom: Android Doze can throttle a backgrounded socket for
-    // ~60 s before killing it. With the foreground service running we keep
-    // the process alive, but a single TCP read can still stall — bumping the
-    // ceiling here means the store's per-batch retry loop is the one that
-    // decides when to give up, not Dio.
+    // 120 s headroom: Movies on-demand summarize does a live Twitter/web
+    // audience lookup (~45 s) then the LLM brief. Android Doze can also
+    // stall a backgrounded socket. The store's retry loop decides when to
+    // give up, not Dio.
     final response = await _apiClient.post<Object?>(
       ApiEndpoints.aiSummarizeArticlesBatch,
       data: payload,
       options: Options(
-        receiveTimeout: const Duration(seconds: 90),
+        receiveTimeout: const Duration(seconds: 120),
         sendTimeout: const Duration(seconds: 30),
       ),
       cancelToken: cancelToken,
@@ -117,7 +116,18 @@ class NewsSummarizeService {
   /// title + excerpt + paragraph/heading blocks (skipping stat blocks which
   /// are noisy without their visual layout). Capped to [maxContentChars] so
   /// we never blow the server-side schema limit even on long features.
+  /// For full-content reviews (Movies / General) we send the stored
+  /// markdown body — that is what the reader shows, including the
+  /// structured critic rating header. Other articles still use excerpt +
+  /// paragraph blocks.
   static String _composeContent(Article a) {
+    final full = (a.summaryMarkdown ?? '').trim();
+    if (a.isFullContent && full.isNotEmpty) {
+      return full.length > maxContentChars
+          ? full.substring(0, maxContentChars)
+          : full;
+    }
+
     final buf = StringBuffer();
     if (a.excerpt.trim().isNotEmpty) {
       buf.writeln(a.excerpt.trim());

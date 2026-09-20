@@ -1,8 +1,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// Local "listened" badges. The audio file may already be gone after 95%;
-/// the article stays in the feed with a checkmark until it ages out.
+/// Local "listened" badges. Audio stays on the server for replay until the
+/// article is deleted or the 168h reaper runs.
 class NarrationCompletionStore extends ChangeNotifier {
   NarrationCompletionStore._();
   static final NarrationCompletionStore instance = NarrationCompletionStore._();

@@ -21,10 +21,12 @@ import 'core/services/hold_to_speak_service.dart';
 import 'core/services/news_summarize_fg_task.dart';
 import 'core/services/news_summarize_store.dart';
 import 'core/services/notification_service.dart';
+import 'core/services/notification_tap.dart';
 import 'core/services/telegram_logger.dart';
 import 'data/services/narration_api.dart';
 import 'data/services/narration_audio_handler.dart';
 import 'data/services/narration_completion_store.dart';
+import 'data/services/narration_download_store.dart';
 import 'presentation/screens/settings/settings_controller.dart';
 
 /// Entry point for the floating rephrase bubble's own Flutter engine, launched
@@ -80,28 +82,36 @@ void main() async {
         };
       }
 
-      await initializeDateFormatting('en_IN');
+      await initializeDateFormatting('en_IN')
+          .timeout(const Duration(seconds: 2), onTimeout: () {});
 
-      final sharedPreferences = await SharedPreferences.getInstance();
+      SharedPreferences sharedPreferences;
+      try {
+        sharedPreferences = await SharedPreferences.getInstance()
+            .timeout(const Duration(seconds: 3));
+      } on TimeoutException {
+        TLog.w('Init', 'SharedPreferences slow — retrying');
+        sharedPreferences = await SharedPreferences.getInstance();
+      }
       TLog.d('Init', 'SharedPreferences loaded');
 
       // SystemChrome system-UI calls are no-ops on web but we still skip
       // them to avoid noise in browser logs.
       if (PlatformCapabilities.isMobile) {
-        await SystemChrome.setPreferredOrientations([
+        unawaited(SystemChrome.setPreferredOrientations([
           DeviceOrientation.portraitUp,
-        ]);
-
+        ]));
         SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
       }
 
-      await AuthService.instance.init();
-      // Wire the server-token store: load any persisted JWT, let the network
-      // layer re-mint it on a 401, and back-fill a token for a session that
-      // predates token support. All best-effort — never blocks startup.
-      await AppTokenStore.instance.load();
-      AppTokenStore.instance.refresher = AuthService.instance.refreshAppToken;
-      unawaited(AuthService.instance.ensureAppToken());
+      // EncryptedSharedPreferences can stall on some OEMs after a process
+      // kill. Cap the wait so the native splash cannot freeze forever;
+      // authState still updates the router if init finishes late.
+      try {
+        await AuthService.instance.init().timeout(const Duration(seconds: 3));
+      } catch (e) {
+        TLog.w('Init', 'Auth init slow or failed, continuing to first frame: $e');
+      }
       initializeRouter();
       // Initialise the shared AI-background foreground-task subsystem
       // early so any long-running AI feature (news summarize, online
@@ -110,10 +120,8 @@ void main() async {
       // needs to. Safe to call before the engine renders;
       // FlutterForegroundTask.init just stashes options.
       initBackgroundForegroundTask();
-      await NarrationCompletionStore.instance.load(sharedPreferences);
-      if (PlatformCapabilities.canUseAudioService) {
-        unawaited(initNarrationAudio(NarrationApi(ApiClient())));
-      }
+      unawaited(NarrationCompletionStore.instance.load(sharedPreferences));
+      unawaited(NarrationDownloadStore.instance.hydrate(prefs: sharedPreferences));
       TLog.d('Init', 'Auth + Router + ForegroundTask ready');
 
       runApp(
@@ -132,17 +140,50 @@ void main() async {
       );
 
       TLog.i('Init', 'App launched successfully');
-
-      unawaited(ExpenseWidgetService.instance.refreshOnAppStart());
-      unawaited(_initNotifications());
-      // Pre-warm the speech engine so the first hold-to-speak press doesn't
-      // pay a 1-2 s cold-start penalty (binding the native recognizer).
-      unawaited(HoldToSpeakController.warmUp());
+      unawaited(_afterFirstFrame());
     },
     (error, stack) {
       TLog.fatal('Zone', 'Uncaught error', error: error, st: stack);
     },
   );
+}
+
+Future<void> _afterFirstFrame() async {
+  final painted = Completer<void>();
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    if (!painted.isCompleted) painted.complete();
+  });
+  try {
+    await painted.future.timeout(const Duration(seconds: 2));
+  } on TimeoutException {
+    TLog.w('Init', 'first frame callback lagged — continuing deferred work');
+  }
+
+  try {
+    await AppTokenStore.instance.load().timeout(const Duration(seconds: 3));
+  } catch (e) {
+    TLog.w('Init', 'token store load slow or failed: $e');
+  }
+  AppTokenStore.instance.refresher = AuthService.instance.refreshAppToken;
+  try {
+    await AuthService.instance
+        .ensureAppToken()
+        .timeout(const Duration(seconds: 8));
+  } catch (e) {
+    TLog.w('Init', 'ensureAppToken slow or failed: $e');
+  }
+  AppTokenStore.instance.markStartupReady();
+  unawaited(ExpenseWidgetService.instance.refreshOnAppStart());
+  unawaited(_initNotifications());
+
+  // Speech + AudioService bind Google/media services. Doing that during
+  // splash racing AudioServiceActivity is what froze the launch icon until
+  // a force-stop. Warm them only after the UI is on screen.
+  await Future<void>.delayed(const Duration(milliseconds: 1800));
+  unawaited(HoldToSpeakController.warmUp());
+  if (PlatformCapabilities.canUseAudioService) {
+    unawaited(initNarrationAudio(NarrationApi(ApiClient())));
+  }
 }
 
 Future<void> _initNotifications() async {
@@ -155,12 +196,9 @@ Future<void> _initNotifications() async {
           // the flag the very first time it rebuilds, even if the stream
           // event lost the race to the screen mounting.
           NewsSummarizeStore.instance.requestReaderReopen();
-          notificationPayloadStream.add(payload);
-        } else if (payload == 'expense_tab' ||
-            payload == 'news_tab' ||
-            payload == 'tutor_tab' ||
-            payload.startsWith('watch:')) {
-          notificationPayloadStream.add(payload);
+          publishNotificationRoute(payload);
+        } else if (isRoutableNotificationPayload(payload)) {
+          publishNotificationRoute(payload);
         }
       },
     );

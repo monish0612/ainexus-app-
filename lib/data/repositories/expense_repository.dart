@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:dio/dio.dart' show DioException;
@@ -9,6 +10,9 @@ import '../../core/network/api_client.dart';
 import '../../core/network/api_endpoints.dart';
 import '../../core/services/credit_card_forecast_engine.dart' show CardExpense;
 import '../../core/services/telegram_logger.dart';
+import '../../core/services/expense_merge.dart';
+import '../../core/services/expense_sync_policy.dart';
+import '../../core/services/expense_widget_service.dart';
 import '../../domain/entities/expense_entities.dart' as domain;
 import '../local/database/app_database.dart' as db;
 import '../services/expense_memory_service.dart';
@@ -35,6 +39,10 @@ class ExpenseRepository {
   /// unchanged and existing call sites/tests keep working.
   late final ExpenseMemoryService _memory = ExpenseMemoryService(_db);
 
+  static const _syncEntityType = 'expense';
+  static const _syncActionUpsert = 'upsert';
+  static const _syncActionDelete = 'delete';
+
   /// Compact, billions-scale-safe snapshot of all spending for the AI
   /// recommendation engine. Derived from the small rollup, so it is instant.
   Future<MemoryFacts> memorySnapshot({DateTime? now}) =>
@@ -59,6 +67,24 @@ class ExpenseRepository {
       await _memory.recompute();
     } catch (e) {
       TLog.w('ExpenseRepo', 'Memory recompute failed (non-fatal)', error: e);
+    }
+  }
+
+  /// Push the current DB snapshot to the Android home-screen widget.
+  /// Never throws — a widget miss must not fail an expense write.
+  Future<void> _syncHomeWidget() async {
+    try {
+      final rows = await (_db.select(_db.expenses)
+            ..orderBy([
+              (t) => OrderingTerm(expression: t.date, mode: OrderingMode.desc),
+            ]))
+          .get();
+      await ExpenseWidgetService.instance.pushNow(
+        expenses: rows.map(_rowToExpense).toList(),
+        monthBudget: await getBudget(),
+      );
+    } catch (e) {
+      TLog.w('ExpenseRepo', 'Home widget sync skipped', error: e);
     }
   }
 
@@ -90,16 +116,24 @@ class ExpenseRepository {
   Future<Object?> _syncPostWithRetry(
     String endpoint, {
     required Map<String, dynamic> data,
-    int maxAttempts = 3,
+    int maxAttempts = ExpenseSyncPolicy.maxAttempts,
   }) async {
     for (var attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
         final resp = await _api.post<Object?>(endpoint, data: data);
         return resp.data;
       } catch (e) {
-        if (attempt == maxAttempts) rethrow;
-        TLog.d('ExpenseRepo', 'POST retry $attempt/$maxAttempts → $endpoint');
-        await Future<void>.delayed(Duration(milliseconds: 400 * attempt));
+        if (ExpenseSyncPolicy.isPermanent(e) || attempt == maxAttempts) {
+          TLog.e(
+            'ExpenseRepo',
+            'POST ${attempt == maxAttempts ? 'failed after retries' : 'permanent failure'} → $endpoint',
+            error: e,
+          );
+          rethrow;
+        }
+        TLog.w('ExpenseRepo', 'POST retry $attempt/$maxAttempts → $endpoint',
+            error: e);
+        await Future<void>.delayed(ExpenseSyncPolicy.delayForAttempt(attempt));
       }
     }
     return null;
@@ -123,18 +157,114 @@ class ExpenseRepository {
 
   Future<void> _syncDeleteWithRetry(
     String endpoint, {
-    int maxAttempts = 3,
+    int maxAttempts = ExpenseSyncPolicy.maxAttempts,
   }) async {
     for (var attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
         await _api.delete<Object?>(endpoint);
         return;
       } catch (e) {
-        if (attempt == maxAttempts) rethrow;
-        TLog.d('ExpenseRepo', 'DELETE retry $attempt/$maxAttempts → $endpoint');
-        await Future<void>.delayed(Duration(milliseconds: 400 * attempt));
+        if (ExpenseSyncPolicy.isPermanent(e) || attempt == maxAttempts) {
+          TLog.e(
+            'ExpenseRepo',
+            'DELETE ${attempt == maxAttempts ? 'failed after retries' : 'permanent failure'} → $endpoint',
+            error: e,
+          );
+          rethrow;
+        }
+        TLog.w('ExpenseRepo', 'DELETE retry $attempt/$maxAttempts → $endpoint',
+            error: e);
+        await Future<void>.delayed(ExpenseSyncPolicy.delayForAttempt(attempt));
       }
     }
+  }
+
+  Future<void> _dequeueExpense(String id) async {
+    try {
+      final queued = await _db.pendingSyncItems(_syncEntityType);
+      for (final q in queued) {
+        if (q.entityId == id) await _db.deleteSyncItem(q.id);
+      }
+    } catch (_) {/* best-effort cleanup */}
+  }
+
+  Future<void> _enqueueExpenseWrite({
+    required String id,
+    required String action,
+    required String payload,
+  }) async {
+    try {
+      await _dequeueExpense(id);
+      await _db.enqueueSync(
+        entityType: _syncEntityType,
+        entityId: id,
+        action: action,
+        payload: payload,
+      );
+      TLog.w('ExpenseRepo', 'Queued $action for offline retry: $id');
+    } catch (e) {
+      TLog.e('ExpenseRepo', 'Failed to enqueue expense $action $id', error: e);
+    }
+  }
+
+  /// Push queued offline expense upserts/deletes. Call on open after a
+  /// remote-nuke check and before [syncFromServer] so a local-only add is not
+  /// shadowed by a pull.
+  Future<int> drainSyncQueue() async {
+    List<db.SyncQueueData> items;
+    try {
+      items = await _db.pendingSyncItems(_syncEntityType);
+    } catch (e) {
+      TLog.e('ExpenseRepo', 'Reading expense sync queue failed', error: e);
+      return 0;
+    }
+    if (items.isEmpty) return 0;
+    TLog.i('ExpenseRepo', 'Draining ${items.length} queued expense write(s)');
+
+    var drained = 0;
+    for (final item in items) {
+      try {
+        if (item.action == _syncActionDelete) {
+          await _api.delete<Object?>(ApiEndpoints.expense(item.entityId));
+        } else {
+          final local = await getExpenseById(item.entityId);
+          if (local == null) {
+            // Local row is gone (merged or deleted). Never POST it back.
+            await _api.delete<Object?>(ApiEndpoints.expense(item.entityId));
+          } else {
+            final decoded = jsonDecode(item.payload);
+            if (decoded is! Map) {
+              throw const FormatException('expense upsert payload is not a map');
+            }
+            await _api.post<Object?>(
+              ApiEndpoints.expenses,
+              data: Map<String, dynamic>.from(decoded),
+            );
+          }
+        }
+        await _db.deleteSyncItem(item.id);
+        drained++;
+        TLog.i('ExpenseRepo', '☁️ Drained queued expense ${item.entityId}');
+      } catch (e) {
+        if (ExpenseSyncPolicy.isPermanent(e)) {
+          TLog.e(
+            'ExpenseRepo',
+            'Queued expense ${item.entityId} permanent failure — dropping',
+            error: e,
+          );
+          try {
+            await _db.deleteSyncItem(item.id);
+          } catch (_) {/* ignore */}
+        } else {
+          TLog.w(
+            'ExpenseRepo',
+            'Queued expense ${item.entityId} still failing — kept for next drain',
+            error: e,
+          );
+        }
+      }
+    }
+    return drained;
   }
 
   /// Returns `true` if server sync succeeded, `false` if it failed.
@@ -152,19 +282,39 @@ class ExpenseRepository {
     }
 
     await _safeApplyMemory(newExpense: expense);
+    await _syncHomeWidget();
 
     try {
       final resp =
           await _syncPostWithRetry(ApiEndpoints.expenses, data: expense.toJson());
+      await _dequeueExpense(expense.id);
       await _adoptServerUpdatedAt(expense.id, resp);
       TLog.i('ExpenseRepo',
           '☁️ Synced add: ₹${expense.amount.toStringAsFixed(0)} | ${expense.description}');
       return true;
     } catch (e) {
+      if (!ExpenseSyncPolicy.isPermanent(e)) {
+        await _enqueueExpenseWrite(
+          id: expense.id,
+          action: _syncActionUpsert,
+          payload: jsonEncode(expense.toJson()),
+        );
+      }
       TLog.w('ExpenseRepo',
           'Expense sync (add) failed after retries: ₹${expense.amount.toStringAsFixed(0)} | ${expense.description}',
           error: e);
       return false;
+    }
+  }
+
+  Future<domain.Expense?> getExpenseById(String id) async {
+    if (id.isEmpty) return null;
+    try {
+      final row = await (_db.select(_db.expenses)..where((t) => t.id.equals(id)))
+          .getSingleOrNull();
+      return row == null ? null : _rowToExpense(row);
+    } catch (_) {
+      return null;
     }
   }
 
@@ -193,15 +343,24 @@ class ExpenseRepository {
     }
 
     await _safeApplyMemory(oldExpense: previous, newExpense: expense);
+    await _syncHomeWidget();
 
     try {
       final resp =
           await _syncPostWithRetry(ApiEndpoints.expenses, data: expense.toJson());
+      await _dequeueExpense(expense.id);
       await _adoptServerUpdatedAt(expense.id, resp);
       TLog.i('ExpenseRepo',
           '☁️ Synced update: ₹${expense.amount.toStringAsFixed(0)} | ${expense.description}');
       return true;
     } catch (e) {
+      if (!ExpenseSyncPolicy.isPermanent(e)) {
+        await _enqueueExpenseWrite(
+          id: expense.id,
+          action: _syncActionUpsert,
+          payload: jsonEncode(expense.toJson()),
+        );
+      }
       TLog.w('ExpenseRepo',
           'Expense sync (update) failed after retries: ₹${expense.amount.toStringAsFixed(0)}',
           error: e);
@@ -229,16 +388,175 @@ class ExpenseRepository {
     }
 
     if (previous != null) await _safeApplyMemory(oldExpense: previous);
+    await _syncHomeWidget();
 
     try {
       await _syncDeleteWithRetry(ApiEndpoints.expense(id));
+      await _dequeueExpense(id);
       TLog.i('ExpenseRepo', '☁️ Synced delete: $id');
       return true;
     } catch (e) {
+      if (!ExpenseSyncPolicy.isPermanent(e)) {
+        await _enqueueExpenseWrite(
+          id: id,
+          action: _syncActionDelete,
+          payload: jsonEncode({'id': id}),
+        );
+      }
       TLog.w('ExpenseRepo', 'Expense sync (delete) failed after retries: $id',
           error: e);
       return false;
     }
+  }
+
+  /// Replace [sourceIds] with one [merged] row. Local insert + deletes run in
+  /// a single transaction so a crash cannot leave a half-merge. Cloud writes
+  /// tombstone every source first, then upsert the replacement, so originals
+  /// cannot linger on another device.
+  Future<bool> mergeExpenses({
+    required List<String> sourceIds,
+    required domain.Expense merged,
+  }) async {
+    final ids = sourceIds.map((s) => s.trim()).where((s) => s.isNotEmpty).toSet();
+    if (ids.length < 2) {
+      throw const ExpenseMergeException('Select at least two expenses to merge');
+    }
+    if (ids.contains(merged.id)) {
+      throw const ExpenseMergeException(
+        'Merged expense cannot reuse a source id',
+      );
+    }
+
+    final sources = <domain.Expense>[];
+    for (final id in ids) {
+      final row = await (_db.select(_db.expenses)..where((t) => t.id.equals(id)))
+          .getSingleOrNull();
+      if (row == null) {
+        throw ExpenseMergeException('Expense $id is no longer available');
+      }
+      sources.add(_rowToExpense(row));
+    }
+
+    final plan = planExpenseMerge(sources);
+    if (merged.description.trim().isEmpty) {
+      throw const ExpenseMergeException('Enter a description');
+    }
+    final replacement = merged.copyWith(
+      amount: plan.total,
+      comments: merged.comments.trim(),
+      isManualCategory: true,
+      date: merged.date.trim().isEmpty
+          ? plan.loggedAt.toIso8601String()
+          : merged.date,
+      category: merged.category.trim().isEmpty
+          ? plan.defaultCategory
+          : merged.category.trim(),
+      bank: merged.bank.trim().isEmpty ? plan.bank : merged.bank.trim(),
+      cardType:
+          merged.cardType.trim().isEmpty ? plan.cardType : merged.cardType.trim(),
+    );
+
+    final existingMerged = await getExpenseById(replacement.id);
+    if (existingMerged != null) {
+      throw const ExpenseMergeException(
+        'Merged expense id already exists',
+      );
+    }
+
+    final nowIso = DateTime.now().toUtc().toIso8601String();
+    try {
+      await _db.transaction(() async {
+        await _db.into(_db.expenses).insert(
+              _expenseToCompanion(replacement, updatedAt: nowIso),
+            );
+        for (final id in plan.sourceIds) {
+          await (_db.delete(_db.expenses)..where((t) => t.id.equals(id))).go();
+        }
+
+        final queued = await _db.pendingSyncItems(_syncEntityType);
+        final doomed = {...plan.sourceIds, replacement.id};
+        for (final q in queued) {
+          if (doomed.contains(q.entityId)) {
+            await _db.deleteSyncItem(q.id);
+          }
+        }
+
+        // Deletes first, then the replacement upsert, so a later drain cannot
+        // resurrect a source after the merge has already landed locally.
+        final origin = DateTime.now().toUtc();
+        var tick = 0;
+        String nextTs() =>
+            origin.add(Duration(milliseconds: tick++)).toIso8601String();
+        for (final id in plan.sourceIds) {
+          await _db.into(_db.syncQueue).insert(
+                db.SyncQueueCompanion.insert(
+                  entityType: _syncEntityType,
+                  entityId: id,
+                  action: _syncActionDelete,
+                  payload: jsonEncode({'id': id}),
+                  createdAt: nextTs(),
+                ),
+              );
+        }
+        await _db.into(_db.syncQueue).insert(
+              db.SyncQueueCompanion.insert(
+                entityType: _syncEntityType,
+                entityId: replacement.id,
+                action: _syncActionUpsert,
+                payload: jsonEncode(replacement.toJson()),
+                createdAt: nextTs(),
+              ),
+            );
+      });
+      TLog.i(
+        'ExpenseRepo',
+        '🔗 Merged ${plan.count} → ₹${replacement.amount.toStringAsFixed(0)} | ${replacement.description} | ${replacement.category}',
+      );
+    } catch (e) {
+      TLog.e('ExpenseRepo', 'Local merge failed', error: e);
+      rethrow;
+    }
+
+    await _safeRecomputeMemory();
+    await _syncHomeWidget();
+
+    var synced = true;
+
+    for (final id in plan.sourceIds) {
+      try {
+        await _syncDeleteWithRetry(ApiEndpoints.expense(id));
+        await _dequeueExpense(id);
+        TLog.i('ExpenseRepo', '☁️ Tombstoned merged source: $id');
+      } catch (e) {
+        if (ExpenseSyncPolicy.isPermanent(e)) {
+          await _dequeueExpense(id);
+        } else {
+          synced = false;
+        }
+        TLog.w('ExpenseRepo', 'Merge source delete sync failed: $id', error: e);
+      }
+    }
+
+    try {
+      final resp = await _syncPostWithRetry(
+        ApiEndpoints.expenses,
+        data: replacement.toJson(),
+      );
+      await _dequeueExpense(replacement.id);
+      await _adoptServerUpdatedAt(replacement.id, resp);
+      TLog.i(
+        'ExpenseRepo',
+        '☁️ Synced merge: ₹${replacement.amount.toStringAsFixed(0)} | ${replacement.description}',
+      );
+    } catch (e) {
+      if (ExpenseSyncPolicy.isPermanent(e)) {
+        await _dequeueExpense(replacement.id);
+      }
+      synced = false;
+      TLog.w('ExpenseRepo', 'Merge upsert sync failed', error: e);
+    }
+
+    return synced;
   }
 
   /// Cheap `COUNT(*)` of budget-history rows — used by the nuke easter egg to
@@ -276,6 +594,8 @@ class ExpenseRepository {
       TLog.e('ExpenseRepo', 'Local budget insert failed', error: e);
       rethrow;
     }
+
+    await _syncHomeWidget();
 
     try {
       await _syncPostWithRetry(
@@ -322,7 +642,10 @@ class ExpenseRepository {
         inserted++;
       }
 
-      if (inserted > 0) TLog.i('ExpenseRepo', 'Synced $inserted budget entries from server');
+      if (inserted > 0) {
+        TLog.i('ExpenseRepo', 'Synced $inserted budget entries from server');
+        await _syncHomeWidget();
+      }
       return inserted;
     } catch (e) {
       TLog.w('ExpenseRepo', 'Budget pull sync failed: $e', error: e);
@@ -353,6 +676,7 @@ class ExpenseRepository {
       await _prefs.setBool(_pendingClearBudgetKey, true);
       TLog.w('ExpenseRepo', 'Flagged pending clear for budget history');
     }
+    await _syncHomeWidget();
     return serverOk;
   }
 
@@ -361,6 +685,7 @@ class ExpenseRepository {
   Future<bool> clearAllExpenses() async {
     try {
       await _db.delete(_db.expenses).go();
+      await _db.purgeSyncByType(_syncEntityType);
       TLog.i('ExpenseRepo', 'All expenses cleared (local)');
     } catch (e) {
       TLog.e('ExpenseRepo', 'Failed to clear expenses locally', error: e);
@@ -369,6 +694,7 @@ class ExpenseRepository {
 
     // Memory layer is derived from expenses — rebuild it (now empty).
     await _safeRecomputeMemory();
+    await _syncHomeWidget();
 
     final serverOk = await _serverDeleteWithRetry(
       endpoint: ApiEndpoints.expenses,
@@ -639,11 +965,21 @@ class ExpenseRepository {
       if (data is List) {
         final localRows = await _db.select(_db.expenses).get();
         final localById = {for (final r in localRows) r.id: r};
+        final pendingDeletes = <String>{};
+        try {
+          final queued = await _db.pendingSyncItems(_syncEntityType);
+          for (final q in queued) {
+            if (q.action == _syncActionDelete) {
+              pendingDeletes.add(q.entityId);
+            }
+          }
+        } catch (_) {/* pull still proceeds */}
 
         for (final item in data) {
           if (item is! Map) continue;
           final id = item['id']?.toString() ?? '';
           if (id.isEmpty) continue;
+          if (pendingDeletes.contains(id)) continue;
 
           final serverUpdatedAt = item['updatedAt']?.toString() ??
               item['updated_at']?.toString() ??
@@ -700,6 +1036,7 @@ class ExpenseRepository {
       // Bulk upserts/deletes bypass the per-write delta hooks; rebuild the
       // rollup once so the memory layer reflects the reconciled rows.
       await _safeRecomputeMemory();
+      await _syncHomeWidget();
     }
     return changed;
   }

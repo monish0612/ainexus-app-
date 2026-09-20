@@ -140,6 +140,40 @@ List<Expense> _filter(
       .toList();
 }
 
+String _trendCompareCopy({
+  required double currTotal,
+  required double prevTotal,
+  required double rangeAvg,
+  required double latest,
+}) {
+  final parts = <String>[];
+  if (prevTotal > 0) {
+    final delta = currTotal - prevTotal;
+    if (delta.abs() < 1) {
+      parts.add('In line with the previous period');
+    } else if (delta > 0) {
+      parts.add('${formatCurrency(delta)} more than the previous period');
+    } else {
+      parts.add('${formatCurrency(delta.abs())} less than the previous period');
+    }
+  } else {
+    parts.add('No previous period to compare');
+  }
+  if (rangeAvg > 0) {
+    final vsAvg = latest - rangeAvg;
+    if (vsAvg.abs() < 1) {
+      parts.add('latest point in line with the range average');
+    } else if (vsAvg > 0) {
+      parts.add(
+          'latest point ${formatCurrency(vsAvg)} above the range average');
+    } else {
+      parts.add(
+          'latest point ${formatCurrency(vsAvg.abs())} below the range average');
+    }
+  }
+  return parts.join(' · ');
+}
+
 /// Full-screen spending trends (`ExpenseTrendModal.tsx` subset + requested periods).
 Future<void> showExpenseTrendModal(
   BuildContext context, {
@@ -222,6 +256,9 @@ class _ExpenseTrendModalState extends State<ExpenseTrendModal> {
     final isEmpty = curr.isEmpty;
     final isUp = changePct > 0;
     final isStable = prevTotal == 0 || changePct.abs() <= 3;
+    final rangeAvg = spots.isEmpty
+        ? 0.0
+        : spots.fold<double>(0, (s, p) => s + p.y) / spots.length;
 
     return Scaffold(
       backgroundColor: colors.bg,
@@ -428,6 +465,24 @@ class _ExpenseTrendModalState extends State<ExpenseTrendModal> {
                               ],
                             ),
                           ),
+                          if (_period != ExpenseTrendPeriod.allTime)
+                            Padding(
+                              padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+                              child: Text(
+                                _trendCompareCopy(
+                                  currTotal: currTotal,
+                                  prevTotal: prevTotal,
+                                  rangeAvg: rangeAvg,
+                                  latest: spots.isEmpty ? 0 : spots.last.y,
+                                ),
+                                style: GoogleFonts.plusJakartaSans(
+                                  fontSize: 12,
+                                  height: 1.45,
+                                  fontWeight: FontWeight.w600,
+                                  color: colors.text3,
+                                ),
+                              ),
+                            ),
                           Padding(
                             padding: const EdgeInsets.fromLTRB(20, 0, 16, 0),
                             child: SizedBox(

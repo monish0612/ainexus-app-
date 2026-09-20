@@ -25,6 +25,7 @@ import '../../../core/theme/app_colors.dart';
 import '../../../data/local/database/app_database.dart';
 import '../../../data/services/tutor_ai_service.dart';
 import '../../../domain/entities/tutor_entities.dart';
+import '../../widgets/block_selectable.dart';
 import '../../widgets/voice_input_button.dart';
 import '../settings/settings_controller.dart';
 
@@ -190,7 +191,7 @@ class ArticleFollowUpStore with WidgetsBindingObserver {
   static Future<FlutterLocalNotificationsPlugin> _ensureNotifPlugin() async {
     if (_notifPlugin != null) return _notifPlugin!;
     _notifPlugin = FlutterLocalNotificationsPlugin();
-    const android = AndroidInitializationSettings('@mipmap/ic_launcher');
+    const android = AndroidInitializationSettings('ic_notification');
     await _notifPlugin!
         .initialize(const InitializationSettings(android: android));
     return _notifPlugin!;
@@ -208,6 +209,7 @@ class ArticleFollowUpStore with WidgetsBindingObserver {
         channelDescription: _kAiChannelDesc,
         importance: Importance.low,
         priority: Priority.low,
+        icon: 'ic_notification',
         ongoing: true,
         autoCancel: false,
         showProgress: true,
@@ -239,6 +241,7 @@ class ArticleFollowUpStore with WidgetsBindingObserver {
         channelDescription: _kAiChannelDesc,
         importance: Importance.high,
         priority: Priority.high,
+        icon: 'ic_notification',
         category: AndroidNotificationCategory.message,
         color: ui.Color(0xFF0D59F2),
       );
@@ -417,6 +420,25 @@ class ArticleFollowUpStore with WidgetsBindingObserver {
 
   List<_ChatMessage> getCached(String articleId) =>
       _cache[articleId] ?? const [];
+
+  /// Neutral DTOs for the article share sheet (completed Q&A formatting).
+  List<FollowUpMessage> shareMessages(String articleId) {
+    return [
+      for (final m in getCached(articleId))
+        FollowUpMessage(
+          role: m.role,
+          text: m.text,
+          isLoading: m.isLoading,
+          isError: m.isError,
+          model: m.model,
+        ),
+    ];
+  }
+
+  Future<List<FollowUpMessage>> loadShareMessages(String articleId) async {
+    await load(articleId);
+    return shareMessages(articleId);
+  }
 
   // ── Load ─────────────────────────────────────────────────────────────────
 
@@ -2362,23 +2384,20 @@ class _ArticleFollowUpChatState extends ConsumerState<_ArticleFollowUpChat>
                             color: const Color(0xFFFF6B6B),
                           ),
                         )
-                      : SelectionArea(
-                          child: MarkdownBody(
-                            data: msg.text,
-                            selectable: false,
-                            onTapLink: (_, href, __) async {
-                              if (href == null || href.isEmpty) return;
-                              final uri = Uri.tryParse(href);
-                              if (uri == null) return;
-                              try {
-                                await launchUrl(uri,
-                                    mode: LaunchMode.externalApplication);
-                              } catch (e) {
-                                TLog.w('FollowUp', 'Failed to launch URL: $href', error: e);
-                              }
-                            },
-                            styleSheet: _chatMarkdownStyle(colors),
-                          ),
+                      : BlockSelectableMarkdown(
+                          data: msg.text,
+                          onTapLink: (_, href, __) async {
+                            if (href == null || href.isEmpty) return;
+                            final uri = Uri.tryParse(href);
+                            if (uri == null) return;
+                            try {
+                              await launchUrl(uri,
+                                  mode: LaunchMode.externalApplication);
+                            } catch (e) {
+                              TLog.w('FollowUp', 'Failed to launch URL: $href', error: e);
+                            }
+                          },
+                          styleSheet: _chatMarkdownStyle(colors),
                         ),
                 ),
                 if (msg.model.isNotEmpty || msg.sources.isNotEmpty)

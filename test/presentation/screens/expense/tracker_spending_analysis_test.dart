@@ -74,6 +74,7 @@ Future<void> _pumpTracker(
   WidgetTester tester,
   List<ExpenseData> expenses, {
   void Function(int index, String category)? onOpenCategory,
+  DateTime? clock,
 }) async {
   tester.view.physicalSize = const Size(400, 1800);
   tester.view.devicePixelRatio = 1.0;
@@ -102,6 +103,7 @@ Future<void> _pumpTracker(
             onShowBudgetHistory: () {},
             onOpenTimeframe: (_) {},
             onOpenCategory: onOpenCategory,
+            clock: clock,
           ),
         ),
       ),
@@ -235,6 +237,39 @@ void main() {
     expect(find.text('Spending Analysis'), findsOneWidget);
     expect(find.textContaining('No expenses for today'), findsOneWidget);
     expect(_pieLabel('Other'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+      'yesterday afternoon SMS is not TODAY\'S SPENDING after midnight',
+      (tester) async {
+    final clock = DateTime(2026, 9, 17, 13, 29);
+    await _pumpTracker(
+      tester,
+      [
+        _row(
+          id: 'pos',
+          amount: 2890,
+          category: 'Others',
+          date: DateTime(2026, 9, 16, 13, 37),
+          description: 'ibkpos',
+        ),
+        _row(
+          id: 'prajin',
+          amount: 75,
+          category: 'Personal',
+          date: DateTime(2026, 9, 16, 12, 31),
+          description: 'Prajin M',
+        ),
+      ],
+      clock: clock,
+    );
+
+    expect(find.text('no expenses yet today'), findsOneWidget);
+    expect(find.text('2 transactions today'), findsNothing);
+    expect(find.text('YESTERDAY'), findsOneWidget);
+    expect(find.text('ibkpos'), findsOneWidget);
+    expect(find.text('Prajin M'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 }

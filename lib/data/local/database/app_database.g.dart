@@ -5193,6 +5193,2441 @@ class SavedSearchChatSummariesCompanion
   }
 }
 
+class $WatchProductsTable extends WatchProducts
+    with TableInfo<$WatchProductsTable, WatchProduct> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $WatchProductsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+      'id', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _nameMeta = const VerificationMeta('name');
+  @override
+  late final GeneratedColumn<String> name = GeneratedColumn<String>(
+      'name', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _urlMeta = const VerificationMeta('url');
+  @override
+  late final GeneratedColumn<String> url = GeneratedColumn<String>(
+      'url', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _canonicalUrlMeta =
+      const VerificationMeta('canonicalUrl');
+  @override
+  late final GeneratedColumn<String> canonicalUrl = GeneratedColumn<String>(
+      'canonical_url', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _storeMeta = const VerificationMeta('store');
+  @override
+  late final GeneratedColumn<String> store = GeneratedColumn<String>(
+      'store', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _productIdMeta =
+      const VerificationMeta('productId');
+  @override
+  late final GeneratedColumn<String> productId = GeneratedColumn<String>(
+      'product_id', aliasedName, true,
+      type: DriftSqlType.string, requiredDuringInsert: false);
+  static const VerificationMeta _imageUrlMeta =
+      const VerificationMeta('imageUrl');
+  @override
+  late final GeneratedColumn<String> imageUrl = GeneratedColumn<String>(
+      'image_url', aliasedName, false,
+      type: DriftSqlType.string,
+      requiredDuringInsert: false,
+      defaultValue: const Constant(''));
+  static const VerificationMeta _currentPriceMeta =
+      const VerificationMeta('currentPrice');
+  @override
+  late final GeneratedColumn<double> currentPrice = GeneratedColumn<double>(
+      'current_price', aliasedName, false,
+      type: DriftSqlType.double, requiredDuringInsert: true);
+  static const VerificationMeta _basePriceMeta =
+      const VerificationMeta('basePrice');
+  @override
+  late final GeneratedColumn<double> basePrice = GeneratedColumn<double>(
+      'base_price', aliasedName, false,
+      type: DriftSqlType.double, requiredDuringInsert: true);
+  static const VerificationMeta _lastCheckedMeta =
+      const VerificationMeta('lastChecked');
+  @override
+  late final GeneratedColumn<String> lastChecked = GeneratedColumn<String>(
+      'last_checked', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _createdAtMeta =
+      const VerificationMeta('createdAt');
+  @override
+  late final GeneratedColumn<String> createdAt = GeneratedColumn<String>(
+      'created_at', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _targetPriceMeta =
+      const VerificationMeta('targetPrice');
+  @override
+  late final GeneratedColumn<double> targetPrice = GeneratedColumn<double>(
+      'target_price', aliasedName, true,
+      type: DriftSqlType.double, requiredDuringInsert: false);
+  static const VerificationMeta _notifyOnDecreaseMeta =
+      const VerificationMeta('notifyOnDecrease');
+  @override
+  late final GeneratedColumn<bool> notifyOnDecrease = GeneratedColumn<bool>(
+      'notify_on_decrease', aliasedName, false,
+      type: DriftSqlType.bool,
+      requiredDuringInsert: false,
+      defaultConstraints: GeneratedColumn.constraintIsAlways(
+          'CHECK ("notify_on_decrease" IN (0, 1))'),
+      defaultValue: const Constant(true));
+  static const VerificationMeta _notifyOnIncreaseMeta =
+      const VerificationMeta('notifyOnIncrease');
+  @override
+  late final GeneratedColumn<bool> notifyOnIncrease = GeneratedColumn<bool>(
+      'notify_on_increase', aliasedName, false,
+      type: DriftSqlType.bool,
+      requiredDuringInsert: false,
+      defaultConstraints: GeneratedColumn.constraintIsAlways(
+          'CHECK ("notify_on_increase" IN (0, 1))'),
+      defaultValue: const Constant(false));
+  static const VerificationMeta _notifyOnTargetMeta =
+      const VerificationMeta('notifyOnTarget');
+  @override
+  late final GeneratedColumn<bool> notifyOnTarget = GeneratedColumn<bool>(
+      'notify_on_target', aliasedName, false,
+      type: DriftSqlType.bool,
+      requiredDuringInsert: false,
+      defaultConstraints: GeneratedColumn.constraintIsAlways(
+          'CHECK ("notify_on_target" IN (0, 1))'),
+      defaultValue: const Constant(true));
+  static const VerificationMeta _checkIntervalMinutesMeta =
+      const VerificationMeta('checkIntervalMinutes');
+  @override
+  late final GeneratedColumn<int> checkIntervalMinutes = GeneratedColumn<int>(
+      'check_interval_minutes', aliasedName, false,
+      type: DriftSqlType.int,
+      requiredDuringInsert: false,
+      defaultValue: const Constant(60));
+  static const VerificationMeta _isPausedMeta =
+      const VerificationMeta('isPaused');
+  @override
+  late final GeneratedColumn<bool> isPaused = GeneratedColumn<bool>(
+      'is_paused', aliasedName, false,
+      type: DriftSqlType.bool,
+      requiredDuringInsert: false,
+      defaultConstraints:
+          GeneratedColumn.constraintIsAlways('CHECK ("is_paused" IN (0, 1))'),
+      defaultValue: const Constant(false));
+  static const VerificationMeta _isPinnedMeta =
+      const VerificationMeta('isPinned');
+  @override
+  late final GeneratedColumn<bool> isPinned = GeneratedColumn<bool>(
+      'is_pinned', aliasedName, false,
+      type: DriftSqlType.bool,
+      requiredDuringInsert: false,
+      defaultConstraints:
+          GeneratedColumn.constraintIsAlways('CHECK ("is_pinned" IN (0, 1))'),
+      defaultValue: const Constant(false));
+  static const VerificationMeta _manuallyPausedMeta =
+      const VerificationMeta('manuallyPaused');
+  @override
+  late final GeneratedColumn<bool> manuallyPaused = GeneratedColumn<bool>(
+      'manually_paused', aliasedName, false,
+      type: DriftSqlType.bool,
+      requiredDuringInsert: false,
+      defaultConstraints: GeneratedColumn.constraintIsAlways(
+          'CHECK ("manually_paused" IN (0, 1))'),
+      defaultValue: const Constant(false));
+  static const VerificationMeta _pausedAtMeta =
+      const VerificationMeta('pausedAt');
+  @override
+  late final GeneratedColumn<String> pausedAt = GeneratedColumn<String>(
+      'paused_at', aliasedName, true,
+      type: DriftSqlType.string, requiredDuringInsert: false);
+  static const VerificationMeta _pinnedAtMeta =
+      const VerificationMeta('pinnedAt');
+  @override
+  late final GeneratedColumn<String> pinnedAt = GeneratedColumn<String>(
+      'pinned_at', aliasedName, true,
+      type: DriftSqlType.string, requiredDuringInsert: false);
+  static const VerificationMeta _pendingPriceMeta =
+      const VerificationMeta('pendingPrice');
+  @override
+  late final GeneratedColumn<double> pendingPrice = GeneratedColumn<double>(
+      'pending_price', aliasedName, true,
+      type: DriftSqlType.double, requiredDuringInsert: false);
+  static const VerificationMeta _pendingPriceAtMeta =
+      const VerificationMeta('pendingPriceAt');
+  @override
+  late final GeneratedColumn<String> pendingPriceAt = GeneratedColumn<String>(
+      'pending_price_at', aliasedName, true,
+      type: DriftSqlType.string, requiredDuringInsert: false);
+  static const VerificationMeta _consecutiveFailuresMeta =
+      const VerificationMeta('consecutiveFailures');
+  @override
+  late final GeneratedColumn<int> consecutiveFailures = GeneratedColumn<int>(
+      'consecutive_failures', aliasedName, false,
+      type: DriftSqlType.int,
+      requiredDuringInsert: false,
+      defaultValue: const Constant(0));
+  static const VerificationMeta _lastCheckErrorMeta =
+      const VerificationMeta('lastCheckError');
+  @override
+  late final GeneratedColumn<String> lastCheckError = GeneratedColumn<String>(
+      'last_check_error', aliasedName, true,
+      type: DriftSqlType.string, requiredDuringInsert: false);
+  static const VerificationMeta _availabilityMeta =
+      const VerificationMeta('availability');
+  @override
+  late final GeneratedColumn<String> availability = GeneratedColumn<String>(
+      'availability', aliasedName, true,
+      type: DriftSqlType.string, requiredDuringInsert: false);
+  static const VerificationMeta _currencyCodeMeta =
+      const VerificationMeta('currencyCode');
+  @override
+  late final GeneratedColumn<String> currencyCode = GeneratedColumn<String>(
+      'currency_code', aliasedName, false,
+      type: DriftSqlType.string,
+      requiredDuringInsert: false,
+      defaultValue: const Constant('INR'));
+  static const VerificationMeta _lastSourceMeta =
+      const VerificationMeta('lastSource');
+  @override
+  late final GeneratedColumn<String> lastSource = GeneratedColumn<String>(
+      'last_source', aliasedName, false,
+      type: DriftSqlType.string,
+      requiredDuringInsert: false,
+      defaultValue: const Constant(''));
+  static const VerificationMeta _lastScoreMeta =
+      const VerificationMeta('lastScore');
+  @override
+  late final GeneratedColumn<int> lastScore = GeneratedColumn<int>(
+      'last_score', aliasedName, false,
+      type: DriftSqlType.int,
+      requiredDuringInsert: false,
+      defaultValue: const Constant(0));
+  static const VerificationMeta _identityKeyMeta =
+      const VerificationMeta('identityKey');
+  @override
+  late final GeneratedColumn<String> identityKey = GeneratedColumn<String>(
+      'identity_key', aliasedName, false,
+      type: DriftSqlType.string,
+      requiredDuringInsert: false,
+      defaultValue: const Constant(''));
+  static const VerificationMeta _updatedAtMeta =
+      const VerificationMeta('updatedAt');
+  @override
+  late final GeneratedColumn<String> updatedAt = GeneratedColumn<String>(
+      'updated_at', aliasedName, true,
+      type: DriftSqlType.string, requiredDuringInsert: false);
+  static const VerificationMeta _revMeta = const VerificationMeta('rev');
+  @override
+  late final GeneratedColumn<int> rev = GeneratedColumn<int>(
+      'rev', aliasedName, false,
+      type: DriftSqlType.int,
+      requiredDuringInsert: false,
+      defaultValue: const Constant(0));
+  @override
+  List<GeneratedColumn> get $columns => [
+        id,
+        name,
+        url,
+        canonicalUrl,
+        store,
+        productId,
+        imageUrl,
+        currentPrice,
+        basePrice,
+        lastChecked,
+        createdAt,
+        targetPrice,
+        notifyOnDecrease,
+        notifyOnIncrease,
+        notifyOnTarget,
+        checkIntervalMinutes,
+        isPaused,
+        isPinned,
+        manuallyPaused,
+        pausedAt,
+        pinnedAt,
+        pendingPrice,
+        pendingPriceAt,
+        consecutiveFailures,
+        lastCheckError,
+        availability,
+        currencyCode,
+        lastSource,
+        lastScore,
+        identityKey,
+        updatedAt,
+        rev
+      ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'watch_products';
+  @override
+  VerificationContext validateIntegrity(Insertable<WatchProduct> instance,
+      {bool isInserting = false}) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('name')) {
+      context.handle(
+          _nameMeta, name.isAcceptableOrUnknown(data['name']!, _nameMeta));
+    } else if (isInserting) {
+      context.missing(_nameMeta);
+    }
+    if (data.containsKey('url')) {
+      context.handle(
+          _urlMeta, url.isAcceptableOrUnknown(data['url']!, _urlMeta));
+    } else if (isInserting) {
+      context.missing(_urlMeta);
+    }
+    if (data.containsKey('canonical_url')) {
+      context.handle(
+          _canonicalUrlMeta,
+          canonicalUrl.isAcceptableOrUnknown(
+              data['canonical_url']!, _canonicalUrlMeta));
+    } else if (isInserting) {
+      context.missing(_canonicalUrlMeta);
+    }
+    if (data.containsKey('store')) {
+      context.handle(
+          _storeMeta, store.isAcceptableOrUnknown(data['store']!, _storeMeta));
+    } else if (isInserting) {
+      context.missing(_storeMeta);
+    }
+    if (data.containsKey('product_id')) {
+      context.handle(_productIdMeta,
+          productId.isAcceptableOrUnknown(data['product_id']!, _productIdMeta));
+    }
+    if (data.containsKey('image_url')) {
+      context.handle(_imageUrlMeta,
+          imageUrl.isAcceptableOrUnknown(data['image_url']!, _imageUrlMeta));
+    }
+    if (data.containsKey('current_price')) {
+      context.handle(
+          _currentPriceMeta,
+          currentPrice.isAcceptableOrUnknown(
+              data['current_price']!, _currentPriceMeta));
+    } else if (isInserting) {
+      context.missing(_currentPriceMeta);
+    }
+    if (data.containsKey('base_price')) {
+      context.handle(_basePriceMeta,
+          basePrice.isAcceptableOrUnknown(data['base_price']!, _basePriceMeta));
+    } else if (isInserting) {
+      context.missing(_basePriceMeta);
+    }
+    if (data.containsKey('last_checked')) {
+      context.handle(
+          _lastCheckedMeta,
+          lastChecked.isAcceptableOrUnknown(
+              data['last_checked']!, _lastCheckedMeta));
+    } else if (isInserting) {
+      context.missing(_lastCheckedMeta);
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(_createdAtMeta,
+          createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta));
+    } else if (isInserting) {
+      context.missing(_createdAtMeta);
+    }
+    if (data.containsKey('target_price')) {
+      context.handle(
+          _targetPriceMeta,
+          targetPrice.isAcceptableOrUnknown(
+              data['target_price']!, _targetPriceMeta));
+    }
+    if (data.containsKey('notify_on_decrease')) {
+      context.handle(
+          _notifyOnDecreaseMeta,
+          notifyOnDecrease.isAcceptableOrUnknown(
+              data['notify_on_decrease']!, _notifyOnDecreaseMeta));
+    }
+    if (data.containsKey('notify_on_increase')) {
+      context.handle(
+          _notifyOnIncreaseMeta,
+          notifyOnIncrease.isAcceptableOrUnknown(
+              data['notify_on_increase']!, _notifyOnIncreaseMeta));
+    }
+    if (data.containsKey('notify_on_target')) {
+      context.handle(
+          _notifyOnTargetMeta,
+          notifyOnTarget.isAcceptableOrUnknown(
+              data['notify_on_target']!, _notifyOnTargetMeta));
+    }
+    if (data.containsKey('check_interval_minutes')) {
+      context.handle(
+          _checkIntervalMinutesMeta,
+          checkIntervalMinutes.isAcceptableOrUnknown(
+              data['check_interval_minutes']!, _checkIntervalMinutesMeta));
+    }
+    if (data.containsKey('is_paused')) {
+      context.handle(_isPausedMeta,
+          isPaused.isAcceptableOrUnknown(data['is_paused']!, _isPausedMeta));
+    }
+    if (data.containsKey('is_pinned')) {
+      context.handle(_isPinnedMeta,
+          isPinned.isAcceptableOrUnknown(data['is_pinned']!, _isPinnedMeta));
+    }
+    if (data.containsKey('manually_paused')) {
+      context.handle(
+          _manuallyPausedMeta,
+          manuallyPaused.isAcceptableOrUnknown(
+              data['manually_paused']!, _manuallyPausedMeta));
+    }
+    if (data.containsKey('paused_at')) {
+      context.handle(_pausedAtMeta,
+          pausedAt.isAcceptableOrUnknown(data['paused_at']!, _pausedAtMeta));
+    }
+    if (data.containsKey('pinned_at')) {
+      context.handle(_pinnedAtMeta,
+          pinnedAt.isAcceptableOrUnknown(data['pinned_at']!, _pinnedAtMeta));
+    }
+    if (data.containsKey('pending_price')) {
+      context.handle(
+          _pendingPriceMeta,
+          pendingPrice.isAcceptableOrUnknown(
+              data['pending_price']!, _pendingPriceMeta));
+    }
+    if (data.containsKey('pending_price_at')) {
+      context.handle(
+          _pendingPriceAtMeta,
+          pendingPriceAt.isAcceptableOrUnknown(
+              data['pending_price_at']!, _pendingPriceAtMeta));
+    }
+    if (data.containsKey('consecutive_failures')) {
+      context.handle(
+          _consecutiveFailuresMeta,
+          consecutiveFailures.isAcceptableOrUnknown(
+              data['consecutive_failures']!, _consecutiveFailuresMeta));
+    }
+    if (data.containsKey('last_check_error')) {
+      context.handle(
+          _lastCheckErrorMeta,
+          lastCheckError.isAcceptableOrUnknown(
+              data['last_check_error']!, _lastCheckErrorMeta));
+    }
+    if (data.containsKey('availability')) {
+      context.handle(
+          _availabilityMeta,
+          availability.isAcceptableOrUnknown(
+              data['availability']!, _availabilityMeta));
+    }
+    if (data.containsKey('currency_code')) {
+      context.handle(
+          _currencyCodeMeta,
+          currencyCode.isAcceptableOrUnknown(
+              data['currency_code']!, _currencyCodeMeta));
+    }
+    if (data.containsKey('last_source')) {
+      context.handle(
+          _lastSourceMeta,
+          lastSource.isAcceptableOrUnknown(
+              data['last_source']!, _lastSourceMeta));
+    }
+    if (data.containsKey('last_score')) {
+      context.handle(_lastScoreMeta,
+          lastScore.isAcceptableOrUnknown(data['last_score']!, _lastScoreMeta));
+    }
+    if (data.containsKey('identity_key')) {
+      context.handle(
+          _identityKeyMeta,
+          identityKey.isAcceptableOrUnknown(
+              data['identity_key']!, _identityKeyMeta));
+    }
+    if (data.containsKey('updated_at')) {
+      context.handle(_updatedAtMeta,
+          updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta));
+    }
+    if (data.containsKey('rev')) {
+      context.handle(
+          _revMeta, rev.isAcceptableOrUnknown(data['rev']!, _revMeta));
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  List<Set<GeneratedColumn>> get uniqueKeys => [
+        {canonicalUrl},
+      ];
+  @override
+  WatchProduct map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return WatchProduct(
+      id: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}id'])!,
+      name: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}name'])!,
+      url: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}url'])!,
+      canonicalUrl: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}canonical_url'])!,
+      store: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}store'])!,
+      productId: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}product_id']),
+      imageUrl: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}image_url'])!,
+      currentPrice: attachedDatabase.typeMapping
+          .read(DriftSqlType.double, data['${effectivePrefix}current_price'])!,
+      basePrice: attachedDatabase.typeMapping
+          .read(DriftSqlType.double, data['${effectivePrefix}base_price'])!,
+      lastChecked: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}last_checked'])!,
+      createdAt: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}created_at'])!,
+      targetPrice: attachedDatabase.typeMapping
+          .read(DriftSqlType.double, data['${effectivePrefix}target_price']),
+      notifyOnDecrease: attachedDatabase.typeMapping.read(
+          DriftSqlType.bool, data['${effectivePrefix}notify_on_decrease'])!,
+      notifyOnIncrease: attachedDatabase.typeMapping.read(
+          DriftSqlType.bool, data['${effectivePrefix}notify_on_increase'])!,
+      notifyOnTarget: attachedDatabase.typeMapping
+          .read(DriftSqlType.bool, data['${effectivePrefix}notify_on_target'])!,
+      checkIntervalMinutes: attachedDatabase.typeMapping.read(
+          DriftSqlType.int, data['${effectivePrefix}check_interval_minutes'])!,
+      isPaused: attachedDatabase.typeMapping
+          .read(DriftSqlType.bool, data['${effectivePrefix}is_paused'])!,
+      isPinned: attachedDatabase.typeMapping
+          .read(DriftSqlType.bool, data['${effectivePrefix}is_pinned'])!,
+      manuallyPaused: attachedDatabase.typeMapping
+          .read(DriftSqlType.bool, data['${effectivePrefix}manually_paused'])!,
+      pausedAt: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}paused_at']),
+      pinnedAt: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}pinned_at']),
+      pendingPrice: attachedDatabase.typeMapping
+          .read(DriftSqlType.double, data['${effectivePrefix}pending_price']),
+      pendingPriceAt: attachedDatabase.typeMapping.read(
+          DriftSqlType.string, data['${effectivePrefix}pending_price_at']),
+      consecutiveFailures: attachedDatabase.typeMapping.read(
+          DriftSqlType.int, data['${effectivePrefix}consecutive_failures'])!,
+      lastCheckError: attachedDatabase.typeMapping.read(
+          DriftSqlType.string, data['${effectivePrefix}last_check_error']),
+      availability: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}availability']),
+      currencyCode: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}currency_code'])!,
+      lastSource: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}last_source'])!,
+      lastScore: attachedDatabase.typeMapping
+          .read(DriftSqlType.int, data['${effectivePrefix}last_score'])!,
+      identityKey: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}identity_key'])!,
+      updatedAt: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}updated_at']),
+      rev: attachedDatabase.typeMapping
+          .read(DriftSqlType.int, data['${effectivePrefix}rev'])!,
+    );
+  }
+
+  @override
+  $WatchProductsTable createAlias(String alias) {
+    return $WatchProductsTable(attachedDatabase, alias);
+  }
+}
+
+class WatchProduct extends DataClass implements Insertable<WatchProduct> {
+  final String id;
+  final String name;
+  final String url;
+  final String canonicalUrl;
+  final String store;
+  final String? productId;
+  final String imageUrl;
+  final double currentPrice;
+  final double basePrice;
+  final String lastChecked;
+  final String createdAt;
+  final double? targetPrice;
+  final bool notifyOnDecrease;
+  final bool notifyOnIncrease;
+  final bool notifyOnTarget;
+  final int checkIntervalMinutes;
+  final bool isPaused;
+  final bool isPinned;
+  final bool manuallyPaused;
+  final String? pausedAt;
+  final String? pinnedAt;
+  final double? pendingPrice;
+  final String? pendingPriceAt;
+  final int consecutiveFailures;
+  final String? lastCheckError;
+  final String? availability;
+  final String currencyCode;
+  final String lastSource;
+  final int lastScore;
+
+  /// `store:productId` (or `store:url:…` until the SKU is known). Same
+  /// SKU on two phones merges on this key, not the local UUID.
+  final String identityKey;
+
+  /// ISO-8601 UTC of the last local write. Last-write-wins when a cloud
+  /// catalog exists. NULL on rows created before the v12 migration.
+  final String? updatedAt;
+
+  /// Bumped on every local mutation so a later sync can collapse upserts.
+  final int rev;
+  const WatchProduct(
+      {required this.id,
+      required this.name,
+      required this.url,
+      required this.canonicalUrl,
+      required this.store,
+      this.productId,
+      required this.imageUrl,
+      required this.currentPrice,
+      required this.basePrice,
+      required this.lastChecked,
+      required this.createdAt,
+      this.targetPrice,
+      required this.notifyOnDecrease,
+      required this.notifyOnIncrease,
+      required this.notifyOnTarget,
+      required this.checkIntervalMinutes,
+      required this.isPaused,
+      required this.isPinned,
+      required this.manuallyPaused,
+      this.pausedAt,
+      this.pinnedAt,
+      this.pendingPrice,
+      this.pendingPriceAt,
+      required this.consecutiveFailures,
+      this.lastCheckError,
+      this.availability,
+      required this.currencyCode,
+      required this.lastSource,
+      required this.lastScore,
+      required this.identityKey,
+      this.updatedAt,
+      required this.rev});
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['name'] = Variable<String>(name);
+    map['url'] = Variable<String>(url);
+    map['canonical_url'] = Variable<String>(canonicalUrl);
+    map['store'] = Variable<String>(store);
+    if (!nullToAbsent || productId != null) {
+      map['product_id'] = Variable<String>(productId);
+    }
+    map['image_url'] = Variable<String>(imageUrl);
+    map['current_price'] = Variable<double>(currentPrice);
+    map['base_price'] = Variable<double>(basePrice);
+    map['last_checked'] = Variable<String>(lastChecked);
+    map['created_at'] = Variable<String>(createdAt);
+    if (!nullToAbsent || targetPrice != null) {
+      map['target_price'] = Variable<double>(targetPrice);
+    }
+    map['notify_on_decrease'] = Variable<bool>(notifyOnDecrease);
+    map['notify_on_increase'] = Variable<bool>(notifyOnIncrease);
+    map['notify_on_target'] = Variable<bool>(notifyOnTarget);
+    map['check_interval_minutes'] = Variable<int>(checkIntervalMinutes);
+    map['is_paused'] = Variable<bool>(isPaused);
+    map['is_pinned'] = Variable<bool>(isPinned);
+    map['manually_paused'] = Variable<bool>(manuallyPaused);
+    if (!nullToAbsent || pausedAt != null) {
+      map['paused_at'] = Variable<String>(pausedAt);
+    }
+    if (!nullToAbsent || pinnedAt != null) {
+      map['pinned_at'] = Variable<String>(pinnedAt);
+    }
+    if (!nullToAbsent || pendingPrice != null) {
+      map['pending_price'] = Variable<double>(pendingPrice);
+    }
+    if (!nullToAbsent || pendingPriceAt != null) {
+      map['pending_price_at'] = Variable<String>(pendingPriceAt);
+    }
+    map['consecutive_failures'] = Variable<int>(consecutiveFailures);
+    if (!nullToAbsent || lastCheckError != null) {
+      map['last_check_error'] = Variable<String>(lastCheckError);
+    }
+    if (!nullToAbsent || availability != null) {
+      map['availability'] = Variable<String>(availability);
+    }
+    map['currency_code'] = Variable<String>(currencyCode);
+    map['last_source'] = Variable<String>(lastSource);
+    map['last_score'] = Variable<int>(lastScore);
+    map['identity_key'] = Variable<String>(identityKey);
+    if (!nullToAbsent || updatedAt != null) {
+      map['updated_at'] = Variable<String>(updatedAt);
+    }
+    map['rev'] = Variable<int>(rev);
+    return map;
+  }
+
+  WatchProductsCompanion toCompanion(bool nullToAbsent) {
+    return WatchProductsCompanion(
+      id: Value(id),
+      name: Value(name),
+      url: Value(url),
+      canonicalUrl: Value(canonicalUrl),
+      store: Value(store),
+      productId: productId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(productId),
+      imageUrl: Value(imageUrl),
+      currentPrice: Value(currentPrice),
+      basePrice: Value(basePrice),
+      lastChecked: Value(lastChecked),
+      createdAt: Value(createdAt),
+      targetPrice: targetPrice == null && nullToAbsent
+          ? const Value.absent()
+          : Value(targetPrice),
+      notifyOnDecrease: Value(notifyOnDecrease),
+      notifyOnIncrease: Value(notifyOnIncrease),
+      notifyOnTarget: Value(notifyOnTarget),
+      checkIntervalMinutes: Value(checkIntervalMinutes),
+      isPaused: Value(isPaused),
+      isPinned: Value(isPinned),
+      manuallyPaused: Value(manuallyPaused),
+      pausedAt: pausedAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(pausedAt),
+      pinnedAt: pinnedAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(pinnedAt),
+      pendingPrice: pendingPrice == null && nullToAbsent
+          ? const Value.absent()
+          : Value(pendingPrice),
+      pendingPriceAt: pendingPriceAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(pendingPriceAt),
+      consecutiveFailures: Value(consecutiveFailures),
+      lastCheckError: lastCheckError == null && nullToAbsent
+          ? const Value.absent()
+          : Value(lastCheckError),
+      availability: availability == null && nullToAbsent
+          ? const Value.absent()
+          : Value(availability),
+      currencyCode: Value(currencyCode),
+      lastSource: Value(lastSource),
+      lastScore: Value(lastScore),
+      identityKey: Value(identityKey),
+      updatedAt: updatedAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(updatedAt),
+      rev: Value(rev),
+    );
+  }
+
+  factory WatchProduct.fromJson(Map<String, dynamic> json,
+      {ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return WatchProduct(
+      id: serializer.fromJson<String>(json['id']),
+      name: serializer.fromJson<String>(json['name']),
+      url: serializer.fromJson<String>(json['url']),
+      canonicalUrl: serializer.fromJson<String>(json['canonicalUrl']),
+      store: serializer.fromJson<String>(json['store']),
+      productId: serializer.fromJson<String?>(json['productId']),
+      imageUrl: serializer.fromJson<String>(json['imageUrl']),
+      currentPrice: serializer.fromJson<double>(json['currentPrice']),
+      basePrice: serializer.fromJson<double>(json['basePrice']),
+      lastChecked: serializer.fromJson<String>(json['lastChecked']),
+      createdAt: serializer.fromJson<String>(json['createdAt']),
+      targetPrice: serializer.fromJson<double?>(json['targetPrice']),
+      notifyOnDecrease: serializer.fromJson<bool>(json['notifyOnDecrease']),
+      notifyOnIncrease: serializer.fromJson<bool>(json['notifyOnIncrease']),
+      notifyOnTarget: serializer.fromJson<bool>(json['notifyOnTarget']),
+      checkIntervalMinutes:
+          serializer.fromJson<int>(json['checkIntervalMinutes']),
+      isPaused: serializer.fromJson<bool>(json['isPaused']),
+      isPinned: serializer.fromJson<bool>(json['isPinned']),
+      manuallyPaused: serializer.fromJson<bool>(json['manuallyPaused']),
+      pausedAt: serializer.fromJson<String?>(json['pausedAt']),
+      pinnedAt: serializer.fromJson<String?>(json['pinnedAt']),
+      pendingPrice: serializer.fromJson<double?>(json['pendingPrice']),
+      pendingPriceAt: serializer.fromJson<String?>(json['pendingPriceAt']),
+      consecutiveFailures:
+          serializer.fromJson<int>(json['consecutiveFailures']),
+      lastCheckError: serializer.fromJson<String?>(json['lastCheckError']),
+      availability: serializer.fromJson<String?>(json['availability']),
+      currencyCode: serializer.fromJson<String>(json['currencyCode']),
+      lastSource: serializer.fromJson<String>(json['lastSource']),
+      lastScore: serializer.fromJson<int>(json['lastScore']),
+      identityKey: serializer.fromJson<String>(json['identityKey']),
+      updatedAt: serializer.fromJson<String?>(json['updatedAt']),
+      rev: serializer.fromJson<int>(json['rev']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'name': serializer.toJson<String>(name),
+      'url': serializer.toJson<String>(url),
+      'canonicalUrl': serializer.toJson<String>(canonicalUrl),
+      'store': serializer.toJson<String>(store),
+      'productId': serializer.toJson<String?>(productId),
+      'imageUrl': serializer.toJson<String>(imageUrl),
+      'currentPrice': serializer.toJson<double>(currentPrice),
+      'basePrice': serializer.toJson<double>(basePrice),
+      'lastChecked': serializer.toJson<String>(lastChecked),
+      'createdAt': serializer.toJson<String>(createdAt),
+      'targetPrice': serializer.toJson<double?>(targetPrice),
+      'notifyOnDecrease': serializer.toJson<bool>(notifyOnDecrease),
+      'notifyOnIncrease': serializer.toJson<bool>(notifyOnIncrease),
+      'notifyOnTarget': serializer.toJson<bool>(notifyOnTarget),
+      'checkIntervalMinutes': serializer.toJson<int>(checkIntervalMinutes),
+      'isPaused': serializer.toJson<bool>(isPaused),
+      'isPinned': serializer.toJson<bool>(isPinned),
+      'manuallyPaused': serializer.toJson<bool>(manuallyPaused),
+      'pausedAt': serializer.toJson<String?>(pausedAt),
+      'pinnedAt': serializer.toJson<String?>(pinnedAt),
+      'pendingPrice': serializer.toJson<double?>(pendingPrice),
+      'pendingPriceAt': serializer.toJson<String?>(pendingPriceAt),
+      'consecutiveFailures': serializer.toJson<int>(consecutiveFailures),
+      'lastCheckError': serializer.toJson<String?>(lastCheckError),
+      'availability': serializer.toJson<String?>(availability),
+      'currencyCode': serializer.toJson<String>(currencyCode),
+      'lastSource': serializer.toJson<String>(lastSource),
+      'lastScore': serializer.toJson<int>(lastScore),
+      'identityKey': serializer.toJson<String>(identityKey),
+      'updatedAt': serializer.toJson<String?>(updatedAt),
+      'rev': serializer.toJson<int>(rev),
+    };
+  }
+
+  WatchProduct copyWith(
+          {String? id,
+          String? name,
+          String? url,
+          String? canonicalUrl,
+          String? store,
+          Value<String?> productId = const Value.absent(),
+          String? imageUrl,
+          double? currentPrice,
+          double? basePrice,
+          String? lastChecked,
+          String? createdAt,
+          Value<double?> targetPrice = const Value.absent(),
+          bool? notifyOnDecrease,
+          bool? notifyOnIncrease,
+          bool? notifyOnTarget,
+          int? checkIntervalMinutes,
+          bool? isPaused,
+          bool? isPinned,
+          bool? manuallyPaused,
+          Value<String?> pausedAt = const Value.absent(),
+          Value<String?> pinnedAt = const Value.absent(),
+          Value<double?> pendingPrice = const Value.absent(),
+          Value<String?> pendingPriceAt = const Value.absent(),
+          int? consecutiveFailures,
+          Value<String?> lastCheckError = const Value.absent(),
+          Value<String?> availability = const Value.absent(),
+          String? currencyCode,
+          String? lastSource,
+          int? lastScore,
+          String? identityKey,
+          Value<String?> updatedAt = const Value.absent(),
+          int? rev}) =>
+      WatchProduct(
+        id: id ?? this.id,
+        name: name ?? this.name,
+        url: url ?? this.url,
+        canonicalUrl: canonicalUrl ?? this.canonicalUrl,
+        store: store ?? this.store,
+        productId: productId.present ? productId.value : this.productId,
+        imageUrl: imageUrl ?? this.imageUrl,
+        currentPrice: currentPrice ?? this.currentPrice,
+        basePrice: basePrice ?? this.basePrice,
+        lastChecked: lastChecked ?? this.lastChecked,
+        createdAt: createdAt ?? this.createdAt,
+        targetPrice: targetPrice.present ? targetPrice.value : this.targetPrice,
+        notifyOnDecrease: notifyOnDecrease ?? this.notifyOnDecrease,
+        notifyOnIncrease: notifyOnIncrease ?? this.notifyOnIncrease,
+        notifyOnTarget: notifyOnTarget ?? this.notifyOnTarget,
+        checkIntervalMinutes: checkIntervalMinutes ?? this.checkIntervalMinutes,
+        isPaused: isPaused ?? this.isPaused,
+        isPinned: isPinned ?? this.isPinned,
+        manuallyPaused: manuallyPaused ?? this.manuallyPaused,
+        pausedAt: pausedAt.present ? pausedAt.value : this.pausedAt,
+        pinnedAt: pinnedAt.present ? pinnedAt.value : this.pinnedAt,
+        pendingPrice:
+            pendingPrice.present ? pendingPrice.value : this.pendingPrice,
+        pendingPriceAt:
+            pendingPriceAt.present ? pendingPriceAt.value : this.pendingPriceAt,
+        consecutiveFailures: consecutiveFailures ?? this.consecutiveFailures,
+        lastCheckError:
+            lastCheckError.present ? lastCheckError.value : this.lastCheckError,
+        availability:
+            availability.present ? availability.value : this.availability,
+        currencyCode: currencyCode ?? this.currencyCode,
+        lastSource: lastSource ?? this.lastSource,
+        lastScore: lastScore ?? this.lastScore,
+        identityKey: identityKey ?? this.identityKey,
+        updatedAt: updatedAt.present ? updatedAt.value : this.updatedAt,
+        rev: rev ?? this.rev,
+      );
+  WatchProduct copyWithCompanion(WatchProductsCompanion data) {
+    return WatchProduct(
+      id: data.id.present ? data.id.value : this.id,
+      name: data.name.present ? data.name.value : this.name,
+      url: data.url.present ? data.url.value : this.url,
+      canonicalUrl: data.canonicalUrl.present
+          ? data.canonicalUrl.value
+          : this.canonicalUrl,
+      store: data.store.present ? data.store.value : this.store,
+      productId: data.productId.present ? data.productId.value : this.productId,
+      imageUrl: data.imageUrl.present ? data.imageUrl.value : this.imageUrl,
+      currentPrice: data.currentPrice.present
+          ? data.currentPrice.value
+          : this.currentPrice,
+      basePrice: data.basePrice.present ? data.basePrice.value : this.basePrice,
+      lastChecked:
+          data.lastChecked.present ? data.lastChecked.value : this.lastChecked,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+      targetPrice:
+          data.targetPrice.present ? data.targetPrice.value : this.targetPrice,
+      notifyOnDecrease: data.notifyOnDecrease.present
+          ? data.notifyOnDecrease.value
+          : this.notifyOnDecrease,
+      notifyOnIncrease: data.notifyOnIncrease.present
+          ? data.notifyOnIncrease.value
+          : this.notifyOnIncrease,
+      notifyOnTarget: data.notifyOnTarget.present
+          ? data.notifyOnTarget.value
+          : this.notifyOnTarget,
+      checkIntervalMinutes: data.checkIntervalMinutes.present
+          ? data.checkIntervalMinutes.value
+          : this.checkIntervalMinutes,
+      isPaused: data.isPaused.present ? data.isPaused.value : this.isPaused,
+      isPinned: data.isPinned.present ? data.isPinned.value : this.isPinned,
+      manuallyPaused: data.manuallyPaused.present
+          ? data.manuallyPaused.value
+          : this.manuallyPaused,
+      pausedAt: data.pausedAt.present ? data.pausedAt.value : this.pausedAt,
+      pinnedAt: data.pinnedAt.present ? data.pinnedAt.value : this.pinnedAt,
+      pendingPrice: data.pendingPrice.present
+          ? data.pendingPrice.value
+          : this.pendingPrice,
+      pendingPriceAt: data.pendingPriceAt.present
+          ? data.pendingPriceAt.value
+          : this.pendingPriceAt,
+      consecutiveFailures: data.consecutiveFailures.present
+          ? data.consecutiveFailures.value
+          : this.consecutiveFailures,
+      lastCheckError: data.lastCheckError.present
+          ? data.lastCheckError.value
+          : this.lastCheckError,
+      availability: data.availability.present
+          ? data.availability.value
+          : this.availability,
+      currencyCode: data.currencyCode.present
+          ? data.currencyCode.value
+          : this.currencyCode,
+      lastSource:
+          data.lastSource.present ? data.lastSource.value : this.lastSource,
+      lastScore: data.lastScore.present ? data.lastScore.value : this.lastScore,
+      identityKey:
+          data.identityKey.present ? data.identityKey.value : this.identityKey,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+      rev: data.rev.present ? data.rev.value : this.rev,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('WatchProduct(')
+          ..write('id: $id, ')
+          ..write('name: $name, ')
+          ..write('url: $url, ')
+          ..write('canonicalUrl: $canonicalUrl, ')
+          ..write('store: $store, ')
+          ..write('productId: $productId, ')
+          ..write('imageUrl: $imageUrl, ')
+          ..write('currentPrice: $currentPrice, ')
+          ..write('basePrice: $basePrice, ')
+          ..write('lastChecked: $lastChecked, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('targetPrice: $targetPrice, ')
+          ..write('notifyOnDecrease: $notifyOnDecrease, ')
+          ..write('notifyOnIncrease: $notifyOnIncrease, ')
+          ..write('notifyOnTarget: $notifyOnTarget, ')
+          ..write('checkIntervalMinutes: $checkIntervalMinutes, ')
+          ..write('isPaused: $isPaused, ')
+          ..write('isPinned: $isPinned, ')
+          ..write('manuallyPaused: $manuallyPaused, ')
+          ..write('pausedAt: $pausedAt, ')
+          ..write('pinnedAt: $pinnedAt, ')
+          ..write('pendingPrice: $pendingPrice, ')
+          ..write('pendingPriceAt: $pendingPriceAt, ')
+          ..write('consecutiveFailures: $consecutiveFailures, ')
+          ..write('lastCheckError: $lastCheckError, ')
+          ..write('availability: $availability, ')
+          ..write('currencyCode: $currencyCode, ')
+          ..write('lastSource: $lastSource, ')
+          ..write('lastScore: $lastScore, ')
+          ..write('identityKey: $identityKey, ')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('rev: $rev')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hashAll([
+        id,
+        name,
+        url,
+        canonicalUrl,
+        store,
+        productId,
+        imageUrl,
+        currentPrice,
+        basePrice,
+        lastChecked,
+        createdAt,
+        targetPrice,
+        notifyOnDecrease,
+        notifyOnIncrease,
+        notifyOnTarget,
+        checkIntervalMinutes,
+        isPaused,
+        isPinned,
+        manuallyPaused,
+        pausedAt,
+        pinnedAt,
+        pendingPrice,
+        pendingPriceAt,
+        consecutiveFailures,
+        lastCheckError,
+        availability,
+        currencyCode,
+        lastSource,
+        lastScore,
+        identityKey,
+        updatedAt,
+        rev
+      ]);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is WatchProduct &&
+          other.id == this.id &&
+          other.name == this.name &&
+          other.url == this.url &&
+          other.canonicalUrl == this.canonicalUrl &&
+          other.store == this.store &&
+          other.productId == this.productId &&
+          other.imageUrl == this.imageUrl &&
+          other.currentPrice == this.currentPrice &&
+          other.basePrice == this.basePrice &&
+          other.lastChecked == this.lastChecked &&
+          other.createdAt == this.createdAt &&
+          other.targetPrice == this.targetPrice &&
+          other.notifyOnDecrease == this.notifyOnDecrease &&
+          other.notifyOnIncrease == this.notifyOnIncrease &&
+          other.notifyOnTarget == this.notifyOnTarget &&
+          other.checkIntervalMinutes == this.checkIntervalMinutes &&
+          other.isPaused == this.isPaused &&
+          other.isPinned == this.isPinned &&
+          other.manuallyPaused == this.manuallyPaused &&
+          other.pausedAt == this.pausedAt &&
+          other.pinnedAt == this.pinnedAt &&
+          other.pendingPrice == this.pendingPrice &&
+          other.pendingPriceAt == this.pendingPriceAt &&
+          other.consecutiveFailures == this.consecutiveFailures &&
+          other.lastCheckError == this.lastCheckError &&
+          other.availability == this.availability &&
+          other.currencyCode == this.currencyCode &&
+          other.lastSource == this.lastSource &&
+          other.lastScore == this.lastScore &&
+          other.identityKey == this.identityKey &&
+          other.updatedAt == this.updatedAt &&
+          other.rev == this.rev);
+}
+
+class WatchProductsCompanion extends UpdateCompanion<WatchProduct> {
+  final Value<String> id;
+  final Value<String> name;
+  final Value<String> url;
+  final Value<String> canonicalUrl;
+  final Value<String> store;
+  final Value<String?> productId;
+  final Value<String> imageUrl;
+  final Value<double> currentPrice;
+  final Value<double> basePrice;
+  final Value<String> lastChecked;
+  final Value<String> createdAt;
+  final Value<double?> targetPrice;
+  final Value<bool> notifyOnDecrease;
+  final Value<bool> notifyOnIncrease;
+  final Value<bool> notifyOnTarget;
+  final Value<int> checkIntervalMinutes;
+  final Value<bool> isPaused;
+  final Value<bool> isPinned;
+  final Value<bool> manuallyPaused;
+  final Value<String?> pausedAt;
+  final Value<String?> pinnedAt;
+  final Value<double?> pendingPrice;
+  final Value<String?> pendingPriceAt;
+  final Value<int> consecutiveFailures;
+  final Value<String?> lastCheckError;
+  final Value<String?> availability;
+  final Value<String> currencyCode;
+  final Value<String> lastSource;
+  final Value<int> lastScore;
+  final Value<String> identityKey;
+  final Value<String?> updatedAt;
+  final Value<int> rev;
+  final Value<int> rowid;
+  const WatchProductsCompanion({
+    this.id = const Value.absent(),
+    this.name = const Value.absent(),
+    this.url = const Value.absent(),
+    this.canonicalUrl = const Value.absent(),
+    this.store = const Value.absent(),
+    this.productId = const Value.absent(),
+    this.imageUrl = const Value.absent(),
+    this.currentPrice = const Value.absent(),
+    this.basePrice = const Value.absent(),
+    this.lastChecked = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.targetPrice = const Value.absent(),
+    this.notifyOnDecrease = const Value.absent(),
+    this.notifyOnIncrease = const Value.absent(),
+    this.notifyOnTarget = const Value.absent(),
+    this.checkIntervalMinutes = const Value.absent(),
+    this.isPaused = const Value.absent(),
+    this.isPinned = const Value.absent(),
+    this.manuallyPaused = const Value.absent(),
+    this.pausedAt = const Value.absent(),
+    this.pinnedAt = const Value.absent(),
+    this.pendingPrice = const Value.absent(),
+    this.pendingPriceAt = const Value.absent(),
+    this.consecutiveFailures = const Value.absent(),
+    this.lastCheckError = const Value.absent(),
+    this.availability = const Value.absent(),
+    this.currencyCode = const Value.absent(),
+    this.lastSource = const Value.absent(),
+    this.lastScore = const Value.absent(),
+    this.identityKey = const Value.absent(),
+    this.updatedAt = const Value.absent(),
+    this.rev = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  WatchProductsCompanion.insert({
+    required String id,
+    required String name,
+    required String url,
+    required String canonicalUrl,
+    required String store,
+    this.productId = const Value.absent(),
+    this.imageUrl = const Value.absent(),
+    required double currentPrice,
+    required double basePrice,
+    required String lastChecked,
+    required String createdAt,
+    this.targetPrice = const Value.absent(),
+    this.notifyOnDecrease = const Value.absent(),
+    this.notifyOnIncrease = const Value.absent(),
+    this.notifyOnTarget = const Value.absent(),
+    this.checkIntervalMinutes = const Value.absent(),
+    this.isPaused = const Value.absent(),
+    this.isPinned = const Value.absent(),
+    this.manuallyPaused = const Value.absent(),
+    this.pausedAt = const Value.absent(),
+    this.pinnedAt = const Value.absent(),
+    this.pendingPrice = const Value.absent(),
+    this.pendingPriceAt = const Value.absent(),
+    this.consecutiveFailures = const Value.absent(),
+    this.lastCheckError = const Value.absent(),
+    this.availability = const Value.absent(),
+    this.currencyCode = const Value.absent(),
+    this.lastSource = const Value.absent(),
+    this.lastScore = const Value.absent(),
+    this.identityKey = const Value.absent(),
+    this.updatedAt = const Value.absent(),
+    this.rev = const Value.absent(),
+    this.rowid = const Value.absent(),
+  })  : id = Value(id),
+        name = Value(name),
+        url = Value(url),
+        canonicalUrl = Value(canonicalUrl),
+        store = Value(store),
+        currentPrice = Value(currentPrice),
+        basePrice = Value(basePrice),
+        lastChecked = Value(lastChecked),
+        createdAt = Value(createdAt);
+  static Insertable<WatchProduct> custom({
+    Expression<String>? id,
+    Expression<String>? name,
+    Expression<String>? url,
+    Expression<String>? canonicalUrl,
+    Expression<String>? store,
+    Expression<String>? productId,
+    Expression<String>? imageUrl,
+    Expression<double>? currentPrice,
+    Expression<double>? basePrice,
+    Expression<String>? lastChecked,
+    Expression<String>? createdAt,
+    Expression<double>? targetPrice,
+    Expression<bool>? notifyOnDecrease,
+    Expression<bool>? notifyOnIncrease,
+    Expression<bool>? notifyOnTarget,
+    Expression<int>? checkIntervalMinutes,
+    Expression<bool>? isPaused,
+    Expression<bool>? isPinned,
+    Expression<bool>? manuallyPaused,
+    Expression<String>? pausedAt,
+    Expression<String>? pinnedAt,
+    Expression<double>? pendingPrice,
+    Expression<String>? pendingPriceAt,
+    Expression<int>? consecutiveFailures,
+    Expression<String>? lastCheckError,
+    Expression<String>? availability,
+    Expression<String>? currencyCode,
+    Expression<String>? lastSource,
+    Expression<int>? lastScore,
+    Expression<String>? identityKey,
+    Expression<String>? updatedAt,
+    Expression<int>? rev,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (name != null) 'name': name,
+      if (url != null) 'url': url,
+      if (canonicalUrl != null) 'canonical_url': canonicalUrl,
+      if (store != null) 'store': store,
+      if (productId != null) 'product_id': productId,
+      if (imageUrl != null) 'image_url': imageUrl,
+      if (currentPrice != null) 'current_price': currentPrice,
+      if (basePrice != null) 'base_price': basePrice,
+      if (lastChecked != null) 'last_checked': lastChecked,
+      if (createdAt != null) 'created_at': createdAt,
+      if (targetPrice != null) 'target_price': targetPrice,
+      if (notifyOnDecrease != null) 'notify_on_decrease': notifyOnDecrease,
+      if (notifyOnIncrease != null) 'notify_on_increase': notifyOnIncrease,
+      if (notifyOnTarget != null) 'notify_on_target': notifyOnTarget,
+      if (checkIntervalMinutes != null)
+        'check_interval_minutes': checkIntervalMinutes,
+      if (isPaused != null) 'is_paused': isPaused,
+      if (isPinned != null) 'is_pinned': isPinned,
+      if (manuallyPaused != null) 'manually_paused': manuallyPaused,
+      if (pausedAt != null) 'paused_at': pausedAt,
+      if (pinnedAt != null) 'pinned_at': pinnedAt,
+      if (pendingPrice != null) 'pending_price': pendingPrice,
+      if (pendingPriceAt != null) 'pending_price_at': pendingPriceAt,
+      if (consecutiveFailures != null)
+        'consecutive_failures': consecutiveFailures,
+      if (lastCheckError != null) 'last_check_error': lastCheckError,
+      if (availability != null) 'availability': availability,
+      if (currencyCode != null) 'currency_code': currencyCode,
+      if (lastSource != null) 'last_source': lastSource,
+      if (lastScore != null) 'last_score': lastScore,
+      if (identityKey != null) 'identity_key': identityKey,
+      if (updatedAt != null) 'updated_at': updatedAt,
+      if (rev != null) 'rev': rev,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  WatchProductsCompanion copyWith(
+      {Value<String>? id,
+      Value<String>? name,
+      Value<String>? url,
+      Value<String>? canonicalUrl,
+      Value<String>? store,
+      Value<String?>? productId,
+      Value<String>? imageUrl,
+      Value<double>? currentPrice,
+      Value<double>? basePrice,
+      Value<String>? lastChecked,
+      Value<String>? createdAt,
+      Value<double?>? targetPrice,
+      Value<bool>? notifyOnDecrease,
+      Value<bool>? notifyOnIncrease,
+      Value<bool>? notifyOnTarget,
+      Value<int>? checkIntervalMinutes,
+      Value<bool>? isPaused,
+      Value<bool>? isPinned,
+      Value<bool>? manuallyPaused,
+      Value<String?>? pausedAt,
+      Value<String?>? pinnedAt,
+      Value<double?>? pendingPrice,
+      Value<String?>? pendingPriceAt,
+      Value<int>? consecutiveFailures,
+      Value<String?>? lastCheckError,
+      Value<String?>? availability,
+      Value<String>? currencyCode,
+      Value<String>? lastSource,
+      Value<int>? lastScore,
+      Value<String>? identityKey,
+      Value<String?>? updatedAt,
+      Value<int>? rev,
+      Value<int>? rowid}) {
+    return WatchProductsCompanion(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      url: url ?? this.url,
+      canonicalUrl: canonicalUrl ?? this.canonicalUrl,
+      store: store ?? this.store,
+      productId: productId ?? this.productId,
+      imageUrl: imageUrl ?? this.imageUrl,
+      currentPrice: currentPrice ?? this.currentPrice,
+      basePrice: basePrice ?? this.basePrice,
+      lastChecked: lastChecked ?? this.lastChecked,
+      createdAt: createdAt ?? this.createdAt,
+      targetPrice: targetPrice ?? this.targetPrice,
+      notifyOnDecrease: notifyOnDecrease ?? this.notifyOnDecrease,
+      notifyOnIncrease: notifyOnIncrease ?? this.notifyOnIncrease,
+      notifyOnTarget: notifyOnTarget ?? this.notifyOnTarget,
+      checkIntervalMinutes: checkIntervalMinutes ?? this.checkIntervalMinutes,
+      isPaused: isPaused ?? this.isPaused,
+      isPinned: isPinned ?? this.isPinned,
+      manuallyPaused: manuallyPaused ?? this.manuallyPaused,
+      pausedAt: pausedAt ?? this.pausedAt,
+      pinnedAt: pinnedAt ?? this.pinnedAt,
+      pendingPrice: pendingPrice ?? this.pendingPrice,
+      pendingPriceAt: pendingPriceAt ?? this.pendingPriceAt,
+      consecutiveFailures: consecutiveFailures ?? this.consecutiveFailures,
+      lastCheckError: lastCheckError ?? this.lastCheckError,
+      availability: availability ?? this.availability,
+      currencyCode: currencyCode ?? this.currencyCode,
+      lastSource: lastSource ?? this.lastSource,
+      lastScore: lastScore ?? this.lastScore,
+      identityKey: identityKey ?? this.identityKey,
+      updatedAt: updatedAt ?? this.updatedAt,
+      rev: rev ?? this.rev,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (name.present) {
+      map['name'] = Variable<String>(name.value);
+    }
+    if (url.present) {
+      map['url'] = Variable<String>(url.value);
+    }
+    if (canonicalUrl.present) {
+      map['canonical_url'] = Variable<String>(canonicalUrl.value);
+    }
+    if (store.present) {
+      map['store'] = Variable<String>(store.value);
+    }
+    if (productId.present) {
+      map['product_id'] = Variable<String>(productId.value);
+    }
+    if (imageUrl.present) {
+      map['image_url'] = Variable<String>(imageUrl.value);
+    }
+    if (currentPrice.present) {
+      map['current_price'] = Variable<double>(currentPrice.value);
+    }
+    if (basePrice.present) {
+      map['base_price'] = Variable<double>(basePrice.value);
+    }
+    if (lastChecked.present) {
+      map['last_checked'] = Variable<String>(lastChecked.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<String>(createdAt.value);
+    }
+    if (targetPrice.present) {
+      map['target_price'] = Variable<double>(targetPrice.value);
+    }
+    if (notifyOnDecrease.present) {
+      map['notify_on_decrease'] = Variable<bool>(notifyOnDecrease.value);
+    }
+    if (notifyOnIncrease.present) {
+      map['notify_on_increase'] = Variable<bool>(notifyOnIncrease.value);
+    }
+    if (notifyOnTarget.present) {
+      map['notify_on_target'] = Variable<bool>(notifyOnTarget.value);
+    }
+    if (checkIntervalMinutes.present) {
+      map['check_interval_minutes'] = Variable<int>(checkIntervalMinutes.value);
+    }
+    if (isPaused.present) {
+      map['is_paused'] = Variable<bool>(isPaused.value);
+    }
+    if (isPinned.present) {
+      map['is_pinned'] = Variable<bool>(isPinned.value);
+    }
+    if (manuallyPaused.present) {
+      map['manually_paused'] = Variable<bool>(manuallyPaused.value);
+    }
+    if (pausedAt.present) {
+      map['paused_at'] = Variable<String>(pausedAt.value);
+    }
+    if (pinnedAt.present) {
+      map['pinned_at'] = Variable<String>(pinnedAt.value);
+    }
+    if (pendingPrice.present) {
+      map['pending_price'] = Variable<double>(pendingPrice.value);
+    }
+    if (pendingPriceAt.present) {
+      map['pending_price_at'] = Variable<String>(pendingPriceAt.value);
+    }
+    if (consecutiveFailures.present) {
+      map['consecutive_failures'] = Variable<int>(consecutiveFailures.value);
+    }
+    if (lastCheckError.present) {
+      map['last_check_error'] = Variable<String>(lastCheckError.value);
+    }
+    if (availability.present) {
+      map['availability'] = Variable<String>(availability.value);
+    }
+    if (currencyCode.present) {
+      map['currency_code'] = Variable<String>(currencyCode.value);
+    }
+    if (lastSource.present) {
+      map['last_source'] = Variable<String>(lastSource.value);
+    }
+    if (lastScore.present) {
+      map['last_score'] = Variable<int>(lastScore.value);
+    }
+    if (identityKey.present) {
+      map['identity_key'] = Variable<String>(identityKey.value);
+    }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<String>(updatedAt.value);
+    }
+    if (rev.present) {
+      map['rev'] = Variable<int>(rev.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('WatchProductsCompanion(')
+          ..write('id: $id, ')
+          ..write('name: $name, ')
+          ..write('url: $url, ')
+          ..write('canonicalUrl: $canonicalUrl, ')
+          ..write('store: $store, ')
+          ..write('productId: $productId, ')
+          ..write('imageUrl: $imageUrl, ')
+          ..write('currentPrice: $currentPrice, ')
+          ..write('basePrice: $basePrice, ')
+          ..write('lastChecked: $lastChecked, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('targetPrice: $targetPrice, ')
+          ..write('notifyOnDecrease: $notifyOnDecrease, ')
+          ..write('notifyOnIncrease: $notifyOnIncrease, ')
+          ..write('notifyOnTarget: $notifyOnTarget, ')
+          ..write('checkIntervalMinutes: $checkIntervalMinutes, ')
+          ..write('isPaused: $isPaused, ')
+          ..write('isPinned: $isPinned, ')
+          ..write('manuallyPaused: $manuallyPaused, ')
+          ..write('pausedAt: $pausedAt, ')
+          ..write('pinnedAt: $pinnedAt, ')
+          ..write('pendingPrice: $pendingPrice, ')
+          ..write('pendingPriceAt: $pendingPriceAt, ')
+          ..write('consecutiveFailures: $consecutiveFailures, ')
+          ..write('lastCheckError: $lastCheckError, ')
+          ..write('availability: $availability, ')
+          ..write('currencyCode: $currencyCode, ')
+          ..write('lastSource: $lastSource, ')
+          ..write('lastScore: $lastScore, ')
+          ..write('identityKey: $identityKey, ')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('rev: $rev, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $WatchPriceHistoryTable extends WatchPriceHistory
+    with TableInfo<$WatchPriceHistoryTable, WatchPriceHistoryData> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $WatchPriceHistoryTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+      'id', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _productIdMeta =
+      const VerificationMeta('productId');
+  @override
+  late final GeneratedColumn<String> productId = GeneratedColumn<String>(
+      'product_id', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _priceMeta = const VerificationMeta('price');
+  @override
+  late final GeneratedColumn<double> price = GeneratedColumn<double>(
+      'price', aliasedName, false,
+      type: DriftSqlType.double, requiredDuringInsert: true);
+  static const VerificationMeta _checkedAtMeta =
+      const VerificationMeta('checkedAt');
+  @override
+  late final GeneratedColumn<String> checkedAt = GeneratedColumn<String>(
+      'checked_at', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _sourceMeta = const VerificationMeta('source');
+  @override
+  late final GeneratedColumn<String> source = GeneratedColumn<String>(
+      'source', aliasedName, false,
+      type: DriftSqlType.string,
+      requiredDuringInsert: false,
+      defaultValue: const Constant(''));
+  @override
+  List<GeneratedColumn> get $columns =>
+      [id, productId, price, checkedAt, source];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'watch_price_history';
+  @override
+  VerificationContext validateIntegrity(
+      Insertable<WatchPriceHistoryData> instance,
+      {bool isInserting = false}) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('product_id')) {
+      context.handle(_productIdMeta,
+          productId.isAcceptableOrUnknown(data['product_id']!, _productIdMeta));
+    } else if (isInserting) {
+      context.missing(_productIdMeta);
+    }
+    if (data.containsKey('price')) {
+      context.handle(
+          _priceMeta, price.isAcceptableOrUnknown(data['price']!, _priceMeta));
+    } else if (isInserting) {
+      context.missing(_priceMeta);
+    }
+    if (data.containsKey('checked_at')) {
+      context.handle(_checkedAtMeta,
+          checkedAt.isAcceptableOrUnknown(data['checked_at']!, _checkedAtMeta));
+    } else if (isInserting) {
+      context.missing(_checkedAtMeta);
+    }
+    if (data.containsKey('source')) {
+      context.handle(_sourceMeta,
+          source.isAcceptableOrUnknown(data['source']!, _sourceMeta));
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  WatchPriceHistoryData map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return WatchPriceHistoryData(
+      id: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}id'])!,
+      productId: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}product_id'])!,
+      price: attachedDatabase.typeMapping
+          .read(DriftSqlType.double, data['${effectivePrefix}price'])!,
+      checkedAt: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}checked_at'])!,
+      source: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}source'])!,
+    );
+  }
+
+  @override
+  $WatchPriceHistoryTable createAlias(String alias) {
+    return $WatchPriceHistoryTable(attachedDatabase, alias);
+  }
+}
+
+class WatchPriceHistoryData extends DataClass
+    implements Insertable<WatchPriceHistoryData> {
+  final String id;
+  final String productId;
+  final double price;
+  final String checkedAt;
+  final String source;
+  const WatchPriceHistoryData(
+      {required this.id,
+      required this.productId,
+      required this.price,
+      required this.checkedAt,
+      required this.source});
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['product_id'] = Variable<String>(productId);
+    map['price'] = Variable<double>(price);
+    map['checked_at'] = Variable<String>(checkedAt);
+    map['source'] = Variable<String>(source);
+    return map;
+  }
+
+  WatchPriceHistoryCompanion toCompanion(bool nullToAbsent) {
+    return WatchPriceHistoryCompanion(
+      id: Value(id),
+      productId: Value(productId),
+      price: Value(price),
+      checkedAt: Value(checkedAt),
+      source: Value(source),
+    );
+  }
+
+  factory WatchPriceHistoryData.fromJson(Map<String, dynamic> json,
+      {ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return WatchPriceHistoryData(
+      id: serializer.fromJson<String>(json['id']),
+      productId: serializer.fromJson<String>(json['productId']),
+      price: serializer.fromJson<double>(json['price']),
+      checkedAt: serializer.fromJson<String>(json['checkedAt']),
+      source: serializer.fromJson<String>(json['source']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'productId': serializer.toJson<String>(productId),
+      'price': serializer.toJson<double>(price),
+      'checkedAt': serializer.toJson<String>(checkedAt),
+      'source': serializer.toJson<String>(source),
+    };
+  }
+
+  WatchPriceHistoryData copyWith(
+          {String? id,
+          String? productId,
+          double? price,
+          String? checkedAt,
+          String? source}) =>
+      WatchPriceHistoryData(
+        id: id ?? this.id,
+        productId: productId ?? this.productId,
+        price: price ?? this.price,
+        checkedAt: checkedAt ?? this.checkedAt,
+        source: source ?? this.source,
+      );
+  WatchPriceHistoryData copyWithCompanion(WatchPriceHistoryCompanion data) {
+    return WatchPriceHistoryData(
+      id: data.id.present ? data.id.value : this.id,
+      productId: data.productId.present ? data.productId.value : this.productId,
+      price: data.price.present ? data.price.value : this.price,
+      checkedAt: data.checkedAt.present ? data.checkedAt.value : this.checkedAt,
+      source: data.source.present ? data.source.value : this.source,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('WatchPriceHistoryData(')
+          ..write('id: $id, ')
+          ..write('productId: $productId, ')
+          ..write('price: $price, ')
+          ..write('checkedAt: $checkedAt, ')
+          ..write('source: $source')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(id, productId, price, checkedAt, source);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is WatchPriceHistoryData &&
+          other.id == this.id &&
+          other.productId == this.productId &&
+          other.price == this.price &&
+          other.checkedAt == this.checkedAt &&
+          other.source == this.source);
+}
+
+class WatchPriceHistoryCompanion
+    extends UpdateCompanion<WatchPriceHistoryData> {
+  final Value<String> id;
+  final Value<String> productId;
+  final Value<double> price;
+  final Value<String> checkedAt;
+  final Value<String> source;
+  final Value<int> rowid;
+  const WatchPriceHistoryCompanion({
+    this.id = const Value.absent(),
+    this.productId = const Value.absent(),
+    this.price = const Value.absent(),
+    this.checkedAt = const Value.absent(),
+    this.source = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  WatchPriceHistoryCompanion.insert({
+    required String id,
+    required String productId,
+    required double price,
+    required String checkedAt,
+    this.source = const Value.absent(),
+    this.rowid = const Value.absent(),
+  })  : id = Value(id),
+        productId = Value(productId),
+        price = Value(price),
+        checkedAt = Value(checkedAt);
+  static Insertable<WatchPriceHistoryData> custom({
+    Expression<String>? id,
+    Expression<String>? productId,
+    Expression<double>? price,
+    Expression<String>? checkedAt,
+    Expression<String>? source,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (productId != null) 'product_id': productId,
+      if (price != null) 'price': price,
+      if (checkedAt != null) 'checked_at': checkedAt,
+      if (source != null) 'source': source,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  WatchPriceHistoryCompanion copyWith(
+      {Value<String>? id,
+      Value<String>? productId,
+      Value<double>? price,
+      Value<String>? checkedAt,
+      Value<String>? source,
+      Value<int>? rowid}) {
+    return WatchPriceHistoryCompanion(
+      id: id ?? this.id,
+      productId: productId ?? this.productId,
+      price: price ?? this.price,
+      checkedAt: checkedAt ?? this.checkedAt,
+      source: source ?? this.source,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (productId.present) {
+      map['product_id'] = Variable<String>(productId.value);
+    }
+    if (price.present) {
+      map['price'] = Variable<double>(price.value);
+    }
+    if (checkedAt.present) {
+      map['checked_at'] = Variable<String>(checkedAt.value);
+    }
+    if (source.present) {
+      map['source'] = Variable<String>(source.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('WatchPriceHistoryCompanion(')
+          ..write('id: $id, ')
+          ..write('productId: $productId, ')
+          ..write('price: $price, ')
+          ..write('checkedAt: $checkedAt, ')
+          ..write('source: $source, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $WatchAlertsTable extends WatchAlerts
+    with TableInfo<$WatchAlertsTable, WatchAlert> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $WatchAlertsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+      'id', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _productIdMeta =
+      const VerificationMeta('productId');
+  @override
+  late final GeneratedColumn<String> productId = GeneratedColumn<String>(
+      'product_id', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _productNameMeta =
+      const VerificationMeta('productName');
+  @override
+  late final GeneratedColumn<String> productName = GeneratedColumn<String>(
+      'product_name', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _imageUrlMeta =
+      const VerificationMeta('imageUrl');
+  @override
+  late final GeneratedColumn<String> imageUrl = GeneratedColumn<String>(
+      'image_url', aliasedName, false,
+      type: DriftSqlType.string,
+      requiredDuringInsert: false,
+      defaultValue: const Constant(''));
+  static const VerificationMeta _oldPriceMeta =
+      const VerificationMeta('oldPrice');
+  @override
+  late final GeneratedColumn<double> oldPrice = GeneratedColumn<double>(
+      'old_price', aliasedName, false,
+      type: DriftSqlType.double, requiredDuringInsert: true);
+  static const VerificationMeta _newPriceMeta =
+      const VerificationMeta('newPrice');
+  @override
+  late final GeneratedColumn<double> newPrice = GeneratedColumn<double>(
+      'new_price', aliasedName, false,
+      type: DriftSqlType.double, requiredDuringInsert: true);
+  static const VerificationMeta _reasonMeta = const VerificationMeta('reason');
+  @override
+  late final GeneratedColumn<String> reason = GeneratedColumn<String>(
+      'reason', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _createdAtMeta =
+      const VerificationMeta('createdAt');
+  @override
+  late final GeneratedColumn<String> createdAt = GeneratedColumn<String>(
+      'created_at', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _isReadMeta = const VerificationMeta('isRead');
+  @override
+  late final GeneratedColumn<bool> isRead = GeneratedColumn<bool>(
+      'is_read', aliasedName, false,
+      type: DriftSqlType.bool,
+      requiredDuringInsert: false,
+      defaultConstraints:
+          GeneratedColumn.constraintIsAlways('CHECK ("is_read" IN (0, 1))'),
+      defaultValue: const Constant(false));
+  @override
+  List<GeneratedColumn> get $columns => [
+        id,
+        productId,
+        productName,
+        imageUrl,
+        oldPrice,
+        newPrice,
+        reason,
+        createdAt,
+        isRead
+      ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'watch_alerts';
+  @override
+  VerificationContext validateIntegrity(Insertable<WatchAlert> instance,
+      {bool isInserting = false}) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('product_id')) {
+      context.handle(_productIdMeta,
+          productId.isAcceptableOrUnknown(data['product_id']!, _productIdMeta));
+    } else if (isInserting) {
+      context.missing(_productIdMeta);
+    }
+    if (data.containsKey('product_name')) {
+      context.handle(
+          _productNameMeta,
+          productName.isAcceptableOrUnknown(
+              data['product_name']!, _productNameMeta));
+    } else if (isInserting) {
+      context.missing(_productNameMeta);
+    }
+    if (data.containsKey('image_url')) {
+      context.handle(_imageUrlMeta,
+          imageUrl.isAcceptableOrUnknown(data['image_url']!, _imageUrlMeta));
+    }
+    if (data.containsKey('old_price')) {
+      context.handle(_oldPriceMeta,
+          oldPrice.isAcceptableOrUnknown(data['old_price']!, _oldPriceMeta));
+    } else if (isInserting) {
+      context.missing(_oldPriceMeta);
+    }
+    if (data.containsKey('new_price')) {
+      context.handle(_newPriceMeta,
+          newPrice.isAcceptableOrUnknown(data['new_price']!, _newPriceMeta));
+    } else if (isInserting) {
+      context.missing(_newPriceMeta);
+    }
+    if (data.containsKey('reason')) {
+      context.handle(_reasonMeta,
+          reason.isAcceptableOrUnknown(data['reason']!, _reasonMeta));
+    } else if (isInserting) {
+      context.missing(_reasonMeta);
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(_createdAtMeta,
+          createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta));
+    } else if (isInserting) {
+      context.missing(_createdAtMeta);
+    }
+    if (data.containsKey('is_read')) {
+      context.handle(_isReadMeta,
+          isRead.isAcceptableOrUnknown(data['is_read']!, _isReadMeta));
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  WatchAlert map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return WatchAlert(
+      id: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}id'])!,
+      productId: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}product_id'])!,
+      productName: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}product_name'])!,
+      imageUrl: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}image_url'])!,
+      oldPrice: attachedDatabase.typeMapping
+          .read(DriftSqlType.double, data['${effectivePrefix}old_price'])!,
+      newPrice: attachedDatabase.typeMapping
+          .read(DriftSqlType.double, data['${effectivePrefix}new_price'])!,
+      reason: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}reason'])!,
+      createdAt: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}created_at'])!,
+      isRead: attachedDatabase.typeMapping
+          .read(DriftSqlType.bool, data['${effectivePrefix}is_read'])!,
+    );
+  }
+
+  @override
+  $WatchAlertsTable createAlias(String alias) {
+    return $WatchAlertsTable(attachedDatabase, alias);
+  }
+}
+
+class WatchAlert extends DataClass implements Insertable<WatchAlert> {
+  final String id;
+  final String productId;
+  final String productName;
+  final String imageUrl;
+  final double oldPrice;
+  final double newPrice;
+  final String reason;
+  final String createdAt;
+  final bool isRead;
+  const WatchAlert(
+      {required this.id,
+      required this.productId,
+      required this.productName,
+      required this.imageUrl,
+      required this.oldPrice,
+      required this.newPrice,
+      required this.reason,
+      required this.createdAt,
+      required this.isRead});
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['product_id'] = Variable<String>(productId);
+    map['product_name'] = Variable<String>(productName);
+    map['image_url'] = Variable<String>(imageUrl);
+    map['old_price'] = Variable<double>(oldPrice);
+    map['new_price'] = Variable<double>(newPrice);
+    map['reason'] = Variable<String>(reason);
+    map['created_at'] = Variable<String>(createdAt);
+    map['is_read'] = Variable<bool>(isRead);
+    return map;
+  }
+
+  WatchAlertsCompanion toCompanion(bool nullToAbsent) {
+    return WatchAlertsCompanion(
+      id: Value(id),
+      productId: Value(productId),
+      productName: Value(productName),
+      imageUrl: Value(imageUrl),
+      oldPrice: Value(oldPrice),
+      newPrice: Value(newPrice),
+      reason: Value(reason),
+      createdAt: Value(createdAt),
+      isRead: Value(isRead),
+    );
+  }
+
+  factory WatchAlert.fromJson(Map<String, dynamic> json,
+      {ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return WatchAlert(
+      id: serializer.fromJson<String>(json['id']),
+      productId: serializer.fromJson<String>(json['productId']),
+      productName: serializer.fromJson<String>(json['productName']),
+      imageUrl: serializer.fromJson<String>(json['imageUrl']),
+      oldPrice: serializer.fromJson<double>(json['oldPrice']),
+      newPrice: serializer.fromJson<double>(json['newPrice']),
+      reason: serializer.fromJson<String>(json['reason']),
+      createdAt: serializer.fromJson<String>(json['createdAt']),
+      isRead: serializer.fromJson<bool>(json['isRead']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'productId': serializer.toJson<String>(productId),
+      'productName': serializer.toJson<String>(productName),
+      'imageUrl': serializer.toJson<String>(imageUrl),
+      'oldPrice': serializer.toJson<double>(oldPrice),
+      'newPrice': serializer.toJson<double>(newPrice),
+      'reason': serializer.toJson<String>(reason),
+      'createdAt': serializer.toJson<String>(createdAt),
+      'isRead': serializer.toJson<bool>(isRead),
+    };
+  }
+
+  WatchAlert copyWith(
+          {String? id,
+          String? productId,
+          String? productName,
+          String? imageUrl,
+          double? oldPrice,
+          double? newPrice,
+          String? reason,
+          String? createdAt,
+          bool? isRead}) =>
+      WatchAlert(
+        id: id ?? this.id,
+        productId: productId ?? this.productId,
+        productName: productName ?? this.productName,
+        imageUrl: imageUrl ?? this.imageUrl,
+        oldPrice: oldPrice ?? this.oldPrice,
+        newPrice: newPrice ?? this.newPrice,
+        reason: reason ?? this.reason,
+        createdAt: createdAt ?? this.createdAt,
+        isRead: isRead ?? this.isRead,
+      );
+  WatchAlert copyWithCompanion(WatchAlertsCompanion data) {
+    return WatchAlert(
+      id: data.id.present ? data.id.value : this.id,
+      productId: data.productId.present ? data.productId.value : this.productId,
+      productName:
+          data.productName.present ? data.productName.value : this.productName,
+      imageUrl: data.imageUrl.present ? data.imageUrl.value : this.imageUrl,
+      oldPrice: data.oldPrice.present ? data.oldPrice.value : this.oldPrice,
+      newPrice: data.newPrice.present ? data.newPrice.value : this.newPrice,
+      reason: data.reason.present ? data.reason.value : this.reason,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+      isRead: data.isRead.present ? data.isRead.value : this.isRead,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('WatchAlert(')
+          ..write('id: $id, ')
+          ..write('productId: $productId, ')
+          ..write('productName: $productName, ')
+          ..write('imageUrl: $imageUrl, ')
+          ..write('oldPrice: $oldPrice, ')
+          ..write('newPrice: $newPrice, ')
+          ..write('reason: $reason, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('isRead: $isRead')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(id, productId, productName, imageUrl,
+      oldPrice, newPrice, reason, createdAt, isRead);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is WatchAlert &&
+          other.id == this.id &&
+          other.productId == this.productId &&
+          other.productName == this.productName &&
+          other.imageUrl == this.imageUrl &&
+          other.oldPrice == this.oldPrice &&
+          other.newPrice == this.newPrice &&
+          other.reason == this.reason &&
+          other.createdAt == this.createdAt &&
+          other.isRead == this.isRead);
+}
+
+class WatchAlertsCompanion extends UpdateCompanion<WatchAlert> {
+  final Value<String> id;
+  final Value<String> productId;
+  final Value<String> productName;
+  final Value<String> imageUrl;
+  final Value<double> oldPrice;
+  final Value<double> newPrice;
+  final Value<String> reason;
+  final Value<String> createdAt;
+  final Value<bool> isRead;
+  final Value<int> rowid;
+  const WatchAlertsCompanion({
+    this.id = const Value.absent(),
+    this.productId = const Value.absent(),
+    this.productName = const Value.absent(),
+    this.imageUrl = const Value.absent(),
+    this.oldPrice = const Value.absent(),
+    this.newPrice = const Value.absent(),
+    this.reason = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.isRead = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  WatchAlertsCompanion.insert({
+    required String id,
+    required String productId,
+    required String productName,
+    this.imageUrl = const Value.absent(),
+    required double oldPrice,
+    required double newPrice,
+    required String reason,
+    required String createdAt,
+    this.isRead = const Value.absent(),
+    this.rowid = const Value.absent(),
+  })  : id = Value(id),
+        productId = Value(productId),
+        productName = Value(productName),
+        oldPrice = Value(oldPrice),
+        newPrice = Value(newPrice),
+        reason = Value(reason),
+        createdAt = Value(createdAt);
+  static Insertable<WatchAlert> custom({
+    Expression<String>? id,
+    Expression<String>? productId,
+    Expression<String>? productName,
+    Expression<String>? imageUrl,
+    Expression<double>? oldPrice,
+    Expression<double>? newPrice,
+    Expression<String>? reason,
+    Expression<String>? createdAt,
+    Expression<bool>? isRead,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (productId != null) 'product_id': productId,
+      if (productName != null) 'product_name': productName,
+      if (imageUrl != null) 'image_url': imageUrl,
+      if (oldPrice != null) 'old_price': oldPrice,
+      if (newPrice != null) 'new_price': newPrice,
+      if (reason != null) 'reason': reason,
+      if (createdAt != null) 'created_at': createdAt,
+      if (isRead != null) 'is_read': isRead,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  WatchAlertsCompanion copyWith(
+      {Value<String>? id,
+      Value<String>? productId,
+      Value<String>? productName,
+      Value<String>? imageUrl,
+      Value<double>? oldPrice,
+      Value<double>? newPrice,
+      Value<String>? reason,
+      Value<String>? createdAt,
+      Value<bool>? isRead,
+      Value<int>? rowid}) {
+    return WatchAlertsCompanion(
+      id: id ?? this.id,
+      productId: productId ?? this.productId,
+      productName: productName ?? this.productName,
+      imageUrl: imageUrl ?? this.imageUrl,
+      oldPrice: oldPrice ?? this.oldPrice,
+      newPrice: newPrice ?? this.newPrice,
+      reason: reason ?? this.reason,
+      createdAt: createdAt ?? this.createdAt,
+      isRead: isRead ?? this.isRead,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (productId.present) {
+      map['product_id'] = Variable<String>(productId.value);
+    }
+    if (productName.present) {
+      map['product_name'] = Variable<String>(productName.value);
+    }
+    if (imageUrl.present) {
+      map['image_url'] = Variable<String>(imageUrl.value);
+    }
+    if (oldPrice.present) {
+      map['old_price'] = Variable<double>(oldPrice.value);
+    }
+    if (newPrice.present) {
+      map['new_price'] = Variable<double>(newPrice.value);
+    }
+    if (reason.present) {
+      map['reason'] = Variable<String>(reason.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<String>(createdAt.value);
+    }
+    if (isRead.present) {
+      map['is_read'] = Variable<bool>(isRead.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('WatchAlertsCompanion(')
+          ..write('id: $id, ')
+          ..write('productId: $productId, ')
+          ..write('productName: $productName, ')
+          ..write('imageUrl: $imageUrl, ')
+          ..write('oldPrice: $oldPrice, ')
+          ..write('newPrice: $newPrice, ')
+          ..write('reason: $reason, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('isRead: $isRead, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $WatchTombstonesTable extends WatchTombstones
+    with TableInfo<$WatchTombstonesTable, WatchTombstone> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $WatchTombstonesTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _identityKeyMeta =
+      const VerificationMeta('identityKey');
+  @override
+  late final GeneratedColumn<String> identityKey = GeneratedColumn<String>(
+      'identity_key', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _deletedAtMeta =
+      const VerificationMeta('deletedAt');
+  @override
+  late final GeneratedColumn<String> deletedAt = GeneratedColumn<String>(
+      'deleted_at', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  @override
+  List<GeneratedColumn> get $columns => [identityKey, deletedAt];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'watch_tombstones';
+  @override
+  VerificationContext validateIntegrity(Insertable<WatchTombstone> instance,
+      {bool isInserting = false}) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('identity_key')) {
+      context.handle(
+          _identityKeyMeta,
+          identityKey.isAcceptableOrUnknown(
+              data['identity_key']!, _identityKeyMeta));
+    } else if (isInserting) {
+      context.missing(_identityKeyMeta);
+    }
+    if (data.containsKey('deleted_at')) {
+      context.handle(_deletedAtMeta,
+          deletedAt.isAcceptableOrUnknown(data['deleted_at']!, _deletedAtMeta));
+    } else if (isInserting) {
+      context.missing(_deletedAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {identityKey};
+  @override
+  WatchTombstone map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return WatchTombstone(
+      identityKey: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}identity_key'])!,
+      deletedAt: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}deleted_at'])!,
+    );
+  }
+
+  @override
+  $WatchTombstonesTable createAlias(String alias) {
+    return $WatchTombstonesTable(attachedDatabase, alias);
+  }
+}
+
+class WatchTombstone extends DataClass implements Insertable<WatchTombstone> {
+  final String identityKey;
+  final String deletedAt;
+  const WatchTombstone({required this.identityKey, required this.deletedAt});
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['identity_key'] = Variable<String>(identityKey);
+    map['deleted_at'] = Variable<String>(deletedAt);
+    return map;
+  }
+
+  WatchTombstonesCompanion toCompanion(bool nullToAbsent) {
+    return WatchTombstonesCompanion(
+      identityKey: Value(identityKey),
+      deletedAt: Value(deletedAt),
+    );
+  }
+
+  factory WatchTombstone.fromJson(Map<String, dynamic> json,
+      {ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return WatchTombstone(
+      identityKey: serializer.fromJson<String>(json['identityKey']),
+      deletedAt: serializer.fromJson<String>(json['deletedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'identityKey': serializer.toJson<String>(identityKey),
+      'deletedAt': serializer.toJson<String>(deletedAt),
+    };
+  }
+
+  WatchTombstone copyWith({String? identityKey, String? deletedAt}) =>
+      WatchTombstone(
+        identityKey: identityKey ?? this.identityKey,
+        deletedAt: deletedAt ?? this.deletedAt,
+      );
+  WatchTombstone copyWithCompanion(WatchTombstonesCompanion data) {
+    return WatchTombstone(
+      identityKey:
+          data.identityKey.present ? data.identityKey.value : this.identityKey,
+      deletedAt: data.deletedAt.present ? data.deletedAt.value : this.deletedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('WatchTombstone(')
+          ..write('identityKey: $identityKey, ')
+          ..write('deletedAt: $deletedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(identityKey, deletedAt);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is WatchTombstone &&
+          other.identityKey == this.identityKey &&
+          other.deletedAt == this.deletedAt);
+}
+
+class WatchTombstonesCompanion extends UpdateCompanion<WatchTombstone> {
+  final Value<String> identityKey;
+  final Value<String> deletedAt;
+  final Value<int> rowid;
+  const WatchTombstonesCompanion({
+    this.identityKey = const Value.absent(),
+    this.deletedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  WatchTombstonesCompanion.insert({
+    required String identityKey,
+    required String deletedAt,
+    this.rowid = const Value.absent(),
+  })  : identityKey = Value(identityKey),
+        deletedAt = Value(deletedAt);
+  static Insertable<WatchTombstone> custom({
+    Expression<String>? identityKey,
+    Expression<String>? deletedAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (identityKey != null) 'identity_key': identityKey,
+      if (deletedAt != null) 'deleted_at': deletedAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  WatchTombstonesCompanion copyWith(
+      {Value<String>? identityKey,
+      Value<String>? deletedAt,
+      Value<int>? rowid}) {
+    return WatchTombstonesCompanion(
+      identityKey: identityKey ?? this.identityKey,
+      deletedAt: deletedAt ?? this.deletedAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (identityKey.present) {
+      map['identity_key'] = Variable<String>(identityKey.value);
+    }
+    if (deletedAt.present) {
+      map['deleted_at'] = Variable<String>(deletedAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('WatchTombstonesCompanion(')
+          ..write('identityKey: $identityKey, ')
+          ..write('deletedAt: $deletedAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
@@ -5216,6 +7651,12 @@ abstract class _$AppDatabase extends GeneratedDatabase {
       $SavedSearchChatMessagesTable(this);
   late final $SavedSearchChatSummariesTable savedSearchChatSummaries =
       $SavedSearchChatSummariesTable(this);
+  late final $WatchProductsTable watchProducts = $WatchProductsTable(this);
+  late final $WatchPriceHistoryTable watchPriceHistory =
+      $WatchPriceHistoryTable(this);
+  late final $WatchAlertsTable watchAlerts = $WatchAlertsTable(this);
+  late final $WatchTombstonesTable watchTombstones =
+      $WatchTombstonesTable(this);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -5234,7 +7675,11 @@ abstract class _$AppDatabase extends GeneratedDatabase {
         articleChatSummaries,
         savedSearches,
         savedSearchChatMessages,
-        savedSearchChatSummaries
+        savedSearchChatSummaries,
+        watchProducts,
+        watchPriceHistory,
+        watchAlerts,
+        watchTombstones
       ];
 }
 
@@ -7972,6 +10417,1138 @@ typedef $$SavedSearchChatSummariesTableProcessedTableManager
         ),
         SavedSearchChatSummary,
         PrefetchHooks Function()>;
+typedef $$WatchProductsTableCreateCompanionBuilder = WatchProductsCompanion
+    Function({
+  required String id,
+  required String name,
+  required String url,
+  required String canonicalUrl,
+  required String store,
+  Value<String?> productId,
+  Value<String> imageUrl,
+  required double currentPrice,
+  required double basePrice,
+  required String lastChecked,
+  required String createdAt,
+  Value<double?> targetPrice,
+  Value<bool> notifyOnDecrease,
+  Value<bool> notifyOnIncrease,
+  Value<bool> notifyOnTarget,
+  Value<int> checkIntervalMinutes,
+  Value<bool> isPaused,
+  Value<bool> isPinned,
+  Value<bool> manuallyPaused,
+  Value<String?> pausedAt,
+  Value<String?> pinnedAt,
+  Value<double?> pendingPrice,
+  Value<String?> pendingPriceAt,
+  Value<int> consecutiveFailures,
+  Value<String?> lastCheckError,
+  Value<String?> availability,
+  Value<String> currencyCode,
+  Value<String> lastSource,
+  Value<int> lastScore,
+  Value<String> identityKey,
+  Value<String?> updatedAt,
+  Value<int> rev,
+  Value<int> rowid,
+});
+typedef $$WatchProductsTableUpdateCompanionBuilder = WatchProductsCompanion
+    Function({
+  Value<String> id,
+  Value<String> name,
+  Value<String> url,
+  Value<String> canonicalUrl,
+  Value<String> store,
+  Value<String?> productId,
+  Value<String> imageUrl,
+  Value<double> currentPrice,
+  Value<double> basePrice,
+  Value<String> lastChecked,
+  Value<String> createdAt,
+  Value<double?> targetPrice,
+  Value<bool> notifyOnDecrease,
+  Value<bool> notifyOnIncrease,
+  Value<bool> notifyOnTarget,
+  Value<int> checkIntervalMinutes,
+  Value<bool> isPaused,
+  Value<bool> isPinned,
+  Value<bool> manuallyPaused,
+  Value<String?> pausedAt,
+  Value<String?> pinnedAt,
+  Value<double?> pendingPrice,
+  Value<String?> pendingPriceAt,
+  Value<int> consecutiveFailures,
+  Value<String?> lastCheckError,
+  Value<String?> availability,
+  Value<String> currencyCode,
+  Value<String> lastSource,
+  Value<int> lastScore,
+  Value<String> identityKey,
+  Value<String?> updatedAt,
+  Value<int> rev,
+  Value<int> rowid,
+});
+
+class $$WatchProductsTableFilterComposer
+    extends Composer<_$AppDatabase, $WatchProductsTable> {
+  $$WatchProductsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+      column: $table.id, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get name => $composableBuilder(
+      column: $table.name, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get url => $composableBuilder(
+      column: $table.url, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get canonicalUrl => $composableBuilder(
+      column: $table.canonicalUrl, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get store => $composableBuilder(
+      column: $table.store, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get productId => $composableBuilder(
+      column: $table.productId, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get imageUrl => $composableBuilder(
+      column: $table.imageUrl, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<double> get currentPrice => $composableBuilder(
+      column: $table.currentPrice, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<double> get basePrice => $composableBuilder(
+      column: $table.basePrice, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get lastChecked => $composableBuilder(
+      column: $table.lastChecked, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get createdAt => $composableBuilder(
+      column: $table.createdAt, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<double> get targetPrice => $composableBuilder(
+      column: $table.targetPrice, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<bool> get notifyOnDecrease => $composableBuilder(
+      column: $table.notifyOnDecrease,
+      builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<bool> get notifyOnIncrease => $composableBuilder(
+      column: $table.notifyOnIncrease,
+      builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<bool> get notifyOnTarget => $composableBuilder(
+      column: $table.notifyOnTarget,
+      builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<int> get checkIntervalMinutes => $composableBuilder(
+      column: $table.checkIntervalMinutes,
+      builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<bool> get isPaused => $composableBuilder(
+      column: $table.isPaused, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<bool> get isPinned => $composableBuilder(
+      column: $table.isPinned, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<bool> get manuallyPaused => $composableBuilder(
+      column: $table.manuallyPaused,
+      builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get pausedAt => $composableBuilder(
+      column: $table.pausedAt, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get pinnedAt => $composableBuilder(
+      column: $table.pinnedAt, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<double> get pendingPrice => $composableBuilder(
+      column: $table.pendingPrice, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get pendingPriceAt => $composableBuilder(
+      column: $table.pendingPriceAt,
+      builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<int> get consecutiveFailures => $composableBuilder(
+      column: $table.consecutiveFailures,
+      builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get lastCheckError => $composableBuilder(
+      column: $table.lastCheckError,
+      builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get availability => $composableBuilder(
+      column: $table.availability, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get currencyCode => $composableBuilder(
+      column: $table.currencyCode, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get lastSource => $composableBuilder(
+      column: $table.lastSource, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<int> get lastScore => $composableBuilder(
+      column: $table.lastScore, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get identityKey => $composableBuilder(
+      column: $table.identityKey, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get updatedAt => $composableBuilder(
+      column: $table.updatedAt, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<int> get rev => $composableBuilder(
+      column: $table.rev, builder: (column) => ColumnFilters(column));
+}
+
+class $$WatchProductsTableOrderingComposer
+    extends Composer<_$AppDatabase, $WatchProductsTable> {
+  $$WatchProductsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+      column: $table.id, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get name => $composableBuilder(
+      column: $table.name, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get url => $composableBuilder(
+      column: $table.url, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get canonicalUrl => $composableBuilder(
+      column: $table.canonicalUrl,
+      builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get store => $composableBuilder(
+      column: $table.store, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get productId => $composableBuilder(
+      column: $table.productId, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get imageUrl => $composableBuilder(
+      column: $table.imageUrl, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<double> get currentPrice => $composableBuilder(
+      column: $table.currentPrice,
+      builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<double> get basePrice => $composableBuilder(
+      column: $table.basePrice, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get lastChecked => $composableBuilder(
+      column: $table.lastChecked, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get createdAt => $composableBuilder(
+      column: $table.createdAt, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<double> get targetPrice => $composableBuilder(
+      column: $table.targetPrice, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<bool> get notifyOnDecrease => $composableBuilder(
+      column: $table.notifyOnDecrease,
+      builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<bool> get notifyOnIncrease => $composableBuilder(
+      column: $table.notifyOnIncrease,
+      builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<bool> get notifyOnTarget => $composableBuilder(
+      column: $table.notifyOnTarget,
+      builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<int> get checkIntervalMinutes => $composableBuilder(
+      column: $table.checkIntervalMinutes,
+      builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<bool> get isPaused => $composableBuilder(
+      column: $table.isPaused, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<bool> get isPinned => $composableBuilder(
+      column: $table.isPinned, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<bool> get manuallyPaused => $composableBuilder(
+      column: $table.manuallyPaused,
+      builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get pausedAt => $composableBuilder(
+      column: $table.pausedAt, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get pinnedAt => $composableBuilder(
+      column: $table.pinnedAt, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<double> get pendingPrice => $composableBuilder(
+      column: $table.pendingPrice,
+      builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get pendingPriceAt => $composableBuilder(
+      column: $table.pendingPriceAt,
+      builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<int> get consecutiveFailures => $composableBuilder(
+      column: $table.consecutiveFailures,
+      builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get lastCheckError => $composableBuilder(
+      column: $table.lastCheckError,
+      builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get availability => $composableBuilder(
+      column: $table.availability,
+      builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get currencyCode => $composableBuilder(
+      column: $table.currencyCode,
+      builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get lastSource => $composableBuilder(
+      column: $table.lastSource, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<int> get lastScore => $composableBuilder(
+      column: $table.lastScore, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get identityKey => $composableBuilder(
+      column: $table.identityKey, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get updatedAt => $composableBuilder(
+      column: $table.updatedAt, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<int> get rev => $composableBuilder(
+      column: $table.rev, builder: (column) => ColumnOrderings(column));
+}
+
+class $$WatchProductsTableAnnotationComposer
+    extends Composer<_$AppDatabase, $WatchProductsTable> {
+  $$WatchProductsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get name =>
+      $composableBuilder(column: $table.name, builder: (column) => column);
+
+  GeneratedColumn<String> get url =>
+      $composableBuilder(column: $table.url, builder: (column) => column);
+
+  GeneratedColumn<String> get canonicalUrl => $composableBuilder(
+      column: $table.canonicalUrl, builder: (column) => column);
+
+  GeneratedColumn<String> get store =>
+      $composableBuilder(column: $table.store, builder: (column) => column);
+
+  GeneratedColumn<String> get productId =>
+      $composableBuilder(column: $table.productId, builder: (column) => column);
+
+  GeneratedColumn<String> get imageUrl =>
+      $composableBuilder(column: $table.imageUrl, builder: (column) => column);
+
+  GeneratedColumn<double> get currentPrice => $composableBuilder(
+      column: $table.currentPrice, builder: (column) => column);
+
+  GeneratedColumn<double> get basePrice =>
+      $composableBuilder(column: $table.basePrice, builder: (column) => column);
+
+  GeneratedColumn<String> get lastChecked => $composableBuilder(
+      column: $table.lastChecked, builder: (column) => column);
+
+  GeneratedColumn<String> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+
+  GeneratedColumn<double> get targetPrice => $composableBuilder(
+      column: $table.targetPrice, builder: (column) => column);
+
+  GeneratedColumn<bool> get notifyOnDecrease => $composableBuilder(
+      column: $table.notifyOnDecrease, builder: (column) => column);
+
+  GeneratedColumn<bool> get notifyOnIncrease => $composableBuilder(
+      column: $table.notifyOnIncrease, builder: (column) => column);
+
+  GeneratedColumn<bool> get notifyOnTarget => $composableBuilder(
+      column: $table.notifyOnTarget, builder: (column) => column);
+
+  GeneratedColumn<int> get checkIntervalMinutes => $composableBuilder(
+      column: $table.checkIntervalMinutes, builder: (column) => column);
+
+  GeneratedColumn<bool> get isPaused =>
+      $composableBuilder(column: $table.isPaused, builder: (column) => column);
+
+  GeneratedColumn<bool> get isPinned =>
+      $composableBuilder(column: $table.isPinned, builder: (column) => column);
+
+  GeneratedColumn<bool> get manuallyPaused => $composableBuilder(
+      column: $table.manuallyPaused, builder: (column) => column);
+
+  GeneratedColumn<String> get pausedAt =>
+      $composableBuilder(column: $table.pausedAt, builder: (column) => column);
+
+  GeneratedColumn<String> get pinnedAt =>
+      $composableBuilder(column: $table.pinnedAt, builder: (column) => column);
+
+  GeneratedColumn<double> get pendingPrice => $composableBuilder(
+      column: $table.pendingPrice, builder: (column) => column);
+
+  GeneratedColumn<String> get pendingPriceAt => $composableBuilder(
+      column: $table.pendingPriceAt, builder: (column) => column);
+
+  GeneratedColumn<int> get consecutiveFailures => $composableBuilder(
+      column: $table.consecutiveFailures, builder: (column) => column);
+
+  GeneratedColumn<String> get lastCheckError => $composableBuilder(
+      column: $table.lastCheckError, builder: (column) => column);
+
+  GeneratedColumn<String> get availability => $composableBuilder(
+      column: $table.availability, builder: (column) => column);
+
+  GeneratedColumn<String> get currencyCode => $composableBuilder(
+      column: $table.currencyCode, builder: (column) => column);
+
+  GeneratedColumn<String> get lastSource => $composableBuilder(
+      column: $table.lastSource, builder: (column) => column);
+
+  GeneratedColumn<int> get lastScore =>
+      $composableBuilder(column: $table.lastScore, builder: (column) => column);
+
+  GeneratedColumn<String> get identityKey => $composableBuilder(
+      column: $table.identityKey, builder: (column) => column);
+
+  GeneratedColumn<String> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+
+  GeneratedColumn<int> get rev =>
+      $composableBuilder(column: $table.rev, builder: (column) => column);
+}
+
+class $$WatchProductsTableTableManager extends RootTableManager<
+    _$AppDatabase,
+    $WatchProductsTable,
+    WatchProduct,
+    $$WatchProductsTableFilterComposer,
+    $$WatchProductsTableOrderingComposer,
+    $$WatchProductsTableAnnotationComposer,
+    $$WatchProductsTableCreateCompanionBuilder,
+    $$WatchProductsTableUpdateCompanionBuilder,
+    (
+      WatchProduct,
+      BaseReferences<_$AppDatabase, $WatchProductsTable, WatchProduct>
+    ),
+    WatchProduct,
+    PrefetchHooks Function()> {
+  $$WatchProductsTableTableManager(_$AppDatabase db, $WatchProductsTable table)
+      : super(TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$WatchProductsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$WatchProductsTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$WatchProductsTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback: ({
+            Value<String> id = const Value.absent(),
+            Value<String> name = const Value.absent(),
+            Value<String> url = const Value.absent(),
+            Value<String> canonicalUrl = const Value.absent(),
+            Value<String> store = const Value.absent(),
+            Value<String?> productId = const Value.absent(),
+            Value<String> imageUrl = const Value.absent(),
+            Value<double> currentPrice = const Value.absent(),
+            Value<double> basePrice = const Value.absent(),
+            Value<String> lastChecked = const Value.absent(),
+            Value<String> createdAt = const Value.absent(),
+            Value<double?> targetPrice = const Value.absent(),
+            Value<bool> notifyOnDecrease = const Value.absent(),
+            Value<bool> notifyOnIncrease = const Value.absent(),
+            Value<bool> notifyOnTarget = const Value.absent(),
+            Value<int> checkIntervalMinutes = const Value.absent(),
+            Value<bool> isPaused = const Value.absent(),
+            Value<bool> isPinned = const Value.absent(),
+            Value<bool> manuallyPaused = const Value.absent(),
+            Value<String?> pausedAt = const Value.absent(),
+            Value<String?> pinnedAt = const Value.absent(),
+            Value<double?> pendingPrice = const Value.absent(),
+            Value<String?> pendingPriceAt = const Value.absent(),
+            Value<int> consecutiveFailures = const Value.absent(),
+            Value<String?> lastCheckError = const Value.absent(),
+            Value<String?> availability = const Value.absent(),
+            Value<String> currencyCode = const Value.absent(),
+            Value<String> lastSource = const Value.absent(),
+            Value<int> lastScore = const Value.absent(),
+            Value<String> identityKey = const Value.absent(),
+            Value<String?> updatedAt = const Value.absent(),
+            Value<int> rev = const Value.absent(),
+            Value<int> rowid = const Value.absent(),
+          }) =>
+              WatchProductsCompanion(
+            id: id,
+            name: name,
+            url: url,
+            canonicalUrl: canonicalUrl,
+            store: store,
+            productId: productId,
+            imageUrl: imageUrl,
+            currentPrice: currentPrice,
+            basePrice: basePrice,
+            lastChecked: lastChecked,
+            createdAt: createdAt,
+            targetPrice: targetPrice,
+            notifyOnDecrease: notifyOnDecrease,
+            notifyOnIncrease: notifyOnIncrease,
+            notifyOnTarget: notifyOnTarget,
+            checkIntervalMinutes: checkIntervalMinutes,
+            isPaused: isPaused,
+            isPinned: isPinned,
+            manuallyPaused: manuallyPaused,
+            pausedAt: pausedAt,
+            pinnedAt: pinnedAt,
+            pendingPrice: pendingPrice,
+            pendingPriceAt: pendingPriceAt,
+            consecutiveFailures: consecutiveFailures,
+            lastCheckError: lastCheckError,
+            availability: availability,
+            currencyCode: currencyCode,
+            lastSource: lastSource,
+            lastScore: lastScore,
+            identityKey: identityKey,
+            updatedAt: updatedAt,
+            rev: rev,
+            rowid: rowid,
+          ),
+          createCompanionCallback: ({
+            required String id,
+            required String name,
+            required String url,
+            required String canonicalUrl,
+            required String store,
+            Value<String?> productId = const Value.absent(),
+            Value<String> imageUrl = const Value.absent(),
+            required double currentPrice,
+            required double basePrice,
+            required String lastChecked,
+            required String createdAt,
+            Value<double?> targetPrice = const Value.absent(),
+            Value<bool> notifyOnDecrease = const Value.absent(),
+            Value<bool> notifyOnIncrease = const Value.absent(),
+            Value<bool> notifyOnTarget = const Value.absent(),
+            Value<int> checkIntervalMinutes = const Value.absent(),
+            Value<bool> isPaused = const Value.absent(),
+            Value<bool> isPinned = const Value.absent(),
+            Value<bool> manuallyPaused = const Value.absent(),
+            Value<String?> pausedAt = const Value.absent(),
+            Value<String?> pinnedAt = const Value.absent(),
+            Value<double?> pendingPrice = const Value.absent(),
+            Value<String?> pendingPriceAt = const Value.absent(),
+            Value<int> consecutiveFailures = const Value.absent(),
+            Value<String?> lastCheckError = const Value.absent(),
+            Value<String?> availability = const Value.absent(),
+            Value<String> currencyCode = const Value.absent(),
+            Value<String> lastSource = const Value.absent(),
+            Value<int> lastScore = const Value.absent(),
+            Value<String> identityKey = const Value.absent(),
+            Value<String?> updatedAt = const Value.absent(),
+            Value<int> rev = const Value.absent(),
+            Value<int> rowid = const Value.absent(),
+          }) =>
+              WatchProductsCompanion.insert(
+            id: id,
+            name: name,
+            url: url,
+            canonicalUrl: canonicalUrl,
+            store: store,
+            productId: productId,
+            imageUrl: imageUrl,
+            currentPrice: currentPrice,
+            basePrice: basePrice,
+            lastChecked: lastChecked,
+            createdAt: createdAt,
+            targetPrice: targetPrice,
+            notifyOnDecrease: notifyOnDecrease,
+            notifyOnIncrease: notifyOnIncrease,
+            notifyOnTarget: notifyOnTarget,
+            checkIntervalMinutes: checkIntervalMinutes,
+            isPaused: isPaused,
+            isPinned: isPinned,
+            manuallyPaused: manuallyPaused,
+            pausedAt: pausedAt,
+            pinnedAt: pinnedAt,
+            pendingPrice: pendingPrice,
+            pendingPriceAt: pendingPriceAt,
+            consecutiveFailures: consecutiveFailures,
+            lastCheckError: lastCheckError,
+            availability: availability,
+            currencyCode: currencyCode,
+            lastSource: lastSource,
+            lastScore: lastScore,
+            identityKey: identityKey,
+            updatedAt: updatedAt,
+            rev: rev,
+            rowid: rowid,
+          ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ));
+}
+
+typedef $$WatchProductsTableProcessedTableManager = ProcessedTableManager<
+    _$AppDatabase,
+    $WatchProductsTable,
+    WatchProduct,
+    $$WatchProductsTableFilterComposer,
+    $$WatchProductsTableOrderingComposer,
+    $$WatchProductsTableAnnotationComposer,
+    $$WatchProductsTableCreateCompanionBuilder,
+    $$WatchProductsTableUpdateCompanionBuilder,
+    (
+      WatchProduct,
+      BaseReferences<_$AppDatabase, $WatchProductsTable, WatchProduct>
+    ),
+    WatchProduct,
+    PrefetchHooks Function()>;
+typedef $$WatchPriceHistoryTableCreateCompanionBuilder
+    = WatchPriceHistoryCompanion Function({
+  required String id,
+  required String productId,
+  required double price,
+  required String checkedAt,
+  Value<String> source,
+  Value<int> rowid,
+});
+typedef $$WatchPriceHistoryTableUpdateCompanionBuilder
+    = WatchPriceHistoryCompanion Function({
+  Value<String> id,
+  Value<String> productId,
+  Value<double> price,
+  Value<String> checkedAt,
+  Value<String> source,
+  Value<int> rowid,
+});
+
+class $$WatchPriceHistoryTableFilterComposer
+    extends Composer<_$AppDatabase, $WatchPriceHistoryTable> {
+  $$WatchPriceHistoryTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+      column: $table.id, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get productId => $composableBuilder(
+      column: $table.productId, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<double> get price => $composableBuilder(
+      column: $table.price, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get checkedAt => $composableBuilder(
+      column: $table.checkedAt, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get source => $composableBuilder(
+      column: $table.source, builder: (column) => ColumnFilters(column));
+}
+
+class $$WatchPriceHistoryTableOrderingComposer
+    extends Composer<_$AppDatabase, $WatchPriceHistoryTable> {
+  $$WatchPriceHistoryTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+      column: $table.id, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get productId => $composableBuilder(
+      column: $table.productId, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<double> get price => $composableBuilder(
+      column: $table.price, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get checkedAt => $composableBuilder(
+      column: $table.checkedAt, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get source => $composableBuilder(
+      column: $table.source, builder: (column) => ColumnOrderings(column));
+}
+
+class $$WatchPriceHistoryTableAnnotationComposer
+    extends Composer<_$AppDatabase, $WatchPriceHistoryTable> {
+  $$WatchPriceHistoryTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get productId =>
+      $composableBuilder(column: $table.productId, builder: (column) => column);
+
+  GeneratedColumn<double> get price =>
+      $composableBuilder(column: $table.price, builder: (column) => column);
+
+  GeneratedColumn<String> get checkedAt =>
+      $composableBuilder(column: $table.checkedAt, builder: (column) => column);
+
+  GeneratedColumn<String> get source =>
+      $composableBuilder(column: $table.source, builder: (column) => column);
+}
+
+class $$WatchPriceHistoryTableTableManager extends RootTableManager<
+    _$AppDatabase,
+    $WatchPriceHistoryTable,
+    WatchPriceHistoryData,
+    $$WatchPriceHistoryTableFilterComposer,
+    $$WatchPriceHistoryTableOrderingComposer,
+    $$WatchPriceHistoryTableAnnotationComposer,
+    $$WatchPriceHistoryTableCreateCompanionBuilder,
+    $$WatchPriceHistoryTableUpdateCompanionBuilder,
+    (
+      WatchPriceHistoryData,
+      BaseReferences<_$AppDatabase, $WatchPriceHistoryTable,
+          WatchPriceHistoryData>
+    ),
+    WatchPriceHistoryData,
+    PrefetchHooks Function()> {
+  $$WatchPriceHistoryTableTableManager(
+      _$AppDatabase db, $WatchPriceHistoryTable table)
+      : super(TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$WatchPriceHistoryTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$WatchPriceHistoryTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$WatchPriceHistoryTableAnnotationComposer(
+                  $db: db, $table: table),
+          updateCompanionCallback: ({
+            Value<String> id = const Value.absent(),
+            Value<String> productId = const Value.absent(),
+            Value<double> price = const Value.absent(),
+            Value<String> checkedAt = const Value.absent(),
+            Value<String> source = const Value.absent(),
+            Value<int> rowid = const Value.absent(),
+          }) =>
+              WatchPriceHistoryCompanion(
+            id: id,
+            productId: productId,
+            price: price,
+            checkedAt: checkedAt,
+            source: source,
+            rowid: rowid,
+          ),
+          createCompanionCallback: ({
+            required String id,
+            required String productId,
+            required double price,
+            required String checkedAt,
+            Value<String> source = const Value.absent(),
+            Value<int> rowid = const Value.absent(),
+          }) =>
+              WatchPriceHistoryCompanion.insert(
+            id: id,
+            productId: productId,
+            price: price,
+            checkedAt: checkedAt,
+            source: source,
+            rowid: rowid,
+          ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ));
+}
+
+typedef $$WatchPriceHistoryTableProcessedTableManager = ProcessedTableManager<
+    _$AppDatabase,
+    $WatchPriceHistoryTable,
+    WatchPriceHistoryData,
+    $$WatchPriceHistoryTableFilterComposer,
+    $$WatchPriceHistoryTableOrderingComposer,
+    $$WatchPriceHistoryTableAnnotationComposer,
+    $$WatchPriceHistoryTableCreateCompanionBuilder,
+    $$WatchPriceHistoryTableUpdateCompanionBuilder,
+    (
+      WatchPriceHistoryData,
+      BaseReferences<_$AppDatabase, $WatchPriceHistoryTable,
+          WatchPriceHistoryData>
+    ),
+    WatchPriceHistoryData,
+    PrefetchHooks Function()>;
+typedef $$WatchAlertsTableCreateCompanionBuilder = WatchAlertsCompanion
+    Function({
+  required String id,
+  required String productId,
+  required String productName,
+  Value<String> imageUrl,
+  required double oldPrice,
+  required double newPrice,
+  required String reason,
+  required String createdAt,
+  Value<bool> isRead,
+  Value<int> rowid,
+});
+typedef $$WatchAlertsTableUpdateCompanionBuilder = WatchAlertsCompanion
+    Function({
+  Value<String> id,
+  Value<String> productId,
+  Value<String> productName,
+  Value<String> imageUrl,
+  Value<double> oldPrice,
+  Value<double> newPrice,
+  Value<String> reason,
+  Value<String> createdAt,
+  Value<bool> isRead,
+  Value<int> rowid,
+});
+
+class $$WatchAlertsTableFilterComposer
+    extends Composer<_$AppDatabase, $WatchAlertsTable> {
+  $$WatchAlertsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+      column: $table.id, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get productId => $composableBuilder(
+      column: $table.productId, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get productName => $composableBuilder(
+      column: $table.productName, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get imageUrl => $composableBuilder(
+      column: $table.imageUrl, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<double> get oldPrice => $composableBuilder(
+      column: $table.oldPrice, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<double> get newPrice => $composableBuilder(
+      column: $table.newPrice, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get reason => $composableBuilder(
+      column: $table.reason, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get createdAt => $composableBuilder(
+      column: $table.createdAt, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<bool> get isRead => $composableBuilder(
+      column: $table.isRead, builder: (column) => ColumnFilters(column));
+}
+
+class $$WatchAlertsTableOrderingComposer
+    extends Composer<_$AppDatabase, $WatchAlertsTable> {
+  $$WatchAlertsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+      column: $table.id, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get productId => $composableBuilder(
+      column: $table.productId, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get productName => $composableBuilder(
+      column: $table.productName, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get imageUrl => $composableBuilder(
+      column: $table.imageUrl, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<double> get oldPrice => $composableBuilder(
+      column: $table.oldPrice, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<double> get newPrice => $composableBuilder(
+      column: $table.newPrice, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get reason => $composableBuilder(
+      column: $table.reason, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get createdAt => $composableBuilder(
+      column: $table.createdAt, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<bool> get isRead => $composableBuilder(
+      column: $table.isRead, builder: (column) => ColumnOrderings(column));
+}
+
+class $$WatchAlertsTableAnnotationComposer
+    extends Composer<_$AppDatabase, $WatchAlertsTable> {
+  $$WatchAlertsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get productId =>
+      $composableBuilder(column: $table.productId, builder: (column) => column);
+
+  GeneratedColumn<String> get productName => $composableBuilder(
+      column: $table.productName, builder: (column) => column);
+
+  GeneratedColumn<String> get imageUrl =>
+      $composableBuilder(column: $table.imageUrl, builder: (column) => column);
+
+  GeneratedColumn<double> get oldPrice =>
+      $composableBuilder(column: $table.oldPrice, builder: (column) => column);
+
+  GeneratedColumn<double> get newPrice =>
+      $composableBuilder(column: $table.newPrice, builder: (column) => column);
+
+  GeneratedColumn<String> get reason =>
+      $composableBuilder(column: $table.reason, builder: (column) => column);
+
+  GeneratedColumn<String> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+
+  GeneratedColumn<bool> get isRead =>
+      $composableBuilder(column: $table.isRead, builder: (column) => column);
+}
+
+class $$WatchAlertsTableTableManager extends RootTableManager<
+    _$AppDatabase,
+    $WatchAlertsTable,
+    WatchAlert,
+    $$WatchAlertsTableFilterComposer,
+    $$WatchAlertsTableOrderingComposer,
+    $$WatchAlertsTableAnnotationComposer,
+    $$WatchAlertsTableCreateCompanionBuilder,
+    $$WatchAlertsTableUpdateCompanionBuilder,
+    (WatchAlert, BaseReferences<_$AppDatabase, $WatchAlertsTable, WatchAlert>),
+    WatchAlert,
+    PrefetchHooks Function()> {
+  $$WatchAlertsTableTableManager(_$AppDatabase db, $WatchAlertsTable table)
+      : super(TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$WatchAlertsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$WatchAlertsTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$WatchAlertsTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback: ({
+            Value<String> id = const Value.absent(),
+            Value<String> productId = const Value.absent(),
+            Value<String> productName = const Value.absent(),
+            Value<String> imageUrl = const Value.absent(),
+            Value<double> oldPrice = const Value.absent(),
+            Value<double> newPrice = const Value.absent(),
+            Value<String> reason = const Value.absent(),
+            Value<String> createdAt = const Value.absent(),
+            Value<bool> isRead = const Value.absent(),
+            Value<int> rowid = const Value.absent(),
+          }) =>
+              WatchAlertsCompanion(
+            id: id,
+            productId: productId,
+            productName: productName,
+            imageUrl: imageUrl,
+            oldPrice: oldPrice,
+            newPrice: newPrice,
+            reason: reason,
+            createdAt: createdAt,
+            isRead: isRead,
+            rowid: rowid,
+          ),
+          createCompanionCallback: ({
+            required String id,
+            required String productId,
+            required String productName,
+            Value<String> imageUrl = const Value.absent(),
+            required double oldPrice,
+            required double newPrice,
+            required String reason,
+            required String createdAt,
+            Value<bool> isRead = const Value.absent(),
+            Value<int> rowid = const Value.absent(),
+          }) =>
+              WatchAlertsCompanion.insert(
+            id: id,
+            productId: productId,
+            productName: productName,
+            imageUrl: imageUrl,
+            oldPrice: oldPrice,
+            newPrice: newPrice,
+            reason: reason,
+            createdAt: createdAt,
+            isRead: isRead,
+            rowid: rowid,
+          ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ));
+}
+
+typedef $$WatchAlertsTableProcessedTableManager = ProcessedTableManager<
+    _$AppDatabase,
+    $WatchAlertsTable,
+    WatchAlert,
+    $$WatchAlertsTableFilterComposer,
+    $$WatchAlertsTableOrderingComposer,
+    $$WatchAlertsTableAnnotationComposer,
+    $$WatchAlertsTableCreateCompanionBuilder,
+    $$WatchAlertsTableUpdateCompanionBuilder,
+    (WatchAlert, BaseReferences<_$AppDatabase, $WatchAlertsTable, WatchAlert>),
+    WatchAlert,
+    PrefetchHooks Function()>;
+typedef $$WatchTombstonesTableCreateCompanionBuilder = WatchTombstonesCompanion
+    Function({
+  required String identityKey,
+  required String deletedAt,
+  Value<int> rowid,
+});
+typedef $$WatchTombstonesTableUpdateCompanionBuilder = WatchTombstonesCompanion
+    Function({
+  Value<String> identityKey,
+  Value<String> deletedAt,
+  Value<int> rowid,
+});
+
+class $$WatchTombstonesTableFilterComposer
+    extends Composer<_$AppDatabase, $WatchTombstonesTable> {
+  $$WatchTombstonesTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get identityKey => $composableBuilder(
+      column: $table.identityKey, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get deletedAt => $composableBuilder(
+      column: $table.deletedAt, builder: (column) => ColumnFilters(column));
+}
+
+class $$WatchTombstonesTableOrderingComposer
+    extends Composer<_$AppDatabase, $WatchTombstonesTable> {
+  $$WatchTombstonesTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get identityKey => $composableBuilder(
+      column: $table.identityKey, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get deletedAt => $composableBuilder(
+      column: $table.deletedAt, builder: (column) => ColumnOrderings(column));
+}
+
+class $$WatchTombstonesTableAnnotationComposer
+    extends Composer<_$AppDatabase, $WatchTombstonesTable> {
+  $$WatchTombstonesTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get identityKey => $composableBuilder(
+      column: $table.identityKey, builder: (column) => column);
+
+  GeneratedColumn<String> get deletedAt =>
+      $composableBuilder(column: $table.deletedAt, builder: (column) => column);
+}
+
+class $$WatchTombstonesTableTableManager extends RootTableManager<
+    _$AppDatabase,
+    $WatchTombstonesTable,
+    WatchTombstone,
+    $$WatchTombstonesTableFilterComposer,
+    $$WatchTombstonesTableOrderingComposer,
+    $$WatchTombstonesTableAnnotationComposer,
+    $$WatchTombstonesTableCreateCompanionBuilder,
+    $$WatchTombstonesTableUpdateCompanionBuilder,
+    (
+      WatchTombstone,
+      BaseReferences<_$AppDatabase, $WatchTombstonesTable, WatchTombstone>
+    ),
+    WatchTombstone,
+    PrefetchHooks Function()> {
+  $$WatchTombstonesTableTableManager(
+      _$AppDatabase db, $WatchTombstonesTable table)
+      : super(TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$WatchTombstonesTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$WatchTombstonesTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$WatchTombstonesTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback: ({
+            Value<String> identityKey = const Value.absent(),
+            Value<String> deletedAt = const Value.absent(),
+            Value<int> rowid = const Value.absent(),
+          }) =>
+              WatchTombstonesCompanion(
+            identityKey: identityKey,
+            deletedAt: deletedAt,
+            rowid: rowid,
+          ),
+          createCompanionCallback: ({
+            required String identityKey,
+            required String deletedAt,
+            Value<int> rowid = const Value.absent(),
+          }) =>
+              WatchTombstonesCompanion.insert(
+            identityKey: identityKey,
+            deletedAt: deletedAt,
+            rowid: rowid,
+          ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ));
+}
+
+typedef $$WatchTombstonesTableProcessedTableManager = ProcessedTableManager<
+    _$AppDatabase,
+    $WatchTombstonesTable,
+    WatchTombstone,
+    $$WatchTombstonesTableFilterComposer,
+    $$WatchTombstonesTableOrderingComposer,
+    $$WatchTombstonesTableAnnotationComposer,
+    $$WatchTombstonesTableCreateCompanionBuilder,
+    $$WatchTombstonesTableUpdateCompanionBuilder,
+    (
+      WatchTombstone,
+      BaseReferences<_$AppDatabase, $WatchTombstonesTable, WatchTombstone>
+    ),
+    WatchTombstone,
+    PrefetchHooks Function()>;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -8007,4 +11584,12 @@ class $AppDatabaseManager {
   $$SavedSearchChatSummariesTableTableManager get savedSearchChatSummaries =>
       $$SavedSearchChatSummariesTableTableManager(
           _db, _db.savedSearchChatSummaries);
+  $$WatchProductsTableTableManager get watchProducts =>
+      $$WatchProductsTableTableManager(_db, _db.watchProducts);
+  $$WatchPriceHistoryTableTableManager get watchPriceHistory =>
+      $$WatchPriceHistoryTableTableManager(_db, _db.watchPriceHistory);
+  $$WatchAlertsTableTableManager get watchAlerts =>
+      $$WatchAlertsTableTableManager(_db, _db.watchAlerts);
+  $$WatchTombstonesTableTableManager get watchTombstones =>
+      $$WatchTombstonesTableTableManager(_db, _db.watchTombstones);
 }

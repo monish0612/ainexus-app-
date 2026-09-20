@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 
+import '../notifications/android_status_bar_icon.dart';
 import '../platform/platform_capabilities.dart';
 import 'news_summarize_fg_task.dart';
 import 'telegram_logger.dart';
@@ -131,13 +132,17 @@ class BackgroundTaskCoordinator {
         serviceTypes: const [ForegroundServiceTypes.dataSync],
         notificationTitle: _kNotifTitle,
         notificationText: body,
+        notificationIcon: const NotificationIcon(
+          metaDataName: AndroidStatusBarIcon.manifestMeta,
+          backgroundColor: AndroidStatusBarIcon.accent,
+        ),
         callback: aiBackgroundStartCallback,
       );
       if (result is ServiceRequestSuccess) {
         _serviceActive = true;
         _lastNotifAt = DateTime.now();
-        TLog.i('BgCoord',
-            'foreground service started (${_slots.length} slot(s))');
+        TLog.i(
+            'BgCoord', 'foreground service started (${_slots.length} slot(s))');
         // Catch-up refresh: if any concurrent acquire/release/updateLabel
         // calls landed during the start-service await, their refresh was
         // skipped because `_serviceActive` was still false. Reflect the
@@ -206,6 +211,10 @@ class BackgroundTaskCoordinator {
       await FlutterForegroundTask.updateService(
         notificationTitle: _kNotifTitle,
         notificationText: _buildBody(),
+        notificationIcon: const NotificationIcon(
+          metaDataName: AndroidStatusBarIcon.manifestMeta,
+          backgroundColor: AndroidStatusBarIcon.accent,
+        ),
       );
     } catch (e) {
       // Race with stopService is harmless — an updated body for an

@@ -10,6 +10,8 @@ import '../../core/services/telegram_logger.dart';
 import '../../domain/entities/news_entities.dart' as domain;
 import '../../presentation/screens/news/article_followup_sheet.dart';
 import '../local/database/app_database.dart' as db;
+import '../services/narration_audio_handler.dart';
+import '../services/narration_download_store.dart';
 
 class NewsRepository {
   NewsRepository(this._db, this._apiClient);
@@ -22,6 +24,39 @@ class NewsRepository {
       final articles = rows.map(_rowToArticle).toList()..sort(_compareArticles);
       return articles;
     });
+  }
+
+  /// One-shot snapshot of the local feed (same sort as [watchArticles]).
+  Future<List<domain.Article>> getArticles() async {
+    final rows = await _db.select(_db.newsArticles).get();
+    final articles = rows.map(_rowToArticle).toList()..sort(_compareArticles);
+    return articles;
+  }
+
+  /// Overlay persisted `summaryShort` values onto [articles] so Summarize All
+  /// skips the LLM for anything already cached from a previous session.
+  Future<List<domain.Article>> mergeCachedSummaries(
+    List<domain.Article> articles,
+  ) async {
+    if (articles.isEmpty) return articles;
+    final ids = [for (final a in articles) a.id];
+    final rows = await (_db.select(_db.newsArticles)
+          ..where((t) => t.id.isIn(ids)))
+        .get();
+    final shorts = <String, String>{
+      for (final row in rows)
+        if (row.summaryShort != null && row.summaryShort!.trim().isNotEmpty)
+          row.id: row.summaryShort!.trim(),
+    };
+    if (shorts.isEmpty) return articles;
+    return [
+      for (final a in articles)
+        if (shorts[a.id] case final cached?
+            when (a.summaryShort == null || a.summaryShort!.trim().isEmpty))
+          a.copyWith(summaryShort: cached)
+        else
+          a,
+    ];
   }
 
   /// Returns the number of NEW articles that weren't in the local DB before.
@@ -74,6 +109,7 @@ class NewsRepository {
           await (_db.delete(_db.newsArticles)
                 ..where((t) => t.id.isIn(staleIds)))
               .go();
+          unawaited(dropNarrationFor(staleIds));
           for (final id in staleIds) {
             ArticleFollowUpStore.instance.clear(id);
           }
@@ -141,14 +177,16 @@ class NewsRepository {
   ///
   /// The backend records the article's RSS `guid` in `deleted_guids`, so the
   /// feed sync never re-imports it and it disappears from the website (which
-  /// reads the server directly). Used by the Saved-tab remove button, the
-  /// Movies/General swipe-delete, and the unsaved branch of [markRead].
+  /// reads the server directly). Used by the Saved-tab remove button, For You
+  /// swipe-to-delete on every chip (All, AI News, Finance, Movies, General),
+  /// and the unsaved branch of [markRead].
   ///
   /// Local delete is committed FIRST so the reactive Drift stream rebuilds the
   /// feed within one frame; the server leg is best-effort (a transient failure
   /// is logged, and the row is re-pruned on the next read once the delete
   /// lands). The follow-up chat is cleared last so siblings are untouched.
   Future<void> deleteArticle(String id) async {
+    unawaited(dropNarrationFor([id]));
     await (_db.delete(_db.newsArticles)..where((t) => t.id.equals(id))).go();
 
     try {
@@ -174,6 +212,8 @@ class NewsRepository {
           ..where((t) => t.id.equals(id)))
         .getSingleOrNull();
     if (row == null) return;
+
+    unawaited(NarrationDownloadStore.instance.wipe([id]));
 
     if (!row.isSaved) {
       await deleteArticle(id);
@@ -215,6 +255,7 @@ class NewsRepository {
         .get();
     final unsavedIds = [for (final r in unsavedRows) r.id];
     if (unsavedIds.isEmpty) return 0;
+    unawaited(dropNarrationFor(unsavedIds));
 
     final deleted = await (_db.delete(_db.newsArticles)
           ..where((t) => t.id.isIn(unsavedIds)))
@@ -256,6 +297,7 @@ class NewsRepository {
   Future<({int removed, bool serverOk})> clearAllNews() async {
     final rows = await _db.select(_db.newsArticles).get();
     final ids = [for (final r in rows) r.id];
+    unawaited(dropNarrationFor(ids));
 
     await _db.delete(_db.newsArticles).go();
     for (final id in ids) {

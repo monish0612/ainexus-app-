@@ -1,5 +1,7 @@
 import 'package:intl/intl.dart';
 
+import 'expense_logged_at.dart';
+
 /// Parses an ISO-8601 date/time string without ever throwing.
 ///
 /// Returns the Unix epoch as a stable, sortable fallback when [raw] is null,
@@ -7,8 +9,11 @@ import 'package:intl/intl.dart';
 /// rows). This lets downstream date math, sorting, and charts degrade
 /// gracefully instead of throwing a [FormatException] mid-build and taking
 /// down the entire screen.
-DateTime safeParseDate(String raw) =>
-    DateTime.tryParse(raw) ?? DateTime.fromMillisecondsSinceEpoch(0);
+DateTime safeParseDate(String raw) {
+  final d = DateTime.tryParse(raw);
+  if (d == null) return DateTime.fromMillisecondsSinceEpoch(0);
+  return expenseLocal(d);
+}
 
 NumberFormat? _inrFormat;
 NumberFormat? _inrFormatDecimal;
@@ -69,11 +74,13 @@ String formatCompactRupee(num amount) {
   }
 }
 
-String formatDate(String dateStr) {
+String formatDate(String dateStr, {DateTime? now}) {
   final date = DateTime.tryParse(dateStr);
   if (date == null) return dateStr;
-  final now = DateTime.now();
-  final diff = now.difference(date).inDays;
+  final n = now ?? DateTime.now();
+  final local = expenseLocal(date);
+  final nLocal = expenseLocal(n);
+  final diff = calendarDayDelta(local, nLocal);
 
   if (diff == 0) return 'Today';
   if (diff == 1) return 'Yesterday';
@@ -83,16 +90,17 @@ String formatDate(String dateStr) {
   if (diff > 1 && diff < 7) return '$diff days ago';
 
   try {
-    final sameYear = date.year == now.year;
-    return DateFormat(sameYear ? 'd MMM' : 'd MMM y', 'en_IN').format(date);
+    final sameYear = local.year == nLocal.year;
+    return DateFormat(sameYear ? 'd MMM' : 'd MMM y', 'en_IN').format(local);
   } catch (_) {
-    return '${date.day}/${date.month}/${date.year}';
+    return '${local.day}/${local.month}/${local.year}';
   }
 }
 
 String formatTime(String dateStr) {
-  final date = DateTime.tryParse(dateStr);
-  if (date == null) return '';
+  final parsed = DateTime.tryParse(dateStr);
+  if (parsed == null) return '';
+  final date = parsed.isUtc ? parsed.toLocal() : parsed;
   try {
     return DateFormat('hh:mm a', 'en_IN').format(date);
   } catch (_) {
@@ -100,30 +108,49 @@ String formatTime(String dateStr) {
   }
 }
 
-String formatRelativeTime(DateTime date) {
-  final now = DateTime.now();
-  final diff = now.difference(date);
+/// Group header for Tracker lists: calendar Today / Yesterday / `15 Sep`.
+String formatCalendarDayLabel(DateTime date, {DateTime? now}) {
+  final n = now ?? DateTime.now();
+  final local = expenseLocal(date);
+  final nLocal = expenseLocal(n);
+  final diff = calendarDayDelta(local, nLocal);
+  if (diff == 0) return 'Today';
+  if (diff == 1) return 'Yesterday';
+  try {
+    final sameYear = local.year == nLocal.year;
+    return DateFormat(sameYear ? 'd MMM' : 'd MMM y', 'en_IN').format(local);
+  } catch (_) {
+    return '${local.day}/${local.month}/${local.year}';
+  }
+}
+
+String formatRelativeTime(DateTime date, {DateTime? now}) {
+  final n = now ?? DateTime.now();
+  final local = expenseLocal(date);
+  final nLocal = expenseLocal(n);
+  final dayDelta = calendarDayDelta(local, nLocal);
   String absLabel() => DateFormat(
-        date.year == now.year ? 'd MMM' : 'd MMM yyyy',
+        local.year == nLocal.year ? 'd MMM' : 'd MMM yyyy',
         'en_IN',
-      ).format(date);
+      ).format(local);
 
   // Future-dated entries (e.g. a next-month bill logged in advance).
-  if (diff.isNegative) {
-    final today = DateTime(now.year, now.month, now.day);
-    final target = DateTime(date.year, date.month, date.day);
-    final days = target.difference(today).inDays;
-    if (days <= 0) return 'Later today';
+  if (dayDelta < 0) {
+    final days = -dayDelta;
     if (days == 1) return 'Tomorrow';
     if (days < 7) return 'In $days days';
     return absLabel();
   }
 
-  if (diff.inMinutes < 1) return 'Just now';
-  if (diff.inMinutes < 60) return '${diff.inMinutes} min ago';
-  if (diff.inHours < 24) return '${diff.inHours} hr ago';
-  if (diff.inDays == 1) return 'Yesterday';
-  if (diff.inDays < 7) return '${diff.inDays} days ago';
+  if (dayDelta == 0) {
+    final diff = nLocal.difference(local);
+    if (diff.isNegative) return 'Later today';
+    if (diff.inMinutes < 1) return 'Just now';
+    if (diff.inMinutes < 60) return '${diff.inMinutes} min ago';
+    return '${diff.inHours} hr ago';
+  }
+  if (dayDelta == 1) return 'Yesterday';
+  if (dayDelta < 7) return '$dayDelta days ago';
   return absLabel();
 }
 

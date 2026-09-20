@@ -17,10 +17,12 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../../core/di/injection.dart';
 import '../../../core/platform/platform_capabilities.dart';
 import '../../../core/services/background_task_coordinator.dart';
+import '../../../core/services/followup_history.dart';
 import '../../../core/services/telegram_logger.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../data/services/tutor_ai_service.dart';
 import '../../../domain/entities/tutor_entities.dart';
+import '../../widgets/block_selectable.dart';
 import '../../widgets/provider_picker.dart';
 import '../../widgets/voice_input_button.dart';
 import '../settings/settings_controller.dart';
@@ -161,12 +163,31 @@ class ImageFollowUpStore with WidgetsBindingObserver {
   bool hasPending(String key) => _pendingAiMsgs.containsKey(key);
   List<_ChatMessage> getCached(String key) => _cache[key] ?? const [];
 
+  List<FollowUpMessage> shareMessages(String sessionKey) {
+    final list = _cache[sessionKey];
+    if (list == null || list.isEmpty) return const [];
+    return [
+      for (final m in list)
+        FollowUpMessage(
+          role: m.role,
+          text: m.text,
+          isLoading: m.isLoading,
+          isError: m.isError,
+          model: m.model,
+          sources: [
+            for (final s in m.sources)
+              FollowUpSourceRef(url: s.url, title: s.title),
+          ],
+        ),
+    ];
+  }
+
   // ── Background notification helpers ──────────────────────────────────
 
   static Future<FlutterLocalNotificationsPlugin> _ensureNotifPlugin() async {
     if (_notifPlugin != null) return _notifPlugin!;
     _notifPlugin = FlutterLocalNotificationsPlugin();
-    const android = AndroidInitializationSettings('@mipmap/ic_launcher');
+    const android = AndroidInitializationSettings('ic_notification');
     await _notifPlugin!
         .initialize(const InitializationSettings(android: android));
     return _notifPlugin!;
@@ -185,6 +206,7 @@ class ImageFollowUpStore with WidgetsBindingObserver {
         channelDescription: _kChannelDesc,
         importance: Importance.low,
         priority: Priority.low,
+        icon: 'ic_notification',
         ongoing: true,
         autoCancel: false,
         showProgress: true,
@@ -217,6 +239,7 @@ class ImageFollowUpStore with WidgetsBindingObserver {
         channelDescription: _kChannelDesc,
         importance: Importance.high,
         priority: Priority.high,
+        icon: 'ic_notification',
         category: AndroidNotificationCategory.message,
         color: ui.Color(0xFF4285F4),
       );
@@ -1282,13 +1305,15 @@ class _ImageFollowUpChatState extends ConsumerState<_ImageFollowUpChat>
                     color: const Color(0xFF8B5CF6).withValues(alpha: 0.2),
                   ),
                 ),
-                child: SelectableText(
+                child: ArticleSelectionScope(
+                  child: BlockSelectableText(
                   msg.text,
                   style: GoogleFonts.plusJakartaSans(
                     fontSize: 14,
                     height: 1.6,
                     color: colors.text,
                   ),
+                ),
                 ),
               ),
             ),
@@ -1325,37 +1350,36 @@ class _ImageFollowUpChatState extends ConsumerState<_ImageFollowUpChat>
                 ),
               ),
               child: isError
-                  ? SelectableText(
+                  ? ArticleSelectionScope(
+                      child: BlockSelectableText(
                       msg.text,
                       style: GoogleFonts.plusJakartaSans(
                         fontSize: 14,
                         height: 1.7,
                         color: const Color(0xFFFF6B6B),
                       ),
+                    ),
                     )
-                  : SelectionArea(
-                      child: MarkdownBody(
-                        data: msg.text,
-                        selectable: false,
-                        onTapLink: (_, href, __) async {
-                          if (href == null || href.isEmpty) return;
-                          final uri = Uri.tryParse(href);
-                          if (uri == null) return;
-                          try {
-                            await launchUrl(uri,
-                                mode: LaunchMode.externalApplication);
-                          } catch (e) {
-                            TLog.w('ImageChat',
-                                'Failed to launch URL: $href',
-                                error: e);
-                          }
-                        },
-                        styleSheet: MarkdownStyleSheet(
-                          p: GoogleFonts.plusJakartaSans(
-                            fontSize: 14,
-                            height: 1.7,
-                            color: colors.text,
-                          ),
+                  : BlockSelectableMarkdown(
+                      data: msg.text,
+                      onTapLink: (_, href, __) async {
+                        if (href == null || href.isEmpty) return;
+                        final uri = Uri.tryParse(href);
+                        if (uri == null) return;
+                        try {
+                          await launchUrl(uri,
+                              mode: LaunchMode.externalApplication);
+                        } catch (e) {
+                          TLog.w('ImageChat',
+                              'Failed to launch URL: $href',
+                              error: e);
+                        }
+                      },
+                      styleSheet: MarkdownStyleSheet(
+                        p: GoogleFonts.plusJakartaSans(
+                          fontSize: 14,
+                          height: 1.7,
+                          color: colors.text,
                         ),
                       ),
                     ),

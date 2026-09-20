@@ -53,6 +53,8 @@ void main() {
 
   tearDown(() async {
     await AppTokenStore.instance.clear();
+    AppTokenStore.instance.resetStartupGate();
+    AppTokenStore.instance.refresher = null;
     removeMock();
   });
 
@@ -104,5 +106,16 @@ void main() {
     await AppTokenStore.instance.load(); // swallows, keeps memory
     await AppTokenStore.instance.clear(); // swallows
     expect(AppTokenStore.instance.token, isNull);
+  });
+
+  test('startupReady completes when markStartupReady is called', () async {
+    var ready = false;
+    final wait = AppTokenStore.instance.startupReady.then((_) => ready = true);
+    expect(AppTokenStore.instance.isStartupReady, isFalse);
+    AppTokenStore.instance.markStartupReady();
+    await wait;
+    expect(ready, isTrue);
+    expect(AppTokenStore.instance.isStartupReady, isTrue);
+    await AppTokenStore.instance.startupReady; // already signaled
   });
 }

@@ -4,6 +4,7 @@ import 'dart:ui' as ui;
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
+import '../notifications/android_status_bar_icon.dart';
 import '../platform/platform_capabilities.dart';
 import 'telegram_logger.dart';
 
@@ -61,7 +62,7 @@ class TransferNotification {
   Future<FlutterLocalNotificationsPlugin> _ensureFln() async {
     if (_fln != null) return _fln!;
     _fln = FlutterLocalNotificationsPlugin();
-    const android = AndroidInitializationSettings('@mipmap/ic_launcher');
+    const android = AndroidInitializationSettings('ic_notification');
     await _fln!.initialize(const InitializationSettings(android: android));
     return _fln!;
   }
@@ -77,6 +78,10 @@ class TransferNotification {
       await FlutterForegroundTask.updateService(
         notificationTitle: title,
         notificationText: body,
+        notificationIcon: const NotificationIcon(
+          metaDataName: AndroidStatusBarIcon.manifestMeta,
+          backgroundColor: AndroidStatusBarIcon.accent,
+        ),
       );
       return;
     }
@@ -86,6 +91,10 @@ class TransferNotification {
         serviceId: _serviceId,
         notificationTitle: title,
         notificationText: body,
+        notificationIcon: const NotificationIcon(
+          metaDataName: AndroidStatusBarIcon.manifestMeta,
+          backgroundColor: AndroidStatusBarIcon.accent,
+        ),
         callback: _transferServiceCallback,
       );
       _serviceRunning = result is ServiceRequestSuccess;
@@ -123,6 +132,10 @@ class TransferNotification {
       await FlutterForegroundTask.updateService(
         notificationTitle: title,
         notificationText: '$body · $pct%',
+        notificationIcon: const NotificationIcon(
+          metaDataName: AndroidStatusBarIcon.manifestMeta,
+          backgroundColor: AndroidStatusBarIcon.accent,
+        ),
       );
     } catch (e) {
       TLog.w('TransferNotif', 'show update failed: $e');
@@ -145,6 +158,7 @@ class TransferNotification {
         channelDescription: _channelDesc,
         importance: Importance.defaultImportance,
         priority: Priority.defaultPriority,
+        icon: 'ic_notification',
         autoCancel: true,
         category: AndroidNotificationCategory.status,
         color: _accent,
@@ -177,6 +191,7 @@ class TransferNotification {
         channelDescription: _channelDesc,
         importance: Importance.defaultImportance,
         priority: Priority.defaultPriority,
+        icon: 'ic_notification',
         autoCancel: true,
         category: AndroidNotificationCategory.error,
         color: _accent,

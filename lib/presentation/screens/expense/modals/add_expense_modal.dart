@@ -23,6 +23,7 @@ import '../../../../core/services/hold_to_speak_service.dart';
 import '../../../../core/services/telegram_logger.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/utils/currency_formatter.dart';
+import '../../../../core/utils/expense_logged_at.dart';
 import '../../../../data/services/ai_categorize_service.dart';
 import '../../../../data/services/stt_gateway_service.dart';
 import '../../../../domain/entities/expense_entities.dart';
@@ -967,6 +968,21 @@ class _AddExpenseSheetState extends State<_AddExpenseSheet>
 
     final stream = picked.readStream;
     if (stream != null) {
+      if (kIsWeb) {
+        final chunks = <int>[];
+        await for (final chunk in stream) {
+          chunks.addAll(chunk);
+        }
+        if (chunks.isNotEmpty) {
+          TLog.d(
+            'AddExpense',
+            '📄 Drained readStream in memory (${chunks.length} B)',
+          );
+          return (bytes: Uint8List.fromList(chunks), path: null);
+        }
+        return (bytes: null, path: null);
+      }
+
       final tempDir = await getTemporaryDirectory();
       final outPath =
           '${tempDir.path}/nexus_picked_${DateTime.now().millisecondsSinceEpoch}.pdf';
@@ -1592,20 +1608,9 @@ class _AddExpenseSheetState extends State<_AddExpenseSheet>
 
   // ── Date selector ──────────────────────────────────────────────────────────
 
-  /// The exact timestamp the expense is logged against. When the picked day is
-  /// *today* we keep the current time-of-day so it reads as "just now" in the
-  /// recent list; for any other day we anchor to local noon so the entry sits
-  /// squarely inside that calendar day regardless of timezone/DST.
-  DateTime _resolvedExpenseDate() {
-    final now = DateTime.now();
-    final picked = _selectedDate;
-    if (picked.year == now.year &&
-        picked.month == now.month &&
-        picked.day == now.day) {
-      return now;
-    }
-    return DateTime(picked.year, picked.month, picked.day, 12);
-  }
+  /// Timestamp the expense is logged against: live clock on the picked day.
+  DateTime _resolvedExpenseDate() =>
+      expenseTimestampOnPickedDay(_selectedDate);
 
   Widget _buildDateSelector(AppColors colors, TextTheme textTheme) {
     return ExpenseDatePicker(

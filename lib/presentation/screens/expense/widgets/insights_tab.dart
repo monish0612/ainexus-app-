@@ -5,8 +5,10 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 
+import '../../../../core/services/expense_pace_metrics.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/utils/currency_formatter.dart';
+import '../../../../core/utils/expense_logged_at.dart';
 import '../../../../domain/entities/expense_entities.dart';
 import './expense_item.dart';
 import './salary_insights_card.dart';
@@ -44,6 +46,7 @@ class InsightsTab extends StatefulWidget {
     this.onEasterEgg,
     this.onOpenInvestments,
     this.onOpenLoans,
+    this.onShowTrend,
   });
 
   final List<ExpenseData> expenses;
@@ -57,6 +60,10 @@ class InsightsTab extends StatefulWidget {
   /// Opens the dedicated Loan repayments drill-down (tap on the loan KPI card).
   /// Wired by the parent to the timeframe screen.
   final VoidCallback? onOpenLoans;
+
+  /// Opens the vs-previous / vs-average trend sheet (Tracker used to duplicate
+  /// the chart that already lives on this tab).
+  final VoidCallback? onShowTrend;
 
   @override
   State<InsightsTab> createState() => _InsightsTabState();
@@ -112,6 +119,56 @@ List<ExpenseData> expensesInInsightPeriod(
     return true;
   }).toList();
 }
+
+/// Previous equal-length window for the same Insights [periodKey]. Empty for
+/// All / NT (no matching prior range).
+List<ExpenseData> expensesInPreviousInsightPeriod(
+  List<ExpenseData> all,
+  String periodKey,
+  DateTime now,
+) {
+  if (periodKey == 'all' || periodKey == 'nt') return const [];
+  final spend = all.where((e) => !isNonSpendCategory(e.category));
+  final cut = switch (periodKey) {
+    'week' => now.subtract(const Duration(days: 7)),
+    'month' => now.subtract(const Duration(days: 30)),
+    'm3' => now.subtract(const Duration(days: 90)),
+    'm6' => DateTime(now.year, now.month - 6, now.day),
+    _ => DateTime.fromMillisecondsSinceEpoch(0),
+  };
+  final upper = DateTime(now.year, now.month, now.day, 23, 59, 59, 999);
+  final prev = ExpensePaceMetrics.previousMatchingTimeRange(
+    start: cut,
+    end: upper,
+  );
+  return spend.where((e) {
+    final d = safeParseDate(e.date).toLocal();
+    if (d.isBefore(prev.start)) return false;
+    if (!d.isBefore(prev.end)) return false;
+    return true;
+  }).toList();
+}
+
+double calendarMonthSpend(List<ExpenseData> all, DateTime now) {
+  final start = DateTime(now.year, now.month, 1);
+  final end = DateTime(now.year, now.month + 1, 1);
+  var total = 0.0;
+  for (final e in all) {
+    if (isNonSpendCategory(e.category)) continue;
+    final d = safeParseDate(e.date).toLocal();
+    if (!d.isBefore(start) && d.isBefore(end)) {
+      total += e.amount.toDouble();
+    }
+  }
+  return total;
+}
+
+PaceTxn _paceTxnFromData(ExpenseData e) => PaceTxn(
+      amount: e.amount.toDouble(),
+      category: e.category,
+      date: safeParseDate(e.date),
+      description: e.description,
+    );
 
 const Map<_Period, String> _periodSubtitles = {
   _Period.week: 'last 7 days',
@@ -591,6 +648,25 @@ class _InsightsTabState extends State<InsightsTab> {
     final periodExp = _periodExpenses();
     final trendData = _buildTrendSeries(periodExp, _period);
     final dowSummary = _buildDowSummary(periodExp, _period);
+    final now = DateTime.now();
+    final prevExp = expensesInPreviousInsightPeriod(
+      widget.expenses,
+      _period.name,
+      now,
+    );
+    final rangeFacts = ExpensePaceMetrics.rangeFacts(
+      current: periodExp.map(_paceTxnFromData),
+      previous: prevExp.map(_paceTxnFromData),
+      now: now,
+      monthlyTotals: ExpensePaceMetrics.monthTotalsFrom(
+        widget.expenses.map(_paceTxnFromData),
+      ),
+      periodLabel: _periodSubtitles[_period] ?? 'this period',
+    );
+    final monthSpentForBudget = calendarMonthSpend(widget.expenses, now);
+    final merchants = ExpensePaceMetrics.topMerchants(
+      periodExp.map(_paceTxnFromData),
+    );
 
     final total = periodExp.fold<double>(0, (s, e) => s + e.amount.toDouble());
     final txnCount = periodExp.length;
@@ -947,6 +1023,11 @@ class _InsightsTabState extends State<InsightsTab> {
                 ),
               ),
 
+            if (rangeFacts.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              _FeaturedFactCard(colors: c, facts: rangeFacts),
+            ],
+
             // ── KPI Carousel ──
             Builder(builder: (_) {
               final slides = <_KpiSlide>[
@@ -1079,7 +1160,7 @@ class _InsightsTabState extends State<InsightsTab> {
               const SizedBox(height: 16),
               _BudgetStrip(
                 colors: c,
-                spent: total,
+                spent: monthSpentForBudget,
                 budget: widget.budget,
               ),
             ],
@@ -1093,6 +1174,24 @@ class _InsightsTabState extends State<InsightsTab> {
               subtitle: _period == _Period.all
                   ? 'Monthly totals · all time'
                   : 'Totals · ${_periodSubtitles[_period]}',
+              trailing: widget.onShowTrend == null
+                  ? null
+                  : TextButton(
+                      onPressed: widget.onShowTrend,
+                      style: TextButton.styleFrom(
+                        padding: EdgeInsets.zero,
+                        minimumSize: Size.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                      child: Text(
+                        'Details',
+                        style: GoogleFonts.plusJakartaSans(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: const Color(0xFF818CF8),
+                        ),
+                      ),
+                    ),
             ),
             _ChartCard(
               colors: c,
@@ -1356,6 +1455,29 @@ class _InsightsTabState extends State<InsightsTab> {
                         totalSpend: total,
                         showDivider: i < cardRows.length - 1,
                         txnCount: cardTxnCount[cardRows[i].key] ?? 0,
+                      ),
+                  ],
+                ),
+              ),
+            ],
+
+            if (merchants.isNotEmpty) ...[
+              _SectionTitle(
+                colors: c,
+                title: 'Top merchants',
+                subtitle:
+                    '${merchants.length} · ${_periodSubtitles[_period]}',
+              ),
+              _BreakdownCard(
+                colors: c,
+                child: Column(
+                  children: [
+                    for (var i = 0; i < merchants.length; i++)
+                      _MerchantRow(
+                        colors: c,
+                        merchant: merchants[i],
+                        totalSpend: total,
+                        showDivider: i < merchants.length - 1,
                       ),
                   ],
                 ),
@@ -2231,9 +2353,10 @@ class _KpiDetailSheet extends StatelessWidget {
                       AppColors.accent;
                   final emoji =
                       AppColors.categoryIcons[e.category] ?? '📦';
-                  final d = safeParseDate(e.date).toLocal();
-                  final dateStr =
-                      DateFormat('d MMM · hh:mm a', 'en_IN').format(d);
+                  final dateStr = formatExpenseWhen(
+                    e.date,
+                    comments: e.comments,
+                  );
 
                   return Padding(
                     padding:
@@ -2975,6 +3098,182 @@ class _SparklinePainter extends CustomPainter {
       old.values != values || old.color != color;
 }
 
+class _FeaturedFactCard extends StatelessWidget {
+  const _FeaturedFactCard({
+    required this.colors,
+    required this.facts,
+  });
+
+  final AppColors colors;
+  final RangeFacts facts;
+
+  @override
+  Widget build(BuildContext context) {
+    final primary = facts.primary;
+    if (primary == null) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+        decoration: BoxDecoration(
+          color: colors.bg2,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: colors.border),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 3,
+              height: 18,
+              margin: const EdgeInsets.only(top: 2),
+              decoration: BoxDecoration(
+                color: AppColors.accent,
+                borderRadius: BorderRadius.circular(999),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'SPOTLIGHT',
+                    style: GoogleFonts.plusJakartaSans(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 1.1,
+                      color: AppColors.accent,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    primary.headline,
+                    style: GoogleFonts.plusJakartaSans(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w800,
+                      color: colors.text,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    primary.detail,
+                    style: GoogleFonts.plusJakartaSans(
+                      fontSize: 12,
+                      height: 1.4,
+                      color: colors.text3,
+                    ),
+                  ),
+                  if (facts.secondary != null) ...[
+                    const SizedBox(height: 12),
+                    Divider(height: 1, color: colors.border2),
+                    const SizedBox(height: 10),
+                    Text(
+                      facts.secondary!.headline,
+                      style: GoogleFonts.plusJakartaSans(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: colors.text,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      facts.secondary!.detail,
+                      style: GoogleFonts.plusJakartaSans(
+                        fontSize: 11,
+                        color: colors.text3,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MerchantRow extends StatelessWidget {
+  const _MerchantRow({
+    required this.colors,
+    required this.merchant,
+    required this.totalSpend,
+    required this.showDivider,
+  });
+
+  final AppColors colors;
+  final MerchantTotal merchant;
+  final double totalSpend;
+  final bool showDivider;
+
+  @override
+  Widget build(BuildContext context) {
+    final pct = totalSpend > 0 ? (merchant.total / totalSpend) * 100 : 0.0;
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+          child: Row(
+            children: [
+              Container(
+                width: 38,
+                height: 38,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: AppColors.accent.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Text('🛍️', style: TextStyle(fontSize: 16)),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      merchant.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.plusJakartaSans(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: colors.text,
+                      ),
+                    ),
+                    Text(
+                      '${merchant.count} txn${merchant.count == 1 ? '' : 's'} · ${pct.toStringAsFixed(0)}%',
+                      style: GoogleFonts.plusJakartaSans(
+                        fontSize: 10,
+                        color: colors.text4,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(
+                  formatCurrency(merchant.total),
+                  maxLines: 1,
+                  style: GoogleFonts.plusJakartaSans(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w800,
+                    color: colors.text,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        if (showDivider)
+          Divider(height: 1, thickness: 1, color: colors.border2),
+      ],
+    );
+  }
+}
+
 class _BudgetStrip extends StatelessWidget {
   const _BudgetStrip({
     required this.colors,
@@ -2990,7 +3289,12 @@ class _BudgetStrip extends StatelessWidget {
   Widget build(BuildContext context) {
     final pct = math.min((spent / budget) * 100, 100.0);
     final over = spent > budget;
-    final warn = !over && pct > 75;
+    final warn = ExpensePaceMetrics.isAtRisk(spent: spent, budget: budget);
+    final pace = ExpensePaceMetrics.monthPace(
+      budget: budget,
+      monthSpent: spent,
+      today: DateTime.now(),
+    );
     final pctColor = over
         ? const Color(0xFFF87171)
         : warn
@@ -3021,7 +3325,7 @@ class _BudgetStrip extends StatelessWidget {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text(
-                  'Budget progress',
+                  'This calendar month',
                   style: GoogleFonts.plusJakartaSans(
                     fontSize: 13,
                     fontWeight: FontWeight.w800,
@@ -3039,24 +3343,57 @@ class _BudgetStrip extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 10),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(999),
-              child: SizedBox(
-                height: 9,
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    ColoredBox(color: colors.bg3),
-                    FractionallySizedBox(
-                      widthFactor: pct / 100,
-                      alignment: Alignment.centerLeft,
-                      child: DecoratedBox(
-                        decoration: BoxDecoration(gradient: gradient),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final tickLeft = (constraints.maxWidth * pace.todayFraction)
+                    .clamp(0.0, math.max(0.0, constraints.maxWidth - 2))
+                    .toDouble();
+                return SizedBox(
+                  height: 12,
+                  child: Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      Positioned(
+                        left: 0,
+                        right: 0,
+                        top: 1.5,
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(999),
+                          child: SizedBox(
+                            height: 9,
+                            child: Stack(
+                              fit: StackFit.expand,
+                              children: [
+                                ColoredBox(color: colors.bg3),
+                                FractionallySizedBox(
+                                  widthFactor: pct / 100,
+                                  alignment: Alignment.centerLeft,
+                                  child: DecoratedBox(
+                                    decoration:
+                                        BoxDecoration(gradient: gradient),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
                       ),
-                    ),
-                  ],
-                ),
-              ),
+                      Positioned(
+                        left: tickLeft,
+                        top: 0,
+                        child: Container(
+                          width: 2,
+                          height: 12,
+                          decoration: BoxDecoration(
+                            color: colors.text.withValues(alpha: 0.7),
+                            borderRadius: BorderRadius.circular(1),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              },
             ),
             const SizedBox(height: 8),
             Row(
@@ -3080,6 +3417,17 @@ class _BudgetStrip extends StatelessWidget {
                 ),
               ],
             ),
+            if (pace.remainingSentence.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              Text(
+                pace.remainingSentence,
+                style: GoogleFonts.plusJakartaSans(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  color: colors.text3,
+                ),
+              ),
+            ],
           ],
         ),
       ),
@@ -3092,11 +3440,13 @@ class _SectionTitle extends StatelessWidget {
     required this.colors,
     required this.title,
     this.subtitle,
+    this.trailing,
   });
 
   final AppColors colors;
   final String title;
   final String? subtitle;
+  final Widget? trailing;
 
   @override
   Widget build(BuildContext context) {
@@ -3105,13 +3455,20 @@ class _SectionTitle extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            title,
-            style: GoogleFonts.plusJakartaSans(
-              fontSize: 16,
-              fontWeight: FontWeight.w800,
-              color: colors.text,
-            ),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  title,
+                  style: GoogleFonts.plusJakartaSans(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                    color: colors.text,
+                  ),
+                ),
+              ),
+              if (trailing != null) trailing!,
+            ],
           ),
           if (subtitle != null) ...[
             const SizedBox(height: 2),
@@ -4157,15 +4514,25 @@ class _CardTypeRow extends StatelessWidget {
   final int txnCount;
 
   static const _icons = <String, String>{
+    'DB': '💳',
+    'CC': '🪪',
+    'Cash': '💵',
     'Debit Card': '💳',
     'Credit Card': '🪪',
-    'Cash': '💵',
+  };
+
+  static const _labels = <String, String>{
+    'DB': 'Debit',
+    'CC': 'Credit',
+    'Cash': 'Cash',
   };
 
   static const _iconColors = <String, Color>{
+    'DB': Color(0xFF339AF0),
+    'CC': Color(0xFFCC5DE8),
+    'Cash': Color(0xFF51CF66),
     'Debit Card': Color(0xFF339AF0),
     'Credit Card': Color(0xFFCC5DE8),
-    'Cash': Color(0xFF51CF66),
   };
 
   @override
@@ -4199,7 +4566,7 @@ class _CardTypeRow extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          cardType,
+                          _labels[cardType] ?? cardType,
                           style: GoogleFonts.plusJakartaSans(
                             fontSize: 13,
                             fontWeight: FontWeight.w700,
@@ -4311,7 +4678,10 @@ class _TopExpenseItem extends StatelessWidget {
     final catColor =
         AppColors.categoryColors[expense.category] ?? AppColors.accent;
     final emoji = AppColors.categoryIcons[expense.category] ?? '📦';
-    final d = safeParseDate(expense.date).toLocal();
+    final d = resolveExpenseLoggedAt(
+      expense.date,
+      comments: expense.comments,
+    );
     final dateStr = DateFormat('d MMM', 'en_IN').format(d);
 
     return Column(
@@ -4445,9 +4815,17 @@ class _SearchExpenseRow extends StatelessWidget {
     final catColor =
         AppColors.categoryColors[expense.category] ?? AppColors.accent;
     final emoji = AppColors.categoryIcons[expense.category] ?? '📦';
-    final d = safeParseDate(expense.date).toLocal();
+    final d = resolveExpenseLoggedAt(
+      expense.date,
+      comments: expense.comments,
+    );
     final dateS = DateFormat('d MMM', 'en_IN').format(d);
-    final timeS = DateFormat('hh:mm a', 'en_IN').format(d);
+    final timeS = expenseStampHasClock(
+      expense.date,
+      comments: expense.comments,
+    )
+        ? DateFormat('h:mm a', 'en_IN').format(d)
+        : '';
     final desc = expense.description;
     final idx =
         query.isEmpty ? -1 : desc.toLowerCase().indexOf(query.toLowerCase());

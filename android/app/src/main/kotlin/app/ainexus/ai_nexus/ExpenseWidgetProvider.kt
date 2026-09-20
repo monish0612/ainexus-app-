@@ -191,6 +191,92 @@ class ExpenseWidgetProvider : AppWidgetProvider() {
     private fun parseColorOr(hex: String, fallback: Int): Int =
         ExpenseWidgetLogic.parseHexColor(hex) ?: fallback
 
+    /**
+     * Paints the category donut and stacked legend. Extra legend rows stay
+     * GONE so a one-category month doesn't look like a broken grid.
+     */
+    private fun bindSpendMix(
+        context: Context,
+        views: RemoteViews,
+        slices: List<ExpenseWidgetLogic.PieSlice>,
+    ) {
+        val density = context.resources.displayMetrics.density
+        val sizePx = (88f * density).toInt().coerceIn(72, 320)
+        val bmp = try {
+            ExpenseWidgetCharts.donutBitmap(slices, sizePx)
+        } catch (e: Exception) {
+            Log.w(TAG, "Donut bitmap failed", e)
+            null
+        }
+        if (bmp != null) {
+            views.setImageViewBitmap(R.id.widget_expense_pie, bmp)
+            views.setViewVisibility(R.id.widget_expense_pie, View.VISIBLE)
+        } else {
+            views.setViewVisibility(R.id.widget_expense_pie, View.INVISIBLE)
+        }
+
+        val sweeps = ExpenseWidgetLogic.pieSweeps(slices)
+        bindLegendRow(
+            views, sweeps.getOrNull(0),
+            R.id.widget_expense_legend_1,
+            R.id.widget_expense_topcat_swatch,
+            R.id.widget_expense_topcat_emoji,
+            R.id.widget_expense_topcat_name,
+            R.id.widget_expense_topcat_amount,
+        )
+        bindLegendRow(
+            views, sweeps.getOrNull(1),
+            R.id.widget_expense_legend_2,
+            R.id.widget_expense_slice2_swatch,
+            R.id.widget_expense_slice2_emoji,
+            R.id.widget_expense_slice2_name,
+            R.id.widget_expense_slice2_amount,
+        )
+        bindLegendRow(
+            views, sweeps.getOrNull(2),
+            R.id.widget_expense_legend_3,
+            R.id.widget_expense_slice3_swatch,
+            R.id.widget_expense_slice3_emoji,
+            R.id.widget_expense_slice3_name,
+            R.id.widget_expense_slice3_amount,
+        )
+        bindLegendRow(
+            views, sweeps.getOrNull(3),
+            R.id.widget_expense_legend_4,
+            R.id.widget_expense_slice4_swatch,
+            R.id.widget_expense_slice4_emoji,
+            R.id.widget_expense_slice4_name,
+            R.id.widget_expense_slice4_amount,
+        )
+    }
+
+    private fun bindLegendRow(
+        views: RemoteViews,
+        sweep: ExpenseWidgetLogic.PieSweep?,
+        rowId: Int,
+        swatchId: Int,
+        emojiId: Int,
+        nameId: Int,
+        amountId: Int,
+    ) {
+        if (sweep == null) {
+            views.setViewVisibility(rowId, View.GONE)
+            return
+        }
+        views.setViewVisibility(rowId, View.VISIBLE)
+        val color = parseColorOr(sweep.slice.colorHex, 0xFF8A95A6.toInt())
+        try {
+            views.setInt(swatchId, "setColorFilter", color)
+        } catch (e: Exception) {
+            Log.w(TAG, "Legend swatch tint failed", e)
+        }
+        val emoji = sweep.slice.emoji.ifEmpty { ExpenseWidgetLogic.FALLBACK_EMOJI }
+        views.setTextViewText(emojiId, emoji)
+        views.setTextViewText(nameId, sweep.slice.name.ifEmpty { "—" })
+        views.setTextViewText(amountId, ExpenseWidgetLogic.legendLine(sweep.slice.amount, sweep.percent))
+        views.setTextColor(amountId, color)
+    }
+
     private fun applyTimeProgress(views: RemoteViews, tp: ExpenseWidgetLogic.TimeProgress) {
         views.setTextViewText(R.id.widget_expense_month_label, tp.monthShort)
         views.setProgressBar(R.id.widget_expense_month_bar, 100, tp.monthPercent, false)
@@ -260,6 +346,7 @@ class ExpenseWidgetProvider : AppWidgetProvider() {
         val rawTopEmoji = prefs.getString("flutter.expense_widget_top_cat_emoji", "") ?: ""
         val rawTopAmount = safeParseDouble(prefs, "flutter.expense_widget_top_cat_amount")
         val rawTopColor = prefs.getString("flutter.expense_widget_top_cat_color", "") ?: ""
+        val rawPie = prefs.getString("flutter.expense_widget_pie", "") ?: ""
 
         val todayTotal = if (isDateStale) 0.0 else rawTodayTotal
         val todayCount = if (isDateStale) 0 else rawTodayCount
@@ -269,6 +356,9 @@ class ExpenseWidgetProvider : AppWidgetProvider() {
         val topEmoji = ExpenseWidgetLogic.topEmoji(rawTopEmoji, isMonthStale)
         val topAmount = if (isMonthStale) 0.0 else rawTopAmount
         val topColor = if (isMonthStale) "" else rawTopColor
+        val pieSlices = ExpenseWidgetLogic.effectivePie(
+            rawPie, isMonthStale, topName, topEmoji, topColor, topAmount
+        )
 
         if (isDateStale) {
             Log.d(TAG, "Date stale ($storedDate vs $today) — zeroing today's data for widget $appWidgetId")
@@ -309,11 +399,10 @@ class ExpenseWidgetProvider : AppWidgetProvider() {
 
         val dailyAvg = ExpenseWidgetLogic.dailyAvg(monthSpent, tp.dayOfMonth)
 
-        // ── Stat cards vs. empty state ──
-        // With nothing logged this month the two stat cards read as broken
-        // ("₹0" / "📦 —"), so swap in a single intentional "getting started"
-        // panel that taps straight to Add. Once an entry syncs in, the real
-        // cards return automatically.
+        // ── Spend mix vs. empty state ──
+        // With nothing logged this month the donut would be an empty ring, so
+        // swap in a single "getting started" panel that taps straight to Add.
+        // Once an entry syncs in, the mix card returns automatically.
         if (ExpenseWidgetLogic.isMonthEmpty(monthCount)) {
             views.setViewVisibility(R.id.widget_expense_stats_row, View.GONE)
             views.setViewVisibility(R.id.widget_expense_stats_empty, View.VISIBLE)
@@ -325,24 +414,12 @@ class ExpenseWidgetProvider : AppWidgetProvider() {
             views.setViewVisibility(R.id.widget_expense_stats_row, View.VISIBLE)
             views.setViewVisibility(R.id.widget_expense_stats_empty, View.GONE)
 
-            // ── This Month stat card ──
             views.setTextViewText(R.id.widget_expense_month_value, ExpenseWidgetLogic.formatInrCompact(monthSpent))
             views.setTextViewText(
                 R.id.widget_expense_month_caption,
                 ExpenseWidgetLogic.monthCaption(monthCount, dailyAvg)
             )
-
-            // ── Top Category stat card ──
-            views.setTextViewText(R.id.widget_expense_topcat_emoji, topEmoji)
-            if (topName.isEmpty()) {
-                views.setTextViewText(R.id.widget_expense_topcat_name, "—")
-                views.setTextViewText(R.id.widget_expense_topcat_amount, "₹0")
-                views.setTextColor(R.id.widget_expense_topcat_amount, 0xFF566377.toInt())
-            } else {
-                views.setTextViewText(R.id.widget_expense_topcat_name, topName)
-                views.setTextViewText(R.id.widget_expense_topcat_amount, ExpenseWidgetLogic.formatInrCompact(topAmount))
-                views.setTextColor(R.id.widget_expense_topcat_amount, parseColorOr(topColor, 0xFF8A95A6.toInt()))
-            }
+            bindSpendMix(context, views, pieSlices)
         }
 
         applyTimeProgress(views, tp)

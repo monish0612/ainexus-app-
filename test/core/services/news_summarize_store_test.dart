@@ -7,6 +7,7 @@
 import 'dart:async';
 
 import 'package:dio/dio.dart';
+import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -55,6 +56,7 @@ void main() {
   });
 
   tearDown(() async {
+    store.cancelSession();
     await database.close();
   });
 
@@ -192,5 +194,152 @@ void main() {
       expect(store.statusOf(a.id).status, SummaryStatus.error);
     }
     expect(store.progress.errored, 2);
+  });
+
+  test('mergeCachedSummaries skips the LLM for previously summarized ids',
+      () async {
+    await seedRow('cached-1');
+    await repo.setSummaryShort('cached-1', 'already done');
+    final arts = [article('cached-1')];
+    expect(arts.first.summaryShort, isNull);
+
+    final hydrated = await repo.mergeCachedSummaries(arts);
+    expect(hydrated.single.summaryShort, 'already done');
+
+    store.start(articles: hydrated, service: service, repository: repo);
+    expect(service.calls, 0);
+    expect(store.statusOf('cached-1').status, SummaryStatus.ready);
+  });
+
+  test('successful batches release the slot so the session can finish',
+      () async {
+    final arts = freshArticles(3);
+    for (final a in arts) {
+      await seedRow(a.id);
+    }
+
+    store.start(articles: arts, service: service, repository: repo);
+    await settledAll(arts.map((a) => a.id).toList());
+
+    expect(store.progress.ready, 3);
+    expect(store.hasActiveSession, isFalse,
+        reason: 'leaking _activeCount left the resume pill stuck forever');
+  });
+
+  test('100-article mixed pile reuses cache and finishes every pending row',
+      () async {
+    final arts = <Article>[];
+    for (var i = 0; i < 100; i++) {
+      final id = 'mix-$i';
+      await seedRow(id);
+      if (i < 70) {
+        await repo.setSummaryShort(id, 'cached $id');
+        arts.add(article(id, summaryShort: 'cached $id'));
+      } else {
+        arts.add(article(id));
+      }
+    }
+
+    store.start(articles: arts, service: service, repository: repo);
+    await settledAll(arts.map((a) => a.id).toList());
+
+    expect(store.progress.ready, 100);
+    expect(store.progress.errored, 0);
+    expect(store.hasActiveSession, isFalse);
+    expect(service.articlesSeen, 30,
+        reason: 'only the 30 uncached rows should hit the LLM');
+    expect(service.calls, 3, reason: '30 pending / 10 per batch');
+  });
+
+  test('80+ pending pile runs at huge concurrency and still settles', () async {
+    var inFlight = 0;
+    var maxInFlight = 0;
+    service.onCall = (articles, i) async {
+      inFlight++;
+      if (inFlight > maxInFlight) maxInFlight = inFlight;
+      await Future<void>.delayed(const Duration(milliseconds: 40));
+      inFlight--;
+      return {for (final a in articles) a.id: 'summary for ${a.id}'};
+    };
+
+    final arts = freshArticles(80);
+    for (final a in arts) {
+      await seedRow(a.id);
+    }
+
+    store.start(articles: arts, service: service, repository: repo);
+    await settledAll(arts.map((a) => a.id).toList());
+
+    expect(store.progress.ready, 80);
+    expect(store.hasActiveSession, isFalse);
+    expect(maxInFlight, NewsSummarizeStore.kMaxConcurrentHuge);
+    expect(service.calls, 8, reason: '80 / 10 = 8 batches');
+  });
+
+  test('transient 503 retries then succeeds without extra token spend later',
+      () async {
+    var calls = 0;
+    service.onCall = (articles, i) async {
+      calls++;
+      if (calls == 1) {
+        throw DioException(
+          requestOptions: RequestOptions(path: '/summarize'),
+          type: DioExceptionType.badResponse,
+          response: Response(
+            requestOptions: RequestOptions(path: '/summarize'),
+            statusCode: 503,
+          ),
+        );
+      }
+      return {for (final a in articles) a.id: 'recovered ${a.id}'};
+    };
+
+    final arts = freshArticles(2);
+    for (final a in arts) {
+      await seedRow(a.id);
+    }
+
+    store.start(articles: arts, service: service, repository: repo);
+    await settledAll(arts.map((a) => a.id).toList());
+
+    expect(calls, 2);
+    expect(store.progress.ready, 2);
+    expect(store.progress.errored, 0);
+    expect(store.hasActiveSession, isFalse);
+  });
+
+  test('whitespace-only cached summaries are treated as missing', () async {
+    await seedRow('blank-1');
+    await (database.update(database.newsArticles)
+          ..where((t) => t.id.equals('blank-1')))
+        .write(db.NewsArticlesCompanion(summaryShort: Value('   ')));
+
+    final arts = [article('blank-1')];
+    final hydrated = await repo.mergeCachedSummaries(arts);
+    expect(hydrated.single.summaryShort, isNull);
+
+    store.start(articles: hydrated, service: service, repository: repo);
+    await settledAll(['blank-1']);
+    expect(service.calls, 1);
+    expect(store.statusOf('blank-1').status, SummaryStatus.ready);
+  });
+
+  test('mergeCachedSummaries on an empty pile is a no-op', () async {
+    expect(await repo.mergeCachedSummaries(const []), isEmpty);
+  });
+
+  test('mergeCachedSummaries keeps an in-memory summary and fills the rest',
+      () async {
+    await seedRow('keep-mem');
+    await seedRow('from-db');
+    await repo.setSummaryShort('keep-mem', 'db older');
+    await repo.setSummaryShort('from-db', 'from db');
+
+    final hydrated = await repo.mergeCachedSummaries([
+      article('keep-mem', summaryShort: 'in memory'),
+      article('from-db'),
+    ]);
+    expect(hydrated[0].summaryShort, 'in memory');
+    expect(hydrated[1].summaryShort, 'from db');
   });
 }

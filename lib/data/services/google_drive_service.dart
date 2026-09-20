@@ -344,7 +344,9 @@ class GoogleDriveService {
     }
     await _ensureAuth();
     try {
-      var q = "'$_kFolderId' in parents and trashed = false";
+      var q =
+          "'$_kFolderId' in parents and trashed = false"
+          " and mimeType != 'application/vnd.google-apps.folder'";
       if (searchQuery != null && searchQuery.trim().isNotEmpty) {
         final escaped = searchQuery.replaceAll("'", "\\'");
         q += " and name contains '$escaped'";
@@ -375,7 +377,9 @@ class GoogleDriveService {
     try {
       final escaped = query.replaceAll("'", "\\'");
       final q =
-          "'$_kFolderId' in parents and trashed = false and (name contains '$escaped' or fullText contains '$escaped')";
+          "'$_kFolderId' in parents and trashed = false"
+          " and mimeType != 'application/vnd.google-apps.folder'"
+          " and (name contains '$escaped' or fullText contains '$escaped')";
 
       final fileList = await _driveApi!.files.list(
         q: q,

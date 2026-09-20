@@ -23,6 +23,7 @@ import 'package:ai_nexus/data/local/database/app_database.dart' as db;
 import 'package:ai_nexus/data/repositories/expense_repository.dart';
 import 'package:ai_nexus/domain/entities/expense_entities.dart';
 import 'package:ai_nexus/presentation/screens/expense/expense_timeframe_screen.dart';
+import 'package:ai_nexus/presentation/screens/expense/widgets/expense_merge_bar.dart';
 
 class _FakeApi extends ApiClient {
   _FakeApi();
@@ -401,5 +402,44 @@ void main() {
       expect(find.text('Daily spending'), findsOneWidget);
       expect(find.byType(BarChart), findsOneWidget);
     });
+  });
+
+  testWidgets('header back exits checkbox mode without leaving the list',
+      (tester) async {
+    final repo = await _seededRepo(database);
+    await _pump(tester, repo);
+
+    await tester.longPress(find.text('Coffee'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 250));
+    expect(find.byKey(kExpenseMergeBarKey), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Back'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 250));
+
+    expect(find.byKey(kExpenseMergeBarKey), findsNothing);
+    expect(find.text('Coffee'), findsOneWidget);
+    expect(find.byType(ExpenseTimeframeScreen), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('timeframe long-press then second tap offers Merge',
+      (tester) async {
+    final repo = await _seededRepo(database);
+    await _pump(tester, repo);
+
+    await tester.longPress(find.text('Coffee'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 250));
+    expect(find.byKey(kExpenseMergeBarKey), findsOneWidget);
+    expect(find.byKey(kExpenseMergeSubmitKey), findsNothing);
+
+    await tester.ensureVisible(find.textContaining('Quarterly reconciliation'));
+    await tester.tap(find.textContaining('Quarterly reconciliation'));
+    await tester.pump();
+    expect(find.byKey(kExpenseMergeSubmitKey), findsOneWidget);
+    expect(find.text('2 selected'), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 }

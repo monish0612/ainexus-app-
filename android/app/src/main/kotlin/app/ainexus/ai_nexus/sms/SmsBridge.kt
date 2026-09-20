@@ -7,6 +7,7 @@ import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.graphics.Color
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -104,7 +105,8 @@ object SmsBridge {
         }
 
         builder
-            .setSmallIcon(R.drawable.ic_widget_wallet)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setColor(Color.parseColor("#0D59F2"))
             .setContentIntent(tap)
             .setAutoCancel(true)
             .setContentTitle(title)

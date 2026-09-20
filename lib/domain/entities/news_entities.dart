@@ -135,18 +135,10 @@ const Map<String, String> CAT_COLOR = {
   'General': '#38BDF8',
 };
 
-/// Categories that ship the FULL original article body (no AI summarization).
-///
-/// These feeds are intentionally excluded from:
-///   1. The **All** chip's "unread" feed in the For You tab — they get
-///      their own dedicated chips and should not blend into the generic
-///      pile.
-///   2. The For You speed-dial FAB **Summarize / Clear All** when scope is
-///      "All categories" — the catch-up summarize flow is designed for
-///      AI-condensed articles, not for full long-form reading.
-///
-/// The follow-up chat / save / mark-read / dedup paths are completely
-/// unaffected — those work identically regardless of category.
+/// Categories that ship the FULL original article body in the reader
+/// (on-demand AI summary instead of a pre-baked digest). They are still
+/// included in the All chip, Summarize All, and Clear All. Follow-up chat,
+/// save, and swipe-delete are unchanged.
 // ignore: constant_identifier_names — convention matches CATEGORIES/CAT_COLOR.
 const Set<String> kNoSummarizeCategories = <String>{
   'Movies',

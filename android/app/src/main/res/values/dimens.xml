@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Expense widget uses this card radius. API 31+ swaps it to the
+         launcher's system widget radius so the 4x4 panel clips flush. -->
+    <dimen name="widget_frame_radius">28dp</dimen>
+    <!-- Search bar is a 44dp capsule (radius = half height). Do NOT bind this
+         to system_app_widget_background_radius — that is a card corner and
+         makes a 4x1 search widget look like a thick panel. -->
+    <dimen name="widget_search_bar_height">44dp</dimen>
+    <dimen name="widget_search_bar_radius">22dp</dimen>
+    <dimen name="widget_search_radius">22dp</dimen>
+    <dimen name="widget_inner_radius">18dp</dimen>
+    <dimen name="widget_pill_radius">22dp</dimen>
+    <dimen name="widget_chip_radius">20dp</dimen>
+    <dimen name="widget_progress_radius">8dp</dimen>
+    <dimen name="widget_handle_width">36dp</dimen>
+    <dimen name="widget_handle_height">3dp</dimen>
+    <dimen name="widget_expense_pie_size">88dp</dimen>
+</resources>

@@ -61,7 +61,7 @@ class MemoryFacts {
   /// Categories by spend in [currentMonth], highest first (top 5).
   final List<CategoryTotal> topCategoriesCurrentMonth;
 
-  /// Per-month totals for the most recent 6 months, oldest first.
+  /// Per-month totals for the most recent 12 months, oldest first.
   final List<MonthTotal> monthlyTrend;
 
   bool get isEmpty => lifetimeCount == 0;
@@ -111,7 +111,7 @@ class MemoryFacts {
         .map((m) => (month: m, total: byMonth[m] ?? 0.0))
         .toList();
     final recentTrend =
-        trend.length > 6 ? trend.sublist(trend.length - 6) : trend;
+        trend.length > 12 ? trend.sublist(trend.length - 12) : trend;
 
     List<CategoryTotal> topOf(Map<String, ({double total, int count})> m) {
       final list = m.entries

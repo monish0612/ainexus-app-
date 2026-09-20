@@ -18,6 +18,7 @@ import 'package:ai_nexus/data/local/database/app_database.dart';
 import 'package:ai_nexus/domain/entities/saved_search.dart';
 import 'package:ai_nexus/domain/entities/tutor_entities.dart';
 import 'package:ai_nexus/presentation/screens/tutor/saved_search_detail_sheet.dart';
+import 'package:ai_nexus/presentation/screens/tutor/search_answer_text_scale.dart';
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -143,8 +144,10 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('ORIGINAL RESULT'), findsOneWidget);
+      expect(find.byKey(kSearchAnswerTextSizeBarKey), findsOneWidget);
       expect(find.text('FOLLOW-UP CHAT'), findsOneWidget);
-      // Delete + Close icon buttons exist.
+      // Delete + Share + Close icon buttons exist.
+      expect(find.byTooltip('Share'), findsOneWidget);
       expect(find.byTooltip('Delete'), findsOneWidget);
       expect(find.byTooltip('Close'), findsOneWidget);
       await _drain(tester);

@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
 import '../../../../core/theme/app_colors.dart';
+import '../../../widgets/block_selectable.dart';
 
 /// Shared "magazine-formatted" renderer for an AI quick summary.
 ///
@@ -72,13 +73,15 @@ class NewsSummaryView extends StatelessWidget {
             children: [
               Icon(LucideIcons.sparkles, size: 13, color: cat),
               const SizedBox(width: 6),
-              Text(
-                'QUICK SUMMARY',
-                style: GoogleFonts.plusJakartaSans(
-                  fontSize: 10,
-                  fontWeight: FontWeight.w800,
-                  color: cat,
-                  letterSpacing: 1.6,
+              NonSelectableChrome(
+                child: Text(
+                  'QUICK SUMMARY',
+                  style: GoogleFonts.plusJakartaSans(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w800,
+                    color: cat,
+                    letterSpacing: 1.6,
+                  ),
                 ),
               ),
               const SizedBox(width: 8),
@@ -216,10 +219,8 @@ class _NewsSummaryPartView extends StatelessWidget {
   Widget build(BuildContext context) {
     switch (part.kind) {
       case _NewsSummaryPartKind.lede:
-        return Text(
+        return BlockSelectableText(
           part.text,
-          softWrap: true,
-          overflow: TextOverflow.clip,
           style: GoogleFonts.plusJakartaSans(
             fontSize: 17.5,
             height: 1.45,
@@ -229,10 +230,8 @@ class _NewsSummaryPartView extends StatelessWidget {
           ),
         );
       case _NewsSummaryPartKind.body:
-        return Text(
+        return BlockSelectableText(
           part.text,
-          softWrap: true,
-          overflow: TextOverflow.clip,
           style: GoogleFonts.plusJakartaSans(
             fontSize: 15.5,
             height: 1.62,
@@ -275,13 +274,15 @@ class _NewsKeyFactsList extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 8),
-            Text(
-              'KEY FACTS',
-              style: GoogleFonts.plusJakartaSans(
-                fontSize: 10,
-                fontWeight: FontWeight.w800,
-                color: cat,
-                letterSpacing: 1.4,
+            NonSelectableChrome(
+              child: Text(
+                'KEY FACTS',
+                style: GoogleFonts.plusJakartaSans(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w800,
+                  color: cat,
+                  letterSpacing: 1.4,
+                ),
               ),
             ),
           ],
@@ -302,10 +303,8 @@ class _NewsKeyFactsList extends StatelessWidget {
                 ),
               ),
               Expanded(
-                child: Text(
+                child: BlockSelectableText(
                   bullets[i],
-                  softWrap: true,
-                  overflow: TextOverflow.clip,
                   style: GoogleFonts.plusJakartaSans(
                     fontSize: 14,
                     height: 1.5,

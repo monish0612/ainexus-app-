@@ -4,7 +4,6 @@ import 'dart:ui' as ui;
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -12,20 +11,27 @@ import 'package:lucide_icons/lucide_icons.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/di/injection.dart';
+import '../../../core/services/article_share_text.dart';
+import '../../../core/services/followup_history.dart';
 import '../../../core/services/on_demand_summarize_store.dart';
+import '../../../core/services/share_sheet.dart';
 import '../../../core/services/telegram_logger.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../data/services/article_tts_service.dart';
+import '../../../data/services/narration_download_store.dart';
 import '../../../domain/entities/news_entities.dart';
+import '../../widgets/block_selectable.dart';
 import '../../widgets/image_zoom_viewer.dart';
 import '../../widgets/wave_visualizer.dart';
 import '../settings/settings_controller.dart';
 import 'article_followup_sheet.dart';
+import 'news_chrome.dart';
 import 'news_reader_text_scale.dart';
 import 'news_review_meta.dart';
-import 'news_screen.dart' show newsCategoryIcon;
 import 'widgets/news_summary_view.dart';
 import 'widgets/narration_listen_bar.dart';
+
+export 'news_chrome.dart' show newsCategoryColor, newsCategoryIcon;
 
 /// Which body the article detail is currently showing.
 enum _ArticleView { full, summary }
@@ -112,14 +118,6 @@ class _MarkdownArticleImage extends StatelessWidget {
       ),
     );
   }
-}
-
-Color newsCategoryColor(String category) {
-  final hex = CAT_COLOR[category] ?? '#818CF8';
-  final value = hex.replaceFirst('#', '');
-  final parsed = int.tryParse(value, radix: 16);
-  if (parsed == null) return const Color(0xFF818CF8);
-  return Color(parsed + 0xFF000000);
 }
 
 /// Articles in [kNoSummarizeCategories] (Movies, General) ship the FULL
@@ -293,6 +291,26 @@ class _ArticleDetailModalState extends ConsumerState<ArticleDetailModal> {
 
   void _showFull() => setState(() => _view = _ArticleView.full);
 
+  Widget _buildListenBar(AppColors colors, Color cat) {
+    return NarrationListenBar(
+      key: const ValueKey('article-listen-bar'),
+      article: widget.article,
+      ttsService: _tts,
+      accentColor: cat,
+      colors: colors,
+      isFullContent: _showFullContent,
+      queue: widget.queue,
+      fallback: _TtsPlayerBar(
+        ttsService: _tts,
+        article: widget.article,
+        accentColor: cat,
+        colors: colors,
+        isFullContent: _showFullContent,
+        onDevice: false,
+      ),
+    );
+  }
+
   @override
   void dispose() {
     OnDemandSummarizeStore.instance
@@ -317,19 +335,31 @@ class _ArticleDetailModalState extends ConsumerState<ArticleDetailModal> {
   }
 
   Future<void> _share() async {
-    final originalUrl = widget.article.originalUrl;
-    final text = [
-      widget.article.title,
-      widget.article.excerpt,
-      '— ${widget.article.source}',
-      if (originalUrl != null && originalUrl.isNotEmpty) originalUrl,
-    ].join('\n\n');
-    await Clipboard.setData(ClipboardData(text: text));
-    if (!mounted) return;
+    final article = widget.article;
+    var messages = const <FollowUpMessage>[];
+    try {
+      messages =
+          await ArticleFollowUpStore.instance.loadShareMessages(article.id);
+    } catch (e) {
+      TLog.w('News', 'Share: could not load follow-up chat', error: e);
+    }
+    final text = formatArticleShareText(
+      title: article.title,
+      source: article.source,
+      date: article.date,
+      url: article.originalUrl,
+      snapshot: article.summaryShort,
+      messages: messages,
+    );
+    final opened = await ShareSheet.shareText(
+      text: text,
+      subject: article.title,
+    );
+    if (!mounted || opened) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
-          'Copied to clipboard',
+          'Could not open share',
           style: GoogleFonts.plusJakartaSans(color: Colors.white),
         ),
         backgroundColor: AppColors.accent,
@@ -415,108 +445,99 @@ class _ArticleDetailModalState extends ConsumerState<ArticleDetailModal> {
                 padding: const EdgeInsets.fromLTRB(20, 20, 20, 120),
                 sliver: SliverList(
                   delegate: SliverChildListDelegate([
-                    _MetaRow(article: widget.article, cat: cat, colors: colors),
+                    NonSelectableChrome(
+                      child: _MetaRow(article: widget.article, cat: cat, colors: colors),
+                    ),
                     const SizedBox(height: 16),
                     ArticleReaderProse(
-                      child: Text(
-                        widget.article.title,
-                        softWrap: true,
-                        overflow: TextOverflow.clip,
-                        style: GoogleFonts.plusJakartaSans(
-                          fontSize: 26,
-                          fontWeight: FontWeight.w800,
-                          height: 1.27,
-                          letterSpacing: -0.5,
-                          color: colors.text,
-                        ),
-                      ),
-                    ),
-                    // The standalone RSS excerpt used to live here. It is
-                    // intentionally omitted: every article now ships its full
-                    // body (or AI summary) directly below, which always opens
-                    // with the same sentences — so the excerpt was pure
-                    // duplication. Dropping it gives the reader a cleaner,
-                    // distraction-free lead straight into the content.
-                    const SizedBox(height: 22),
-                    Divider(height: 1, color: colors.border),
-                    const SizedBox(height: 20),
-                    if (_showFullContent) ...[
-                      // Full-content articles render the original body in the
-                      // interactive reader by default and offer AI
-                      // summarization as an explicit, cached, on-demand action.
-                      _SummarizeToggleBar(
-                        view: _view,
-                        summarizing: _summarizing,
-                        hasSummary: _hasSummary,
-                        cat: cat,
-                        colors: colors,
-                        isMovie: widget.article.category == 'Movies',
-                        onSummarize: _onSummarize,
-                        onShowFull: _showFull,
-                      ),
-                      const SizedBox(height: 18),
-                      ArticleReaderProse(
-                        child: _view == _ArticleView.summary
-                            ? _OnDemandSummarySection(
-                                summarizing: _summarizing,
-                                error: _summaryError,
-                                summary: _summaryText,
-                                cat: cat,
-                                colors: colors,
-                                isMovie: widget.article.category == 'Movies',
-                                onRetry: _onRetrySummarize,
-                              )
-                            : hasSummaryMarkdown
-                                ? _SummaryMarkdown(
-                                    summary: summaryMarkdown,
-                                    cat: cat,
-                                    colors: colors,
-                                    isFullArticle: true,
-                                  )
-                                : _BlockList(
-                                    blocks: widget.article.blocks,
-                                    cat: cat,
-                                    colors: colors,
-                                  ),
-                      ),
-                    ] else
-                      ArticleReaderProse(
-                        child: hasSummaryMarkdown
-                            ? _SummaryMarkdown(
-                                summary: summaryMarkdown,
-                                cat: cat,
-                                colors: colors,
-                                isFullArticle:
-                                    _isFullContentArticle(widget.article),
-                              )
-                            : isSummaryUnavailable
-                                ? _SummaryUnavailableBanner(
+                      child: ArticleSelectionScope(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Text(
+                              widget.article.title,
+                              softWrap: true,
+                              overflow: TextOverflow.clip,
+                              style: GoogleFonts.plusJakartaSans(
+                                fontSize: 26,
+                                fontWeight: FontWeight.w800,
+                                height: 1.27,
+                                letterSpacing: -0.5,
+                                color: colors.text,
+                              ),
+                            ),
+                            const SizedBox(height: 22),
+                            Divider(height: 1, color: colors.border),
+                            const SizedBox(height: 20),
+                            if (_showFullContent) ...[
+                              NonSelectableChrome(
+                                child: _SummarizeToggleBar(
+                                  view: _view,
+                                  summarizing: _summarizing,
+                                  hasSummary: _hasSummary,
+                                  cat: cat,
+                                  colors: colors,
+                                  isMovie: widget.article.category == 'Movies',
+                                  onSummarize: _onSummarize,
+                                  onShowFull: _showFull,
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                              NonSelectableChrome(
+                                  child: _buildListenBar(colors, cat)),
+                              const SizedBox(height: 18),
+                              if (_view == _ArticleView.summary)
+                                _OnDemandSummarySection(
+                                  summarizing: _summarizing,
+                                  error: _summaryError,
+                                  summary: _summaryText,
+                                  cat: cat,
+                                  colors: colors,
+                                  isMovie: widget.article.category == 'Movies',
+                                  onRetry: _onRetrySummarize,
+                                )
+                              else if (hasSummaryMarkdown)
+                                _SummaryMarkdown(
+                                  summary: summaryMarkdown,
+                                  cat: cat,
+                                  colors: colors,
+                                  isFullArticle: true,
+                                )
+                              else
+                                _BlockList(
+                                  blocks: widget.article.blocks,
+                                  cat: cat,
+                                  colors: colors,
+                                ),
+                            ] else ...[
+                              NonSelectableChrome(
+                                  child: _buildListenBar(colors, cat)),
+                              const SizedBox(height: 18),
+                              if (hasSummaryMarkdown)
+                                _SummaryMarkdown(
+                                  summary: summaryMarkdown,
+                                  cat: cat,
+                                  colors: colors,
+                                  isFullArticle:
+                                      _isFullContentArticle(widget.article),
+                                )
+                              else if (isSummaryUnavailable)
+                                _SummaryUnavailableBanner(
                                     colors: colors, cat: cat)
-                                : _BlockList(
+                              else
+                                _BlockList(
                                     blocks: widget.article.blocks,
                                     cat: cat,
                                     colors: colors),
-                      ),
-                    const SizedBox(height: 32),
-                    NarrationListenBar(
-                      article: widget.article,
-                      ttsService: _tts,
-                      accentColor: cat,
-                      colors: colors,
-                      isFullContent: _showFullContent,
-                      queue: widget.queue,
-                      fallback: _TtsPlayerBar(
-                        ttsService: _tts,
-                        article: widget.article,
-                        accentColor: cat,
-                        colors: colors,
-                        isFullContent: _showFullContent,
-                        onDevice: false,
+                            ],
+                          ],
+                        ),
                       ),
                     ),
-                    const SizedBox(height: 20),
+                    const SizedBox(height: 32),
                     if (hasOriginalUrl)
-                      GestureDetector(
+                      NonSelectableChrome(
+                        child: GestureDetector(
                         onTap: _openOriginalLink,
                         child: Container(
                           padding: const EdgeInsets.symmetric(
@@ -570,6 +591,7 @@ class _ArticleDetailModalState extends ConsumerState<ArticleDetailModal> {
                           ),
                         ),
                       ),
+                      ),
                   ]),
                 ),
               ),
@@ -579,8 +601,10 @@ class _ArticleDetailModalState extends ConsumerState<ArticleDetailModal> {
             Positioned(
               top: MediaQuery.paddingOf(context).top + 8,
               right: 12,
-              child: const ArticleReaderTextSizeBar(
-                variant: ArticleReaderTextSizeVariant.onMedia,
+              child: const NonSelectableChrome(
+                child: ArticleReaderTextSizeBar(
+                  variant: ArticleReaderTextSizeVariant.onMedia,
+                ),
               ),
             ),
           if (_scrolled)
@@ -662,13 +686,15 @@ class _ArticleDetailModalState extends ConsumerState<ArticleDetailModal> {
             left: 0,
             right: 0,
             bottom: 0,
-            child: _BottomBar(
-              colors: colors,
-              saved: _saved,
-              read: _read,
-              onShare: _share,
-              onToggleSave: _toggleSave,
-              onMarkRead: _markRead,
+            child: NonSelectableChrome(
+              child: _BottomBar(
+                colors: colors,
+                saved: _saved,
+                read: _read,
+                onShare: _share,
+                onToggleSave: _toggleSave,
+                onMarkRead: _markRead,
+              ),
             ),
           ),
         ],
@@ -773,10 +799,9 @@ class _SummaryMarkdown extends StatelessWidget {
         colors: colors,
       );
     }
-    return SelectionArea(
-      child: MarkdownBody(
+    return BlockSelectableMarkdown(
         data: summary,
-        selectable: false,
+        ownSelectionScope: false,
         shrinkWrap: true,
         fitContent: false,
         sizedImageBuilder: (config) =>
@@ -895,7 +920,6 @@ class _SummaryMarkdown extends StatelessWidget {
             ),
           ),
         ),
-      ),
     );
   }
 }
@@ -1602,32 +1626,32 @@ class _FullArticleBody extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _FullArticlePill(cat: cat, colors: colors),
+        NonSelectableChrome(
+          child: _FullArticlePill(cat: cat, colors: colors),
+        ),
         const SizedBox(height: 18),
         if (meta != null) ...[
           _ReviewMetaCard(meta: meta, cat: cat, colors: colors),
           const SizedBox(height: 22),
         ],
-        SelectionArea(
-          child: MarkdownBody(
-            data: effectiveMarkdown,
-            selectable: false,
-            shrinkWrap: true,
-            fitContent: false,
-            sizedImageBuilder: (config) =>
-                _MarkdownArticleImage(uri: config.uri, colors: colors),
-            onTapLink: (text, href, title) async {
-              if (href == null || href.isEmpty) return;
-              final uri = Uri.tryParse(href);
-              if (uri == null) return;
-              try {
-                await launchUrl(uri, mode: LaunchMode.externalApplication);
-              } catch (e) {
-                TLog.w('ArticleDetail', 'Failed to open link: $href', error: e);
-              }
-            },
-            styleSheet: styleSheet,
-          ),
+        BlockSelectableMarkdown(
+          data: effectiveMarkdown,
+          ownSelectionScope: false,
+          shrinkWrap: true,
+          fitContent: false,
+          sizedImageBuilder: (config) =>
+              _MarkdownArticleImage(uri: config.uri, colors: colors),
+          onTapLink: (text, href, title) async {
+            if (href == null || href.isEmpty) return;
+            final uri = Uri.tryParse(href);
+            if (uri == null) return;
+            try {
+              await launchUrl(uri, mode: LaunchMode.externalApplication);
+            } catch (e) {
+              TLog.w('ArticleDetail', 'Failed to open link: $href', error: e);
+            }
+          },
+          styleSheet: styleSheet,
         ),
       ],
     );
@@ -1841,7 +1865,7 @@ class _ProsConsList extends StatelessWidget {
                       ),
                       const SizedBox(width: 10),
                       Expanded(
-                        child: Text(
+                        child: BlockSelectableText(
                           text,
                           style: GoogleFonts.plusJakartaSans(
                             fontSize: 14,
@@ -2162,10 +2186,8 @@ class _BlockList extends StatelessWidget {
       case 'paragraph':
         return Padding(
           padding: const EdgeInsets.only(bottom: 22),
-          child: Text(
+          child: BlockSelectableText(
             b.content,
-            softWrap: true,
-            overflow: TextOverflow.clip,
             style: GoogleFonts.plusJakartaSans(
               fontSize: 15,
               height: 1.88,
@@ -2176,10 +2198,8 @@ class _BlockList extends StatelessWidget {
       case 'heading':
         return Padding(
           padding: const EdgeInsets.only(top: 8, bottom: 12),
-          child: Text(
+          child: BlockSelectableText(
             b.content,
-            softWrap: true,
-            overflow: TextOverflow.clip,
             style: GoogleFonts.plusJakartaSans(
               fontSize: 20,
               fontWeight: FontWeight.w800,
@@ -2201,10 +2221,8 @@ class _BlockList extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
+                  BlockSelectableText(
                     '"${b.content}"',
-                    softWrap: true,
-                    overflow: TextOverflow.clip,
                     style: GoogleFonts.plusJakartaSans(
                       fontSize: 17,
                       fontStyle: FontStyle.italic,
@@ -2214,7 +2232,7 @@ class _BlockList extends StatelessWidget {
                   ),
                   if (b.label != null && b.label!.isNotEmpty) ...[
                     const SizedBox(height: 10),
-                    Text(
+                    BlockSelectableText(
                       '— ${b.label}',
                       style: GoogleFonts.plusJakartaSans(
                         fontSize: 12,
@@ -2256,11 +2274,9 @@ class _StatCard extends StatelessWidget {
       ),
       child: Column(
         children: [
-          Text(
+          BlockSelectableText(
             block.content,
             textAlign: TextAlign.center,
-            softWrap: true,
-            overflow: TextOverflow.clip,
             style: GoogleFonts.plusJakartaSans(
               fontSize: 22,
               fontWeight: FontWeight.w900,
@@ -2518,81 +2534,76 @@ class _TtsPlayerBar extends StatelessWidget {
   }
 
   Widget _buildIdle(String text) {
-    return Material(
-      color: accentColor.withValues(alpha: 0.06),
-      borderRadius: BorderRadius.circular(16),
-      child: InkWell(
-        onTap: () => ttsService.speak(text),
-        borderRadius: BorderRadius.circular(16),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: accentColor.withValues(alpha: 0.14)),
+    return NewsListenSurface(
+      accentColor: accentColor,
+      colors: colors,
+      child: Row(
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: accentColor.withValues(alpha: 0.16),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(LucideIcons.headphones, size: 18, color: accentColor),
           ),
-          child: Row(
-            children: [
-              Container(
-                width: 36,
-                height: 36,
-                decoration: BoxDecoration(
-                  color: accentColor.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(10),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  isFullContent ? 'Listen to Article' : 'Listen to Summary',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.plusJakartaSans(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -0.2,
+                    color: colors.text,
+                  ),
                 ),
-                child:
-                    Icon(LucideIcons.headphones, size: 16, color: accentColor),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      isFullContent ? 'Listen to Article' : 'Listen to Summary',
-                      style: GoogleFonts.plusJakartaSans(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w700,
-                        color: colors.text,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      onDevice
-                          ? 'On-device voice'
-                          : 'On-device voice narration',
-                      style: GoogleFonts.plusJakartaSans(
-                        fontSize: 11,
-                        color: colors.text4,
-                      ),
-                    ),
-                  ],
+                const SizedBox(height: 2),
+                Text(
+                  onDevice ? 'On-device voice' : 'On-device voice narration',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.plusJakartaSans(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: colors.text4,
+                  ),
                 ),
-              ),
-              Container(
-                width: 32,
-                height: 32,
-                decoration: BoxDecoration(
-                  color: accentColor.withValues(alpha: 0.14),
-                  shape: BoxShape.circle,
-                ),
-                child: Icon(LucideIcons.play, size: 14, color: accentColor),
-              ),
-            ],
+              ],
+            ),
           ),
-        ),
+          const SizedBox(width: 8),
+          NewsListenDownloadDisc(
+            accentColor: accentColor,
+            articleId: article.id,
+            onTap: () {
+              unawaited(
+                NarrationDownloadStore.instance.download(article.id),
+              );
+            },
+          ),
+          const SizedBox(width: 8),
+          NewsListenPlayDisc(
+            accentColor: accentColor,
+            playing: false,
+            onTap: () => ttsService.speak(text),
+          ),
+        ],
       ),
     );
   }
 
   Widget _buildActive(TtsState state, String text) {
     final isSpeaking = state == TtsState.speaking;
-    return Container(
-      padding: const EdgeInsets.fromLTRB(16, 20, 16, 16),
-      decoration: BoxDecoration(
-        color: accentColor.withValues(alpha: 0.05),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: accentColor.withValues(alpha: 0.12)),
-      ),
+    return NewsListenSurface(
+      accentColor: accentColor,
+      colors: colors,
       child: Column(
         children: [
           WaveVisualizer(

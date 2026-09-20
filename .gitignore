@@ -72,3 +72,6 @@ google-services.json
 
 # Local commit message scratch files
 .commitmsg.tmp
+
+# Local ops notes with VPS/NAS pointers — secrets live in Cursor user rules
+.cursor/rules/coolify-and-secrets.mdc

@@ -90,4 +90,37 @@ void main() {
     expect(sent[0]['title'], 'Title a1');
     expect(sent[0]['content'], isNotEmpty);
   });
+
+  test('full-content Movies article sends the markdown body including critic rating',
+      () async {
+    final client = ApiClient();
+    final adapter = _CapturingAdapter();
+    client.dio.httpClientAdapter = adapter;
+    final svc = NewsSummarizeService(client);
+
+    await svc.summarizeBatch(articles: [
+      Article(
+        id: 'm1',
+        title: 'DC Movie Review: An unfiltered action thriller that hits hard',
+        excerpt: 'Short excerpt without the score.',
+        source: 'Only Kollywood',
+        category: 'Movies',
+        imageUrl: '',
+        readTime: 8,
+        date: 'Aug 7, 2026',
+        blocks: const [],
+        isFullContent: true,
+        summaryMarkdown:
+            '**⭐ Rating: 3.75 / 5**\n\n---\n\nAfter Rocky, Saani Kaayidham and Captain Miller, director Arun Matheswaran returns.',
+        originalUrl: 'https://www.onlykollywood.com/dc-movie-review/',
+      ),
+    ]);
+
+    final body = adapter.calls.single.data as Map;
+    final sent = (body['articles'] as List).single as Map;
+    expect(sent['category'], 'Movies');
+    expect(sent['content'], contains('3.75 / 5'));
+    expect(sent['content'], contains('Arun Matheswaran'));
+    expect(sent['url'], 'https://www.onlykollywood.com/dc-movie-review/');
+  });
 }

@@ -14,6 +14,7 @@ import '../../../core/services/telegram_logger.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../data/services/tutor_ai_service.dart';
 import '../../../domain/entities/tutor_entities.dart';
+import '../../widgets/block_selectable.dart';
 import '../../widgets/voice_input_button.dart';
 import '../settings/settings_controller.dart';
 
@@ -809,13 +810,15 @@ class _DeepResearchChatState extends ConsumerState<_DeepResearchChat>
                     color: const Color(0xFF0EA5E9).withValues(alpha: 0.2),
                   ),
                 ),
-                child: SelectableText(
+                child: ArticleSelectionScope(
+                  child: BlockSelectableText(
                   msg.text,
                   style: GoogleFonts.plusJakartaSans(
                     fontSize: 14,
                     height: 1.6,
                     color: colors.text,
                   ),
+                ),
                 ),
               ),
             ),
@@ -856,31 +859,30 @@ class _DeepResearchChatState extends ConsumerState<_DeepResearchChat>
                     ),
                   ),
                   child: isError
-                      ? SelectableText(
+                      ? ArticleSelectionScope(
+                          child: BlockSelectableText(
                           msg.text,
                           style: GoogleFonts.plusJakartaSans(
                             fontSize: 14,
                             height: 1.7,
                             color: const Color(0xFFFF6B6B),
                           ),
+                        ),
                         )
-                      : SelectionArea(
-                          child: MarkdownBody(
-                            data: msg.text,
-                            selectable: false,
-                            onTapLink: (_, href, __) async {
-                              if (href == null || href.isEmpty) return;
-                              final uri = Uri.tryParse(href);
-                              if (uri == null) return;
-                              try {
-                                await launchUrl(uri,
-                                    mode: LaunchMode.externalApplication);
-                              } catch (e) {
-                                TLog.w('DeepResearch', 'Failed to launch URL: $href', error: e);
-                              }
-                            },
-                            styleSheet: _markdownStyle(colors),
-                          ),
+                      : BlockSelectableMarkdown(
+                          data: msg.text,
+                          onTapLink: (_, href, __) async {
+                            if (href == null || href.isEmpty) return;
+                            final uri = Uri.tryParse(href);
+                            if (uri == null) return;
+                            try {
+                              await launchUrl(uri,
+                                  mode: LaunchMode.externalApplication);
+                            } catch (e) {
+                              TLog.w('DeepResearch', 'Failed to launch URL: $href', error: e);
+                            }
+                          },
+                          styleSheet: _markdownStyle(colors),
                         ),
                 ),
                 if (msg.model.isNotEmpty || msg.sources.isNotEmpty)

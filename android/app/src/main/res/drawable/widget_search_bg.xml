@@ -1,15 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Outer AMOLED bar: near-pure black with a whisper of vertical lift and a
-     faint indigo-tinted hairline border so the single-row web search widget
-     reads as a floating, glowing glass pill on the home screen. -->
+<!-- Unused by the live layout (bar uses widget_search_bar_bg). Kept as a
+     matching capsule so any leftover references stay a slim pill. -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android"
     android:shape="rectangle">
-    <gradient
-        android:angle="90"
-        android:startColor="#0C0C14"
-        android:endColor="#000000" />
-    <corners android:radius="26dp" />
+    <solid android:color="#F21A1A22" />
+    <corners android:radius="@dimen/widget_search_bar_radius" />
     <stroke
         android:width="1dp"
-        android:color="#26263B" />
+        android:color="#3D3D4A" />
 </shape>

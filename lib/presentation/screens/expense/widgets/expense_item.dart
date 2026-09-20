@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/utils/currency_formatter.dart';
+import '../../../../core/utils/expense_logged_at.dart';
 
 /// Minimal expense row model for list items (matches React `Expense` fields used in UI).
 class ExpenseData {
@@ -38,6 +40,11 @@ class ExpenseItem extends StatefulWidget {
     required this.onEdit,
     required this.onDelete,
     this.onTap,
+    this.onLongPress,
+    this.selectionMode = false,
+    this.selected = false,
+    this.onToggleSelect,
+    this.onExitSelection,
   });
 
   final ExpenseData expense;
@@ -47,6 +54,16 @@ class ExpenseItem extends StatefulWidget {
   /// Optional row tap (e.g. open a full detail view). When the swipe actions
   /// are revealed, a tap closes them instead of firing this.
   final VoidCallback? onTap;
+
+  /// Long-press enters multi-select. Ignored while swipe actions are mid-drag.
+  final VoidCallback? onLongPress;
+
+  final bool selectionMode;
+  final bool selected;
+  final VoidCallback? onToggleSelect;
+
+  /// Swipe-right / swipe-back while selecting leaves checkbox mode.
+  final VoidCallback? onExitSelection;
 
   @override
   State<ExpenseItem> createState() => _ExpenseItemState();
@@ -63,11 +80,23 @@ class _ExpenseItemState extends State<ExpenseItem>
   double _offset = 0;
   bool _revealed = false;
   double _dragAccumDx = 0;
+  double _backDx = 0;
 
   @override
   void initState() {
     super.initState();
     _snapCtrl = AnimationController(vsync: this);
+  }
+
+  @override
+  void didUpdateWidget(covariant ExpenseItem oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.selectionMode && !oldWidget.selectionMode && _offset != 0) {
+      _snapTo(0);
+    }
+    if (!widget.selectionMode && oldWidget.selectionMode && _backDx != 0) {
+      _backDx = 0;
+    }
   }
 
   @override
@@ -109,6 +138,27 @@ class _ExpenseItemState extends State<ExpenseItem>
         _revealed = target <= -_revealWidth + 0.5;
       });
     });
+  }
+
+  void _onSelectionDragStart(DragStartDetails _) {
+    _backDx = 0;
+  }
+
+  void _onSelectionDragUpdate(DragUpdateDetails details) {
+    final next = (_backDx + details.delta.dx).clamp(0.0, 72.0);
+    if (next == _backDx) return;
+    setState(() => _backDx = next);
+  }
+
+  void _onSelectionDragEnd(DragEndDetails details) {
+    final velocity = details.primaryVelocity ?? 0;
+    final commit = _backDx > 44 || velocity > 650;
+    final dx = _backDx;
+    setState(() => _backDx = 0);
+    if (commit && dx > 12 && widget.onExitSelection != null) {
+      HapticFeedback.lightImpact();
+      widget.onExitSelection!();
+    }
   }
 
   void _onHorizontalDragStart(DragStartDetails _) {
@@ -174,6 +224,7 @@ class _ExpenseItemState extends State<ExpenseItem>
       child: Stack(
         clipBehavior: Clip.hardEdge,
         children: [
+          if (!widget.selectionMode)
           Positioned(
             right: 0,
             top: 0,
@@ -228,26 +279,67 @@ class _ExpenseItemState extends State<ExpenseItem>
             ),
           ),
           Transform.translate(
-            offset: Offset(_offset, 0),
+            offset: Offset(
+              widget.selectionMode ? _backDx : _offset,
+              0,
+            ),
             child: GestureDetector(
-              onHorizontalDragStart: _onHorizontalDragStart,
-              onHorizontalDragUpdate: _onHorizontalDragUpdate,
-              onHorizontalDragEnd: _onHorizontalDragEnd,
-              onTap: widget.onTap == null
+              onHorizontalDragStart: widget.selectionMode
+                  ? _onSelectionDragStart
+                  : _onHorizontalDragStart,
+              onHorizontalDragUpdate: widget.selectionMode
+                  ? _onSelectionDragUpdate
+                  : _onHorizontalDragUpdate,
+              onHorizontalDragEnd: widget.selectionMode
+                  ? _onSelectionDragEnd
+                  : _onHorizontalDragEnd,
+              onLongPress: widget.onLongPress == null
                   ? null
                   : () {
-                      if (_revealed) {
-                        _snapTo(0);
-                      } else {
-                        widget.onTap!();
-                      }
+                      if (_revealed) _snapTo(0);
+                      HapticFeedback.mediumImpact();
+                      widget.onLongPress!();
                     },
+              onTap: () {
+                if (widget.selectionMode) {
+                  HapticFeedback.selectionClick();
+                  widget.onToggleSelect?.call();
+                  return;
+                }
+                if (widget.onTap == null) return;
+                if (_revealed) {
+                  _snapTo(0);
+                } else {
+                  widget.onTap!();
+                }
+              },
               behavior: HitTestBehavior.opaque,
-              child: Container(
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 220),
+                curve: Curves.easeOutCubic,
                 decoration: BoxDecoration(
-                  color: c.bg1,
+                  color: widget.selected
+                      ? Color.alphaBlend(
+                          const Color(0xFF7C3AED).withValues(alpha: 0.16),
+                          c.bg1,
+                        )
+                      : c.bg1,
                   borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: c.border),
+                  border: Border.all(
+                    color: widget.selected
+                        ? const Color(0xFFC084FC)
+                        : c.border,
+                    width: widget.selected ? 1.6 : 1,
+                  ),
+                  boxShadow: widget.selected
+                      ? const [
+                          BoxShadow(
+                            color: Color(0x337C3AED),
+                            blurRadius: 14,
+                            offset: Offset(0, 4),
+                          ),
+                        ]
+                      : const [],
                 ),
                 padding: const EdgeInsets.symmetric(
                   horizontal: 16,
@@ -256,6 +348,20 @@ class _ExpenseItemState extends State<ExpenseItem>
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
+                    AnimatedSize(
+                      duration: const Duration(milliseconds: 240),
+                      curve: Curves.easeOutCubic,
+                      alignment: Alignment.centerLeft,
+                      child: widget.selectionMode
+                          ? Padding(
+                              padding: const EdgeInsets.only(right: 10),
+                              child: _MergeCheckbox(
+                                key: ValueKey('merge-check-${e.id}'),
+                                selected: widget.selected,
+                              ),
+                            )
+                          : const SizedBox(width: 0, height: 24),
+                    ),
                     Container(
                       width: 42,
                       height: 42,
@@ -356,13 +462,14 @@ class _ExpenseItemState extends State<ExpenseItem>
                           ),
                         ),
                         Text(
-                          formatTime(e.date),
+                          formatExpenseStamp(e.date, comments: e.comments),
                           style: GoogleFonts.plusJakartaSans(
                             fontSize: 10,
                             fontWeight: FontWeight.w400,
                             color: c.text4,
                           ),
                         ),
+                        if (!widget.selectionMode) ...[
                         const SizedBox(height: 4),
                         Row(
                           mainAxisSize: MainAxisSize.min,
@@ -383,6 +490,7 @@ class _ExpenseItemState extends State<ExpenseItem>
                             ),
                           ],
                         ),
+                        ],
                       ],
                     ),
                   ],
@@ -550,6 +658,73 @@ class _DotSeparator extends StatelessWidget {
       child: Text(
         '·',
         style: TextStyle(fontSize: 10, color: color),
+      ),
+    );
+  }
+}
+
+class _MergeCheckbox extends StatelessWidget {
+  const _MergeCheckbox({super.key, required this.selected});
+
+  final bool selected;
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedScale(
+      scale: selected ? 1 : 0.94,
+      duration: const Duration(milliseconds: 220),
+      curve: selected ? Curves.easeOutBack : Curves.easeOutCubic,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 220),
+        curve: Curves.easeOutCubic,
+        width: 24,
+        height: 24,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(8),
+          gradient: selected
+              ? const LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    Color(0xFFC4B5FD),
+                    Color(0xFF7C3AED),
+                  ],
+                )
+              : null,
+          color: selected ? null : Colors.transparent,
+          border: Border.all(
+            color: selected
+                ? const Color(0x00C084FC)
+                : const Color(0xFF64748B).withValues(alpha: 0.85),
+            width: selected ? 0 : 1.7,
+          ),
+          boxShadow: selected
+              ? const [
+                  BoxShadow(
+                    color: Color(0x667C3AED),
+                    blurRadius: 10,
+                    offset: Offset(0, 3),
+                  ),
+                ]
+              : const [],
+        ),
+        child: IgnorePointer(
+          child: AnimatedScale(
+            scale: selected ? 1 : 0.4,
+            duration: const Duration(milliseconds: 220),
+            curve: Curves.easeOutBack,
+            child: AnimatedOpacity(
+              opacity: selected ? 1 : 0,
+              duration: const Duration(milliseconds: 140),
+              child: const Icon(
+                Icons.check_rounded,
+                size: 15,
+                color: Colors.white,
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }

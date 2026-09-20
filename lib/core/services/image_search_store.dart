@@ -571,7 +571,7 @@ class ImageSearchStore with WidgetsBindingObserver {
   static Future<FlutterLocalNotificationsPlugin> _ensureNotifPlugin() async {
     if (_notifPlugin != null) return _notifPlugin!;
     _notifPlugin = FlutterLocalNotificationsPlugin();
-    const android = AndroidInitializationSettings('@mipmap/ic_launcher');
+    const android = AndroidInitializationSettings('ic_notification');
     await _notifPlugin!
         .initialize(const InitializationSettings(android: android));
     return _notifPlugin!;
@@ -590,6 +590,7 @@ class ImageSearchStore with WidgetsBindingObserver {
         channelDescription: _kChannelDesc,
         importance: Importance.low,
         priority: Priority.low,
+        icon: 'ic_notification',
         ongoing: true,
         autoCancel: false,
         showProgress: true,
@@ -623,6 +624,7 @@ class ImageSearchStore with WidgetsBindingObserver {
         channelDescription: _kChannelDesc,
         importance: Importance.high,
         priority: Priority.high,
+        icon: 'ic_notification',
         category: AndroidNotificationCategory.message,
         color: ui.Color(0xFF0D59F2),
       );

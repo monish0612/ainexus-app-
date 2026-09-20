@@ -31,6 +31,23 @@ void main() {
   });
 
   group('resolveShortcutRoute — Expense widget "Add" pill', () {
+    test('Expense widget body tap is tab 0 with no add/search', () {
+      final r = resolveShortcutRoute({'tab': '0'})!;
+      expect(r.tab, 0);
+      expect(r.openExpenseAdd, isFalse);
+      expect(r.openExpenseSearch, isFalse);
+      expect(r.focusWebSearch, isFalse);
+    });
+
+    test('Expense widget Ask AI pill opens expense search, not add', () {
+      final r = resolveShortcutRoute({
+        'tab': '0',
+        'widget_search_mode': 'expense',
+      })!;
+      expect(r.openExpenseSearch, isTrue);
+      expect(r.openExpenseAdd, isFalse);
+    });
+
     test('opens the Add-expense sheet on tab 0, no search focus', () {
       final r = resolveShortcutRoute({
         'tab': '0',

@@ -17,6 +17,7 @@ import 'package:ai_nexus/domain/entities/news_entities.dart';
 import 'package:ai_nexus/presentation/screens/auth/login_screen.dart';
 import 'package:ai_nexus/presentation/screens/landing/landing_screen.dart';
 import 'package:ai_nexus/presentation/screens/news/article_detail_modal.dart';
+import 'package:ai_nexus/presentation/widgets/nexus_brand_mark.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -201,6 +202,7 @@ Body paragraph after the table to keep the reader flowing.
         // Scaffold background tracks the palette (not a hardcoded black).
         final scaffold = tester.widget<Scaffold>(find.byType(Scaffold));
         expect(scaffold.backgroundColor, p.bg);
+        expect(find.byType(NexusBrandMark), findsOneWidget);
       });
 
       testWidgets('LoginScreen renders in $label theme', (tester) async {
@@ -208,6 +210,7 @@ Body paragraph after the table to keep the reader flowing.
         expect(tester.takeException(), isNull);
         final scaffold = tester.widget<Scaffold>(find.byType(Scaffold));
         expect(scaffold.backgroundColor, p.bg);
+        expect(find.byType(NexusBrandMark), findsOneWidget);
       });
     }
   });

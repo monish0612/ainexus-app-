@@ -8,19 +8,38 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/di/injection.dart';
 import '../../../core/services/online_search_store.dart';
+import '../../../core/services/search_share_text.dart';
 import '../../../core/services/telegram_logger.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../domain/entities/tutor_entities.dart';
 import '../../screens/settings/settings_controller.dart';
+import '../../widgets/block_selectable.dart';
+import '../../widgets/search_result_actions.dart';
 import '../../widgets/sources_disclosure.dart';
+import '../news/news_reader_text_scale.dart';
+import 'search_answer_text_scale.dart';
 import 'search_followup_sheet.dart';
 
 /// Standalone grounded-search screen that can be pushed on any navigation stack.
 /// Tries grounded search first, falls back to Tavily.
 class SearchLookupScreen extends ConsumerStatefulWidget {
-  const SearchLookupScreen({super.key, required this.query});
+  const SearchLookupScreen({
+    super.key,
+    required this.query,
+    this.debugGroundedResult,
+    this.debugTavilyResult,
+  });
 
   final String query;
+
+  /// When set, [initState] skips [OnlineSearchStore] so widget tests can
+  /// render a completed answer without hitting the network.
+  @visibleForTesting
+  final GroundedSearchResponse? debugGroundedResult;
+
+  /// Same as [debugGroundedResult] for the Tavily fallback card.
+  @visibleForTesting
+  final TavilySearchResponse? debugTavilyResult;
 
   @override
   ConsumerState<SearchLookupScreen> createState() =>
@@ -38,12 +57,20 @@ class _SearchLookupScreenState extends ConsumerState<SearchLookupScreen>
   TavilySearchResponse? _tavilyResult;
 
   String? _searchKey;
+  bool _shareInFlight = false;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _search();
+    if (widget.debugGroundedResult != null ||
+        widget.debugTavilyResult != null) {
+      _loading = false;
+      _groundedResult = widget.debugGroundedResult;
+      _tavilyResult = widget.debugTavilyResult;
+    } else {
+      _search();
+    }
   }
 
   @override
@@ -129,6 +156,39 @@ class _SearchLookupScreenState extends ConsumerState<SearchLookupScreen>
         duration: const Duration(seconds: 1),
       ),
     );
+  }
+
+  Future<void> _shareCurrent() async {
+    if (_shareInFlight) return;
+    final result = _groundedResult ?? _tavilyResult;
+    if (result == null) return;
+    setState(() => _shareInFlight = true);
+    HapticFeedback.lightImpact();
+    try {
+      final messages = SearchFollowUpStore.instance.shareMessages(widget.query);
+      final opened = await shareInsightResult(
+        result: result,
+        query: widget.query,
+        messages: messages,
+      );
+      if (!mounted || opened) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Could not open share',
+            style: GoogleFonts.plusJakartaSans(color: Colors.white),
+          ),
+          backgroundColor: _accent,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _shareInFlight = false);
+      } else {
+        _shareInFlight = false;
+      }
+    }
   }
 
   void _openUrl(String url) {
@@ -353,11 +413,26 @@ class _SearchLookupScreenState extends ConsumerState<SearchLookupScreen>
         children: [
           Row(
             children: [
-              _serviceBadge(
-                colors,
-                badgeLabel,
-                isXGrokResult ? LucideIcons.bot : LucideIcons.globe,
-                badgeColor,
+              Expanded(
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerLeft,
+                    child: _serviceBadge(
+                      colors,
+                      badgeLabel,
+                      isXGrokResult ? LucideIcons.bot : LucideIcons.globe,
+                      badgeColor,
+                    ),
+                  ),
+                ),
+              ),
+              NonSelectableChrome(
+                child: SearchShareIconButton(
+                  onPressed: _shareInFlight ? null : _shareCurrent,
+                  colors: colors,
+                ),
               ),
             ],
           ),
@@ -380,15 +455,13 @@ class _SearchLookupScreenState extends ConsumerState<SearchLookupScreen>
                             Icon(LucideIcons.search,
                                 size: 10, color: colors.text4),
                             const SizedBox(width: 4),
-                            Flexible(
-                              child: Text(
-                                q,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: GoogleFonts.plusJakartaSans(
-                                  fontSize: 10,
-                                  color: colors.text3,
-                                ),
+                            Text(
+                              q,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: GoogleFonts.plusJakartaSans(
+                                fontSize: 10,
+                                color: colors.text3,
                               ),
                             ),
                           ],
@@ -398,7 +471,8 @@ class _SearchLookupScreenState extends ConsumerState<SearchLookupScreen>
             ),
             const SizedBox(height: 16),
           ],
-          Container(
+          ArticleSelectionScope(
+            child: Container(
             decoration: BoxDecoration(
               color: colors.bg1,
               borderRadius: BorderRadius.circular(16),
@@ -417,48 +491,42 @@ class _SearchLookupScreenState extends ConsumerState<SearchLookupScreen>
                       bottom: BorderSide(color: colors.border2),
                     ),
                   ),
-                  child: Row(
-                    children: [
-                      const Icon(LucideIcons.globe, size: 14, color: _accent),
-                      const SizedBox(width: 8),
-                      Text(
-                        'ANSWER',
-                        style: GoogleFonts.plusJakartaSans(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w700,
-                          color: _accent,
-                          letterSpacing: 1.2,
-                        ),
-                      ),
-                      const Spacer(),
-                      GestureDetector(
-                        onTap: () => _copy(r.answer),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(LucideIcons.copy,
-                                size: 13, color: colors.text4),
-                            const SizedBox(width: 4),
-                            Text(
-                              'Copy',
-                              style: GoogleFonts.plusJakartaSans(
-                                fontSize: 10,
-                                fontWeight: FontWeight.w700,
-                                color: colors.text4,
-                              ),
+                  child: SearchAnswerSectionHeader(
+                    leading: const Icon(LucideIcons.globe, size: 14, color: _accent),
+                    label: 'ANSWER',
+                    labelStyle: GoogleFonts.plusJakartaSans(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
+                      color: _accent,
+                      letterSpacing: 1.2,
+                    ),
+                    trailing: GestureDetector(
+                      onTap: () => _copy(r.answer),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(LucideIcons.copy,
+                              size: 13, color: colors.text4),
+                          const SizedBox(width: 4),
+                          Text(
+                            'Copy',
+                            style: GoogleFonts.plusJakartaSans(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700,
+                              color: colors.text4,
                             ),
-                          ],
-                        ),
+                          ),
+                        ],
                       ),
-                    ],
+                    ),
                   ),
                 ),
                 Padding(
                   padding: const EdgeInsets.all(16),
-                  child: SelectionArea(
-                    child: MarkdownBody(
+                  child: ArticleReaderProse(
+                    child: BlockSelectableMarkdown(
                       data: r.answer,
-                      selectable: false,
+                      ownSelectionScope: false,
                       onTapLink: (_, href, __) {
                         if (href != null) _openUrl(href);
                       },
@@ -468,6 +536,7 @@ class _SearchLookupScreenState extends ConsumerState<SearchLookupScreen>
                 ),
               ],
             ),
+          ),
           ),
           // Source links live behind a collapsed-by-default disclosure pill
           // so the answer remains the focal point of the screen and we no
@@ -501,17 +570,33 @@ class _SearchLookupScreenState extends ConsumerState<SearchLookupScreen>
         children: [
           Row(
             children: [
-              _serviceBadge(
-                colors,
-                'Tavily Search',
-                LucideIcons.sparkles,
-                const Color(0xFFF59E0B),
+              Expanded(
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerLeft,
+                    child: _serviceBadge(
+                      colors,
+                      'Tavily Search',
+                      LucideIcons.sparkles,
+                      const Color(0xFFF59E0B),
+                    ),
+                  ),
+                ),
+              ),
+              NonSelectableChrome(
+                child: SearchShareIconButton(
+                  onPressed: _shareInFlight ? null : _shareCurrent,
+                  colors: colors,
+                ),
               ),
             ],
           ),
           const SizedBox(height: 14),
           if (r.answer.isNotEmpty)
-            Container(
+            ArticleSelectionScope(
+              child: Container(
               decoration: BoxDecoration(
                 color: colors.bg1,
                 borderRadius: BorderRadius.circular(16),
@@ -530,49 +615,43 @@ class _SearchLookupScreenState extends ConsumerState<SearchLookupScreen>
                         bottom: BorderSide(color: colors.border2),
                       ),
                     ),
-                    child: Row(
-                      children: [
-                        const Icon(LucideIcons.sparkles,
-                            size: 14, color: _accent),
-                        const SizedBox(width: 8),
-                        Text(
-                          'AI ANSWER',
-                          style: GoogleFonts.plusJakartaSans(
-                            fontSize: 10,
-                            fontWeight: FontWeight.w700,
-                            color: _accent,
-                            letterSpacing: 1.2,
-                          ),
-                        ),
-                        const Spacer(),
-                        GestureDetector(
-                          onTap: () => _copy(r.answer),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(LucideIcons.copy,
-                                  size: 13, color: colors.text4),
-                              const SizedBox(width: 4),
-                              Text(
-                                'Copy',
-                                style: GoogleFonts.plusJakartaSans(
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.w700,
-                                  color: colors.text4,
-                                ),
+                    child: SearchAnswerSectionHeader(
+                      leading: const Icon(LucideIcons.sparkles,
+                          size: 14, color: _accent),
+                      label: 'AI ANSWER',
+                      labelStyle: GoogleFonts.plusJakartaSans(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
+                        color: _accent,
+                        letterSpacing: 1.2,
+                      ),
+                      trailing: GestureDetector(
+                        onTap: () => _copy(r.answer),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(LucideIcons.copy,
+                                size: 13, color: colors.text4),
+                            const SizedBox(width: 4),
+                            Text(
+                              'Copy',
+                              style: GoogleFonts.plusJakartaSans(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w700,
+                                color: colors.text4,
                               ),
-                            ],
-                          ),
+                            ),
+                          ],
                         ),
-                      ],
+                      ),
                     ),
                   ),
                   Padding(
                     padding: const EdgeInsets.all(16),
-                    child: SelectionArea(
-                      child: MarkdownBody(
+                    child: ArticleReaderProse(
+                      child: BlockSelectableMarkdown(
                         data: r.answer,
-                        selectable: false,
+                        ownSelectionScope: false,
                         onTapLink: (_, href, __) {
                           if (href != null) _openUrl(href);
                         },
@@ -582,6 +661,7 @@ class _SearchLookupScreenState extends ConsumerState<SearchLookupScreen>
                   ),
                 ],
               ),
+            ),
             ),
           // Source links live behind a collapsed-by-default disclosure pill;
           // see _buildGroundedResult for the same UX pattern.

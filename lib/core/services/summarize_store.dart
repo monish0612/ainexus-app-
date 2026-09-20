@@ -8,6 +8,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import '../../data/services/tutor_ai_service.dart';
 import '../../domain/entities/tutor_entities.dart';
 import '../platform/platform_capabilities.dart';
+import '../utils/tidy_url.dart';
 import 'background_task_coordinator.dart';
 import 'telegram_logger.dart';
 
@@ -104,14 +105,16 @@ class SummarizeStore with WidgetsBindingObserver {
     String? liteModel,
   }) {
     init();
-    final key = url;
+    final cleaned = TidyUrl.normalizeForSummarize(url);
+    final fetchUrl = cleaned.isEmpty ? url.trim() : cleaned;
+    final key = TidyUrl.summarizeJobKey(url);
 
     _cancelTokens[key]?.cancel('Replaced');
     _retryQueue.remove(key);
     _resumeRetryCount.remove(key);
 
     final params = _SummarizeParams(
-      url: url,
+      url: fetchUrl,
       service: service,
       provider: provider,
       xgrokModel: xgrokModel,
@@ -124,7 +127,7 @@ class SummarizeStore with WidgetsBindingObserver {
     final token = CancelToken();
     _cancelTokens[key] = token;
 
-    _acquireCoordSlot(key, url);
+    _acquireCoordSlot(key, fetchUrl);
 
     unawaited(_executeSummarize(
       key: key,
@@ -478,7 +481,7 @@ class SummarizeStore with WidgetsBindingObserver {
   static Future<FlutterLocalNotificationsPlugin> _ensureNotifPlugin() async {
     if (_notifPlugin != null) return _notifPlugin!;
     _notifPlugin = FlutterLocalNotificationsPlugin();
-    const android = AndroidInitializationSettings('@mipmap/ic_launcher');
+    const android = AndroidInitializationSettings('ic_notification');
     await _notifPlugin!
         .initialize(const InitializationSettings(android: android));
     return _notifPlugin!;
@@ -495,6 +498,7 @@ class SummarizeStore with WidgetsBindingObserver {
         channelDescription: _kChannelDesc,
         importance: Importance.low,
         priority: Priority.low,
+        icon: 'ic_notification',
         ongoing: true,
         autoCancel: false,
         showProgress: true,
@@ -526,6 +530,7 @@ class SummarizeStore with WidgetsBindingObserver {
         channelDescription: _kChannelDesc,
         importance: Importance.high,
         priority: Priority.high,
+        icon: 'ic_notification',
         category: AndroidNotificationCategory.message,
         color: ui.Color(0xFF0D59F2),
       );

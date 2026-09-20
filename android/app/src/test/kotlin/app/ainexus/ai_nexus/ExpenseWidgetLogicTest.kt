@@ -42,6 +42,8 @@ class ExpenseWidgetLogicTest {
     @Test
     fun format_lakhBoundaryAndDecimals() {
         assertEquals("\u20B91L", ExpenseWidgetLogic.formatInrCompact(100000.0))
+        // Exact example from the home-screen donut: never emit ₹1,20,345.
+        assertEquals("\u20B91.2L", ExpenseWidgetLogic.formatInrCompact(120345.0))
         assertEquals("\u20B91.2L", ExpenseWidgetLogic.formatInrCompact(123456.0)) // 1.23456L → 1.2L
         assertEquals("\u20B92.5L", ExpenseWidgetLogic.formatInrCompact(250000.0))
     }
@@ -299,6 +301,154 @@ class ExpenseWidgetLogicTest {
         assertEquals(
             ExpenseWidgetLogic.launchRequestCode(42, ExpenseWidgetLogic.LANE_ADD),
             ExpenseWidgetLogic.launchRequestCode(42, ExpenseWidgetLogic.LANE_ADD),
+        )
+    }
+
+    // ── spend-mix donut ───────────────────────────────────────────────────────
+
+    @Test
+    fun parsePie_splitsRecordsAndCapsAtFour() {
+        val rec = { name: String, amt: String -> "$name\u001f🍽️\u001f#22D3EE\u001f$amt" }
+        val raw = listOf("Food", "Shop", "Ride", "Bills", "Extra")
+            .mapIndexed { i, n -> rec(n, "${(5 - i) * 10}.00") }
+            .joinToString("\u001e")
+        val slices = ExpenseWidgetLogic.parsePiePayload(raw)
+        assertEquals(4, slices.size)
+        assertEquals("Food", slices[0].name)
+        assertEquals(50.0, slices[0].amount, 0.001)
+        assertEquals("Bills", slices[3].name)
+    }
+
+    @Test
+    fun parsePie_skipsJunkAndNonPositive() {
+        val raw = listOf(
+            "Bad",
+            "Zero\u001f📦\u001f#FFF\u001f0",
+            "Neg\u001f📦\u001f#ABCDEF\u001f-3",
+            "Food\u001f🍽️\u001f#22D3EE\u001f12.50",
+            "\u001f📦\u001f#22D3EE\u001f9",
+        ).joinToString("\u001e")
+        val slices = ExpenseWidgetLogic.parsePiePayload(raw)
+        assertEquals(1, slices.size)
+        assertEquals("Food", slices.single().name)
+        assertEquals(12.50, slices.single().amount, 0.001)
+        assertTrue(ExpenseWidgetLogic.parsePiePayload(null).isEmpty())
+        assertTrue(ExpenseWidgetLogic.parsePiePayload("").isEmpty())
+    }
+
+    @Test
+    fun effectivePie_staleClears_andFallsBackToTopCategory() {
+        val payload = "Food\u001f🍽️\u001f#22D3EE\u001f80.00"
+        assertTrue(
+            ExpenseWidgetLogic.effectivePie(
+                payload, true, "Food", "🍽️", "#22D3EE", 80.0
+            ).isEmpty()
+        )
+        val fromPayload = ExpenseWidgetLogic.effectivePie(
+            payload, false, "Ignored", "x", "#000000", 1.0
+        )
+        assertEquals("Food", fromPayload.single().name)
+
+        val fallback = ExpenseWidgetLogic.effectivePie(
+            "", false, "Shopping", "🛍️", "#A78BFA", 40.0
+        )
+        assertEquals("Shopping", fallback.single().name)
+        assertEquals(40.0, fallback.single().amount, 0.001)
+        assertTrue(
+            ExpenseWidgetLogic.pieFallbackFromTop("", "📦", "#FFF", 10.0).isEmpty()
+        )
+    }
+
+    @Test
+    fun piePercents_sumTo100_andSingleSliceIs100() {
+        assertEquals(listOf(100), ExpenseWidgetLogic.piePercents(listOf(42.0)))
+        val halves = ExpenseWidgetLogic.piePercents(listOf(50.0, 50.0))
+        assertEquals(listOf(50, 50), halves)
+        val thirds = ExpenseWidgetLogic.piePercents(listOf(1.0, 1.0, 1.0))
+        assertEquals(100, thirds.sum())
+        assertEquals(3, thirds.size)
+        assertEquals(listOf(0, 0), ExpenseWidgetLogic.piePercents(listOf(0.0, 0.0)))
+        assertTrue(ExpenseWidgetLogic.piePercents(emptyList()).isEmpty())
+    }
+
+    @Test
+    fun pieSweeps_fullRingForOne_andGappedArcsForMany() {
+        val one = ExpenseWidgetLogic.PieSlice("Food", "🍽️", "#22D3EE", 80.0)
+        val single = ExpenseWidgetLogic.pieSweeps(listOf(one))
+        assertEquals(1, single.size)
+        assertEquals(-90f, single[0].startAngle)
+        assertEquals(360f, single[0].sweep)
+        assertEquals(100, single[0].percent)
+
+        val two = ExpenseWidgetLogic.pieSweeps(
+            listOf(
+                ExpenseWidgetLogic.PieSlice("Food", "🍽️", "#22D3EE", 75.0),
+                ExpenseWidgetLogic.PieSlice("Shop", "🛍️", "#A78BFA", 25.0),
+            )
+        )
+        assertEquals(2, two.size)
+        assertEquals(-90f, two[0].startAngle, 0.01f)
+        assertEquals(75, two[0].percent)
+        assertEquals(25, two[1].percent)
+        assertEquals(100, two.sumOf { it.percent })
+        assertTrue(two[0].sweep + two[1].sweep < 360f)
+        assertTrue(two.all { it.sweep > 0f })
+        assertTrue(ExpenseWidgetLogic.pieSweeps(emptyList()).isEmpty())
+    }
+
+    @Test
+    fun parsePie_rejectsNonFiniteAndMatchesDartContract() {
+        assertTrue(
+            ExpenseWidgetLogic.parsePiePayload("Glitch\u001f📦\u001f#FFFFFF\u001fNaN").isEmpty()
+        )
+        assertTrue(
+            ExpenseWidgetLogic.parsePiePayload("Boom\u001f📦\u001f#FFFFFF\u001fInfinity").isEmpty()
+        )
+        // Mirrors ExpenseWidgetService.encodePiePayload for two slices.
+        val dartPayload = "Food Hack\u001f🍽️\u001f#AABBCC\u001f12.50\u001eOther\u001f📦\u001f#868E96\u001f7.00"
+        val slices = ExpenseWidgetLogic.parsePiePayload(dartPayload)
+        assertEquals(2, slices.size)
+        assertEquals("Food Hack", slices[0].name)
+        assertEquals(12.50, slices[0].amount, 0.001)
+        assertEquals("Other", slices[1].name)
+        assertEquals(7.00, slices[1].amount, 0.001)
+    }
+
+    @Test
+    fun piePercents_nonFiniteIsZeroed_andTinySliceIsSubOnePercent() {
+        assertEquals(listOf(0, 0), ExpenseWidgetLogic.piePercents(listOf(Double.NaN, 10.0)))
+        assertEquals(listOf(0), ExpenseWidgetLogic.piePercents(listOf(Double.POSITIVE_INFINITY)))
+        val tiny = ExpenseWidgetLogic.piePercents(listOf(9999.0, 1.0))
+        assertEquals(listOf(100, 0), tiny)
+        assertEquals("\u20B91 · <1%", ExpenseWidgetLogic.legendLine(1.0, tiny[1]))
+    }
+
+    @Test
+    fun pieSweeps_fourSlicesAreClockwiseFromNoon() {
+        val sweeps = ExpenseWidgetLogic.pieSweeps(
+            listOf(
+                ExpenseWidgetLogic.PieSlice("A", "a", "#111111", 40.0),
+                ExpenseWidgetLogic.PieSlice("B", "b", "#222222", 30.0),
+                ExpenseWidgetLogic.PieSlice("C", "c", "#333333", 20.0),
+                ExpenseWidgetLogic.PieSlice("D", "d", "#444444", 10.0),
+            )
+        )
+        assertEquals(4, sweeps.size)
+        assertEquals(100, sweeps.sumOf { it.percent })
+        for (i in 1 until sweeps.size) {
+            assertTrue(sweeps[i].startAngle > sweeps[i - 1].startAngle)
+        }
+        assertTrue(sweeps.sumOf { it.sweep.toDouble() } < 360.0)
+        assertTrue(sweeps.sumOf { it.sweep.toDouble() } > 330.0)
+    }
+
+    @Test
+    fun pieFallback_rejectsNonFiniteAmount() {
+        assertTrue(
+            ExpenseWidgetLogic.pieFallbackFromTop("Food", "🍽️", "#22D3EE", Double.NaN).isEmpty()
+        )
+        assertTrue(
+            ExpenseWidgetLogic.pieFallbackFromTop("Food", "🍽️", "#22D3EE", Double.POSITIVE_INFINITY).isEmpty()
         )
     }
 }

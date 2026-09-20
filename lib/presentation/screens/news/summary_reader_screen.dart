@@ -10,6 +10,7 @@ import 'package:lucide_icons/lucide_icons.dart';
 import '../../../core/services/news_summarize_store.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../domain/entities/news_entities.dart';
+import '../../widgets/block_selectable.dart';
 import 'article_detail_modal.dart';
 import 'news_controller.dart';
 
@@ -1250,7 +1251,8 @@ class _ReadySummary extends StatelessWidget {
   Widget build(BuildContext context) {
     final parts = _parseSummary(summary);
 
-    return TweenAnimationBuilder<double>(
+    return ArticleSelectionScope(
+      child: TweenAnimationBuilder<double>(
       tween: Tween(begin: 0, end: 1),
       duration: const Duration(milliseconds: 280),
       curve: Curves.easeOut,
@@ -1296,13 +1298,15 @@ class _ReadySummary extends StatelessWidget {
               children: [
                 Icon(LucideIcons.sparkles, size: 13, color: cat),
                 const SizedBox(width: 6),
-                Text(
-                  'QUICK SUMMARY',
-                  style: GoogleFonts.plusJakartaSans(
-                    fontSize: 10,
-                    fontWeight: FontWeight.w800,
-                    color: cat,
-                    letterSpacing: 1.6,
+                NonSelectableChrome(
+                  child: Text(
+                    'QUICK SUMMARY',
+                    style: GoogleFonts.plusJakartaSans(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w800,
+                      color: cat,
+                      letterSpacing: 1.6,
+                    ),
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -1336,6 +1340,7 @@ class _ReadySummary extends StatelessWidget {
             ],
           ],
         ),
+      ),
       ),
     );
   }
@@ -1377,7 +1382,7 @@ class _SummaryPartView extends StatelessWidget {
   Widget build(BuildContext context) {
     switch (part.kind) {
       case _SummaryPartKind.lede:
-        return Text(
+        return BlockSelectableText(
           part.text,
           style: GoogleFonts.plusJakartaSans(
             fontSize: 17.5,
@@ -1388,7 +1393,7 @@ class _SummaryPartView extends StatelessWidget {
           ),
         );
       case _SummaryPartKind.body:
-        return Text(
+        return BlockSelectableText(
           part.text,
           style: GoogleFonts.plusJakartaSans(
             fontSize: 15.5,
@@ -1436,13 +1441,15 @@ class _KeyFactsList extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 8),
-            Text(
-              'KEY FACTS',
-              style: GoogleFonts.plusJakartaSans(
-                fontSize: 10,
-                fontWeight: FontWeight.w800,
-                color: cat,
-                letterSpacing: 1.4,
+            NonSelectableChrome(
+              child: Text(
+                'KEY FACTS',
+                style: GoogleFonts.plusJakartaSans(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w800,
+                  color: cat,
+                  letterSpacing: 1.4,
+                ),
               ),
             ),
           ],
@@ -1465,7 +1472,7 @@ class _KeyFactsList extends StatelessWidget {
                 ),
               ),
               Expanded(
-                child: Text(
+                child: BlockSelectableText(
                   bullets[i],
                   style: GoogleFonts.plusJakartaSans(
                     fontSize: 14,

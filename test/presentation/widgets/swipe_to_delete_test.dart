@@ -1,15 +1,18 @@
 // Widget tests for [SwipeToDelete] — the generic swipe wrapper used by
-// the News > For You > Movies/General feed.
+// the News > For You feed (All, AI News, Finance, Movies, General).
 //
 // CONTRACT
 //
 //   • Swiping the child in EITHER direction (LTR or RTL) past the
-//     dismiss threshold fires `onDelete`. Both directions show the same
-//     red trash background.
+//     dismiss threshold opens the confirm card. [onDelete] fires only
+//     after tapping Delete.
+//   • Keep / barrier dismiss / back / swipe-back leave the row and
+//     do not call [onDelete].
 //   • The child widget is NEVER actually dismissed — `confirmDismiss`
 //     returns false. This is the inline-delete pattern; the host data
 //     layer is the single source of truth for "is the row gone now?".
-//   • Cancelled / under-threshold swipes do NOT fire `onDelete`.
+//   • Cancelled / under-threshold swipes do NOT fire `onDelete` and
+//     do NOT open the confirm card.
 //   • The red background renders a trash icon + "Delete" label so the
 //     user sees what the gesture does mid-drag.
 //
@@ -19,14 +22,20 @@
 //     both render without overflow.
 //   • contentHeight forces the background to a fixed height (used by
 //     the 280 px featured card so the red bg matches the card exactly).
-//   • Rapid double-swipe is idempotent — onDelete fires per swipe,
-//     never more.
+//   • Rapid double-swipe is idempotent — onDelete fires per confirmed
+//     swipe, never more.
 //   • Default key fallback (ObjectKey) doesn't blow up if a caller
 //     forgets to pass `key`.
+//   • Missing AppColors extension still paints the confirm card.
+//   • Empty / very long titles do not overflow.
+//   • Light + dark themes on a 320 px phone.
+//   • confirm: false keeps the instant-delete path used by pager tests.
 
+import 'package:ai_nexus/core/theme/app_colors.dart';
 import 'package:ai_nexus/presentation/widgets/swipe_to_delete.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
 class _Probe {
@@ -41,9 +50,15 @@ Future<void> _pumpWith(
   double borderRadius = 0,
   double? contentHeight,
   Key? key,
+  bool confirm = true,
+  String? title,
+  String? message,
+  String headline = 'Delete this?',
+  ThemeData? theme,
 }) async {
   await tester.pumpWidget(
     MaterialApp(
+      theme: theme,
       home: Scaffold(
         body: SizedBox(
           width: 400,
@@ -53,6 +68,10 @@ Future<void> _pumpWith(
               SwipeToDelete(
                 key: key,
                 onDelete: onDelete,
+                confirm: confirm,
+                headline: headline,
+                title: title,
+                message: message,
                 borderRadius: borderRadius,
                 contentHeight: contentHeight,
                 child: child,
@@ -66,8 +85,33 @@ Future<void> _pumpWith(
   await tester.pump();
 }
 
+Future<void> _commitSwipe(
+  WidgetTester tester,
+  Finder target, {
+  Offset delta = const Offset(380, 0),
+}) async {
+  await tester.drag(target, delta);
+  await tester.pump();
+  await tester.pump(const Duration(milliseconds: 180));
+}
+
+Future<void> _tapConfirm(WidgetTester tester) async {
+  expect(find.byKey(const Key('swipe-delete-confirm')), findsOneWidget);
+  await tester.tap(find.byKey(const Key('swipe-delete-confirm')));
+  await tester.pump();
+  await tester.pump(const Duration(milliseconds: 200));
+}
+
+Future<void> _tapKeep(WidgetTester tester) async {
+  expect(find.byKey(const Key('swipe-delete-keep')), findsOneWidget);
+  await tester.tap(find.byKey(const Key('swipe-delete-keep')));
+  await tester.pump();
+  await tester.pump(const Duration(milliseconds: 200));
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  GoogleFonts.config.allowRuntimeFetching = false;
 
   Widget card(String id) => Container(
         key: ValueKey<String>('card-$id'),
@@ -93,6 +137,7 @@ void main() {
       // painted on screen (Dismissible doesn't render the background
       // unless the child is being dragged).
       expect(find.text('Delete'), findsNothing);
+      expect(find.byKey(const Key('swipe-delete-confirm')), findsNothing);
       expect(probe.count, 0);
     });
 
@@ -107,30 +152,31 @@ void main() {
     });
   });
 
-  group('SwipeToDelete — swipe gesture fires onDelete', () {
-    testWidgets('LEFT-to-RIGHT swipe past threshold fires onDelete',
+  group('SwipeToDelete — swipe requires confirmation', () {
+    testWidgets('LEFT-to-RIGHT swipe past threshold asks, then Delete fires',
         (tester) async {
       final probe = _Probe();
       await _pumpWith(
         tester,
         key: const ValueKey<String>('row-a'),
+        title: 'Finance headline',
         child: card('A'),
         onDelete: probe.cb,
       );
 
-      // Drag the card to the right by 380 px (well past 30 % of 400).
-      await tester.drag(find.text('Card A'), const Offset(380, 0));
-      await tester.pump();
-      // Settle the Dismissible's snap-back animation (confirmDismiss
-      // returns false so the row stays put).
-      await tester.pump(const Duration(milliseconds: 300));
+      await _commitSwipe(tester, find.text('Card A'));
+      expect(probe.count, 0, reason: 'must not delete before confirm');
+      expect(find.text('Delete this?'), findsOneWidget);
+      expect(find.text('Finance headline'), findsOneWidget);
+      expect(find.text('Card A'), findsOneWidget);
 
+      await _tapConfirm(tester);
       expect(probe.count, 1);
-      // Row is still in the tree — inline-delete pattern.
+      expect(find.byKey(const Key('swipe-delete-confirm')), findsNothing);
       expect(find.text('Card A'), findsOneWidget);
     });
 
-    testWidgets('RIGHT-to-LEFT swipe past threshold fires onDelete',
+    testWidgets('RIGHT-to-LEFT swipe past threshold asks, then Delete fires',
         (tester) async {
       final probe = _Probe();
       await _pumpWith(
@@ -140,12 +186,224 @@ void main() {
         onDelete: probe.cb,
       );
 
-      await tester.drag(find.text('Card B'), const Offset(-380, 0));
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 300));
-
+      await _commitSwipe(
+        tester,
+        find.text('Card B'),
+        delta: const Offset(-380, 0),
+      );
+      expect(probe.count, 0);
+      await _tapConfirm(tester);
       expect(probe.count, 1);
       expect(find.text('Card B'), findsOneWidget);
+    });
+
+    testWidgets('Keep snaps back and does not fire onDelete', (tester) async {
+      final probe = _Probe();
+      await _pumpWith(
+        tester,
+        key: const ValueKey<String>('row-keep'),
+        child: card('K'),
+        onDelete: probe.cb,
+      );
+
+      await _commitSwipe(tester, find.text('Card K'));
+      await _tapKeep(tester);
+
+      expect(probe.count, 0);
+      expect(find.text('Card K'), findsOneWidget);
+      expect(find.byType(Dismissible), findsOneWidget);
+    });
+
+    testWidgets('barrier tap is a keep — no delete', (tester) async {
+      final probe = _Probe();
+      await _pumpWith(
+        tester,
+        key: const ValueKey<String>('row-barrier'),
+        child: card('Z'),
+        onDelete: probe.cb,
+      );
+
+      await _commitSwipe(tester, find.text('Card Z'));
+      expect(find.byKey(const Key('swipe-delete-confirm')), findsOneWidget);
+
+      await tester.tapAt(const Offset(8, 8));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
+
+      expect(probe.count, 0);
+      expect(find.byKey(const Key('swipe-delete-confirm')), findsNothing);
+      expect(find.text('Card Z'), findsOneWidget);
+    });
+
+    testWidgets('system back is a keep — no delete', (tester) async {
+      final probe = _Probe();
+      await _pumpWith(
+        tester,
+        key: const ValueKey<String>('row-back'),
+        child: card('Y'),
+        onDelete: probe.cb,
+      );
+
+      await _commitSwipe(tester, find.text('Card Y'));
+      expect(find.byKey(const Key('swipe-delete-confirm')), findsOneWidget);
+
+      final popped = await tester.binding.handlePopRoute();
+      expect(popped, isTrue);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
+
+      expect(probe.count, 0);
+      expect(find.byKey(const Key('swipe-delete-confirm')), findsNothing);
+      expect(find.text('Card Y'), findsOneWidget);
+    });
+
+    testWidgets('left-edge swipe-back on the overlay is a keep', (tester) async {
+      final probe = _Probe();
+      await _pumpWith(
+        tester,
+        key: const ValueKey<String>('row-edge'),
+        child: card('E'),
+        onDelete: probe.cb,
+      );
+
+      await _commitSwipe(tester, find.text('Card E'));
+      expect(find.byKey(const Key('swipe-delete-confirm-barrier')), findsOneWidget);
+      expect(find.text('Card E').hitTestable(), findsNothing,
+          reason: 'overlay must swallow pointers so the article cannot be swiped');
+
+      final gesture = await tester.startGesture(const Offset(16, 48));
+      await tester.pump();
+      await gesture.moveBy(const Offset(180, 0));
+      await gesture.up();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
+
+      expect(probe.count, 0, reason: 'swipe-back must not delete');
+      expect(find.byKey(const Key('swipe-delete-confirm')), findsNothing);
+      expect(find.text('Card E'), findsOneWidget);
+    });
+
+    testWidgets('right-edge swipe-back on the overlay is a keep', (tester) async {
+      final probe = _Probe();
+      await _pumpWith(
+        tester,
+        key: const ValueKey<String>('row-edge-r'),
+        child: card('Q'),
+        onDelete: probe.cb,
+      );
+
+      await _commitSwipe(tester, find.text('Card Q'));
+      final size = tester.view.physicalSize / tester.view.devicePixelRatio;
+      final gesture =
+          await tester.startGesture(Offset(size.width - 16, 48));
+      await tester.pump();
+      await gesture.moveBy(const Offset(-180, 0));
+      await gesture.up();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
+
+      expect(probe.count, 0);
+      expect(find.byKey(const Key('swipe-delete-confirm')), findsNothing);
+      expect(find.text('Card Q'), findsOneWidget);
+    });
+
+    testWidgets('swipe the popup card away (LTR) is a keep', (tester) async {
+      final probe = _Probe();
+      await _pumpWith(
+        tester,
+        key: const ValueKey<String>('row-card-swipe'),
+        child: card('S'),
+        onDelete: probe.cb,
+      );
+
+      await _commitSwipe(tester, find.text('Card S'));
+      await tester.drag(find.text('Delete this?'), const Offset(180, 0));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
+
+      expect(probe.count, 0);
+      expect(find.byKey(const Key('swipe-delete-confirm')), findsNothing);
+      expect(find.text('Card S'), findsOneWidget);
+    });
+
+    testWidgets('swipe the popup card away (RTL) is a keep', (tester) async {
+      final probe = _Probe();
+      await _pumpWith(
+        tester,
+        key: const ValueKey<String>('row-card-rtl'),
+        child: card('T'),
+        onDelete: probe.cb,
+      );
+
+      await _commitSwipe(tester, find.text('Card T'));
+      await tester.drag(find.text('Delete this?'), const Offset(-180, 0));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
+
+      expect(probe.count, 0);
+      expect(find.byKey(const Key('swipe-delete-confirm')), findsNothing);
+    });
+
+    testWidgets('swipe the popup down is a keep', (tester) async {
+      final probe = _Probe();
+      await _pumpWith(
+        tester,
+        key: const ValueKey<String>('row-card-down'),
+        child: card('U'),
+        onDelete: probe.cb,
+      );
+
+      await _commitSwipe(tester, find.text('Card U'));
+      await tester.drag(find.text('Delete this?'), const Offset(0, 180));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
+
+      expect(probe.count, 0);
+      expect(find.byKey(const Key('swipe-delete-confirm')), findsNothing);
+    });
+
+    testWidgets('tiny pan on the popup snaps back and stays open',
+        (tester) async {
+      final probe = _Probe();
+      await _pumpWith(
+        tester,
+        key: const ValueKey<String>('row-tiny'),
+        child: card('V'),
+        onDelete: probe.cb,
+      );
+
+      await _commitSwipe(tester, find.text('Card V'));
+      await tester.drag(find.text('Delete this?'), const Offset(18, 0));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
+
+      expect(probe.count, 0);
+      expect(find.byKey(const Key('swipe-delete-confirm')), findsOneWidget);
+      await _tapKeep(tester);
+    });
+
+    testWidgets('swipe-back keep then a later Delete still works',
+        (tester) async {
+      final probe = _Probe();
+      await _pumpWith(
+        tester,
+        key: const ValueKey<String>('row-after-back'),
+        child: card('W'),
+        onDelete: probe.cb,
+      );
+
+      await _commitSwipe(tester, find.text('Card W'));
+      final gesture = await tester.startGesture(const Offset(16, 48));
+      await tester.pump();
+      await gesture.moveBy(const Offset(180, 0));
+      await gesture.up();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
+      expect(probe.count, 0);
+
+      await _commitSwipe(tester, find.text('Card W'));
+      await _tapConfirm(tester);
+      expect(probe.count, 1);
     });
 
     testWidgets('small drag UNDER threshold does NOT fire onDelete',
@@ -164,6 +422,7 @@ void main() {
       await tester.pump(const Duration(milliseconds: 300));
 
       expect(probe.count, 0);
+      expect(find.byKey(const Key('swipe-delete-confirm')), findsNothing);
       expect(find.text('Card C'), findsOneWidget);
     });
 
@@ -178,21 +437,51 @@ void main() {
         onDelete: probe.cb,
       );
 
-      // ONE completed swipe. The inline-delete pattern means the row
-      // stays in the tree because confirmDismiss returns false. This
-      // is the core invariant the production code depends on — without
-      // it, the Drift stream would see a row Dismissible thinks is
-      // gone and we'd get visual "ghost row" flickers.
-      await tester.drag(find.text('Card D'), const Offset(380, 0));
-      // 220 ms movementDuration + buffer.
-      await tester.pump(const Duration(milliseconds: 250));
+      await _commitSwipe(tester, find.text('Card D'));
+      await _tapConfirm(tester);
       await tester.pump(const Duration(milliseconds: 250));
 
       expect(probe.count, 1, reason: 'onDelete fired exactly once');
-      // The Dismissible should snap back and the row should remain
-      // findable in the widget tree (not removed by Dismissible).
       expect(find.byType(Dismissible), findsOneWidget,
           reason: 'Dismissible widget stays mounted after a swipe');
+    });
+
+    testWidgets('Keep then a second swipe+Delete fires onDelete once',
+        (tester) async {
+      final probe = _Probe();
+      await _pumpWith(
+        tester,
+        key: const ValueKey<String>('row-retry'),
+        child: card('R'),
+        onDelete: probe.cb,
+      );
+
+      await _commitSwipe(tester, find.text('Card R'));
+      await _tapKeep(tester);
+      expect(probe.count, 0);
+
+      await _commitSwipe(tester, find.text('Card R'));
+      await _tapConfirm(tester);
+      expect(probe.count, 1);
+    });
+
+    testWidgets('confirm:false still deletes instantly (pager-test path)',
+        (tester) async {
+      final probe = _Probe();
+      await _pumpWith(
+        tester,
+        key: const ValueKey<String>('row-instant'),
+        confirm: false,
+        child: card('I'),
+        onDelete: probe.cb,
+      );
+
+      await tester.drag(find.text('Card I'), const Offset(380, 0));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+
+      expect(find.byKey(const Key('swipe-delete-confirm')), findsNothing);
+      expect(probe.count, 1);
     });
   });
 
@@ -200,12 +489,6 @@ void main() {
     testWidgets(
         'background widgets are wired into the Dismissible '
         '(both directions exposed)', (tester) async {
-      // The bg/secondaryBg widgets are only mounted into the tree
-      // while a drag is in flight, so we can't find them via the
-      // element tree at idle. Instead, fetch the Dismissible widget
-      // itself and assert directly on its background+secondaryBackground
-      // fields — this is the wiring contract that production code
-      // depends on.
       final probe = _Probe();
       await _pumpWith(
         tester,
@@ -230,9 +513,6 @@ void main() {
 
     testWidgets('borderRadius=24 renders without overflow (featured card)',
         (tester) async {
-      // The featured card path uses borderRadius=24, contentHeight=280.
-      // Regression guard against accidental layout overflow when those
-      // values are forwarded into the background.
       await _pumpWith(
         tester,
         key: const ValueKey<String>('row-feat'),
@@ -249,6 +529,88 @@ void main() {
 
       expect(tester.takeException(), isNull);
       expect(find.text('Featured'), findsOneWidget);
+    });
+  });
+
+  group('SwipeDeleteConfirmCard — copy and themes', () {
+    Future<void> pumpCard(
+      WidgetTester tester, {
+      required AppColors colors,
+      String headline = 'Delete this article?',
+      String? title,
+      String? message,
+      Size size = const Size(360, 640),
+    }) async {
+      tester.view.physicalSize = size;
+      tester.view.devicePixelRatio = 1;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: ThemeData(
+            brightness: colors.isDark ? Brightness.dark : Brightness.light,
+            extensions: <ThemeExtension<dynamic>>[colors],
+          ),
+          home: Scaffold(
+            backgroundColor: colors.bg,
+            body: Center(
+              child: SwipeDeleteConfirmCard(
+                colors: colors,
+                headline: headline,
+                title: title,
+                message: message,
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+    }
+
+    for (final colors in [AppColors.white, AppColors.dark]) {
+      final label = colors.isDark ? 'dark' : 'light';
+      testWidgets('$label confirm card fits a 320px phone', (tester) async {
+        await pumpCard(
+          tester,
+          colors: colors,
+          title: 'A reasonably long finance headline about markets',
+          message: 'Remove from Finance. It will not come back on refresh.',
+          size: const Size(320, 568),
+        );
+
+        expect(find.text('Delete this article?'), findsOneWidget);
+        expect(find.byKey(const Key('swipe-delete-keep')), findsOneWidget);
+        expect(find.byKey(const Key('swipe-delete-confirm')), findsOneWidget);
+        expect(tester.takeException(), isNull);
+      });
+    }
+
+    testWidgets('empty title and message omit those lines', (tester) async {
+      await pumpCard(
+        tester,
+        colors: AppColors.white,
+        title: '   ',
+        message: '',
+      );
+      expect(find.text('Delete this article?'), findsOneWidget);
+      expect(find.text('   '), findsNothing);
+    });
+
+    testWidgets('very long title does not overflow', (tester) async {
+      await pumpCard(
+        tester,
+        colors: AppColors.dark,
+        title: 'X' * 240,
+        message: 'Remove from AI News. It will not come back on refresh.',
+        size: const Size(320, 568),
+      );
+      expect(tester.takeException(), isNull);
+      final titleFinder = find.text('X' * 240);
+      expect(titleFinder, findsOneWidget);
+      final size = tester.getSize(titleFinder);
+      expect(size.height, lessThan(48));
     });
   });
 
@@ -272,7 +634,6 @@ void main() {
       expect(find.text('Delete'), findsOneWidget);
 
       final iconPos = tester.getCenter(find.byIcon(LucideIcons.trash2));
-      // Aligned to the LEFT half of the 300 px wide container.
       expect(iconPos.dx, lessThan(150));
     });
 
@@ -292,7 +653,6 @@ void main() {
       await tester.pump();
 
       final iconPos = tester.getCenter(find.byIcon(LucideIcons.trash2));
-      // Aligned to the RIGHT half.
       expect(iconPos.dx, greaterThan(150));
     });
 
@@ -323,8 +683,6 @@ void main() {
   group('SwipeToDelete — defensive fallbacks', () {
     testWidgets('omitting `key` falls back to ObjectKey (no crash)',
         (tester) async {
-      // The widget should not crash even when the caller forgets to
-      // pass a key — important because Dismissible REQUIRES a key.
       await _pumpWith(
         tester,
         child: card('X'),
@@ -333,6 +691,22 @@ void main() {
 
       expect(find.byType(Dismissible), findsOneWidget);
       expect(find.text('Card X'), findsOneWidget);
+    });
+
+    testWidgets('missing AppColors still opens confirm', (tester) async {
+      final probe = _Probe();
+      await _pumpWith(
+        tester,
+        key: const ValueKey<String>('row-nocolor'),
+        theme: ThemeData(brightness: Brightness.light),
+        child: card('N'),
+        onDelete: probe.cb,
+      );
+
+      await _commitSwipe(tester, find.text('Card N'));
+      expect(find.byKey(const Key('swipe-delete-confirm')), findsOneWidget);
+      await _tapKeep(tester);
+      expect(probe.count, 0);
     });
   });
 }

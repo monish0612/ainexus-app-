@@ -414,7 +414,7 @@ class OnDemandSummarizeStore with WidgetsBindingObserver {
   Future<FlutterLocalNotificationsPlugin> _ensureFln() async {
     if (_flnPlugin != null) return _flnPlugin!;
     _flnPlugin = FlutterLocalNotificationsPlugin();
-    const android = AndroidInitializationSettings('@mipmap/ic_launcher');
+    const android = AndroidInitializationSettings('ic_notification');
     await _flnPlugin!
         .initialize(const InitializationSettings(android: android));
     return _flnPlugin!;
@@ -432,6 +432,7 @@ class OnDemandSummarizeStore with WidgetsBindingObserver {
         channelDescription: _kFlnChannelDesc,
         importance: Importance.high,
         priority: Priority.high,
+        icon: 'ic_notification',
         category: AndroidNotificationCategory.message,
         color: ui.Color(0xFF8B5CF6),
       );

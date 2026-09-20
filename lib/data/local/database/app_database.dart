@@ -236,6 +236,101 @@ class SavedSearchChatSummaries extends Table {
   Set<Column> get primaryKey => {searchId};
 }
 
+/// Live price-watch products. Identity for future cloud merge is
+/// [identityKey] (`store:productId`), not the local UUID.
+class WatchProducts extends Table {
+  TextColumn get id => text()();
+  TextColumn get name => text()();
+  TextColumn get url => text()();
+  TextColumn get canonicalUrl => text()();
+  TextColumn get store => text()();
+  TextColumn get productId => text().nullable()();
+  TextColumn get imageUrl => text().withDefault(const Constant(''))();
+  RealColumn get currentPrice => real()();
+  RealColumn get basePrice => real()();
+  TextColumn get lastChecked => text()();
+  TextColumn get createdAt => text()();
+  RealColumn get targetPrice => real().nullable()();
+  BoolColumn get notifyOnDecrease =>
+      boolean().withDefault(const Constant(true))();
+  BoolColumn get notifyOnIncrease =>
+      boolean().withDefault(const Constant(false))();
+  BoolColumn get notifyOnTarget =>
+      boolean().withDefault(const Constant(true))();
+  IntColumn get checkIntervalMinutes =>
+      integer().withDefault(const Constant(60))();
+  BoolColumn get isPaused => boolean().withDefault(const Constant(false))();
+  BoolColumn get isPinned => boolean().withDefault(const Constant(false))();
+  BoolColumn get manuallyPaused =>
+      boolean().withDefault(const Constant(false))();
+  TextColumn get pausedAt => text().nullable()();
+  TextColumn get pinnedAt => text().nullable()();
+  RealColumn get pendingPrice => real().nullable()();
+  TextColumn get pendingPriceAt => text().nullable()();
+  IntColumn get consecutiveFailures =>
+      integer().withDefault(const Constant(0))();
+  TextColumn get lastCheckError => text().nullable()();
+  TextColumn get availability => text().nullable()();
+  TextColumn get currencyCode => text().withDefault(const Constant('INR'))();
+  TextColumn get lastSource => text().withDefault(const Constant(''))();
+  IntColumn get lastScore => integer().withDefault(const Constant(0))();
+
+  /// `store:productId` (or `store:url:…` until the SKU is known). Same
+  /// SKU on two phones merges on this key, not the local UUID.
+  TextColumn get identityKey => text().withDefault(const Constant(''))();
+
+  /// ISO-8601 UTC of the last local write. Last-write-wins when a cloud
+  /// catalog exists. NULL on rows created before the v12 migration.
+  TextColumn get updatedAt => text().nullable()();
+
+  /// Bumped on every local mutation so a later sync can collapse upserts.
+  IntColumn get rev => integer().withDefault(const Constant(0))();
+
+  @override
+  Set<Column> get primaryKey => {id};
+
+  @override
+  List<Set<Column>> get uniqueKeys => [
+        {canonicalUrl},
+      ];
+}
+
+class WatchPriceHistory extends Table {
+  TextColumn get id => text()();
+  TextColumn get productId => text()();
+  RealColumn get price => real()();
+  TextColumn get checkedAt => text()();
+  TextColumn get source => text().withDefault(const Constant(''))();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+class WatchAlerts extends Table {
+  TextColumn get id => text()();
+  TextColumn get productId => text()();
+  TextColumn get productName => text()();
+  TextColumn get imageUrl => text().withDefault(const Constant(''))();
+  RealColumn get oldPrice => real()();
+  RealColumn get newPrice => real()();
+  TextColumn get reason => text()();
+  TextColumn get createdAt => text()();
+  BoolColumn get isRead => boolean().withDefault(const Constant(false))();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+/// Cloud-ready delete markers. Local delete writes one of these even while
+/// [NoopWatchSync] drains nothing.
+class WatchTombstones extends Table {
+  TextColumn get identityKey => text()();
+  TextColumn get deletedAt => text()();
+
+  @override
+  Set<Column> get primaryKey => {identityKey};
+}
+
 @DriftDatabase(
   tables: [
     Expenses,
@@ -252,6 +347,10 @@ class SavedSearchChatSummaries extends Table {
     SavedSearches,
     SavedSearchChatMessages,
     SavedSearchChatSummaries,
+    WatchProducts,
+    WatchPriceHistory,
+    WatchAlerts,
+    WatchTombstones,
   ],
 )
 class AppDatabase extends _$AppDatabase {
@@ -267,7 +366,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.executor);
 
   @override
-  int get schemaVersion => 10;
+  int get schemaVersion => 12;
 
   /// Atomically deletes **every row from every table** while leaving the
   /// schema (tables, columns, indexes) fully intact. Powers the "nuke" easter
@@ -303,6 +402,7 @@ class AppDatabase extends _$AppDatabase {
       'Cloud files': await countOf('cloud_files'),
       'Saved searches': await countOf('saved_searches'),
       'Learnings': await countOf('category_learnings'),
+      'Watch': await countOf('watch_products'),
     };
   }
 
@@ -403,6 +503,34 @@ class AppDatabase extends _$AppDatabase {
         // post-upgrade pull simply re-applies identical server data — no loss.
         await migrator.addColumn(expenses, expenses.updatedAt);
       }
+      if (from < 11) {
+        await migrator.createTable(watchProducts);
+        await migrator.createTable(watchPriceHistory);
+        await migrator.createTable(watchAlerts);
+      }
+      if (from < 12) {
+        if (!await _hasColumn('watch_products', 'identity_key')) {
+          await customStatement(
+            "ALTER TABLE watch_products ADD COLUMN identity_key TEXT NOT NULL DEFAULT ''",
+          );
+        }
+        if (!await _hasColumn('watch_products', 'updated_at')) {
+          await customStatement(
+            'ALTER TABLE watch_products ADD COLUMN updated_at TEXT NULL',
+          );
+        }
+        if (!await _hasColumn('watch_products', 'rev')) {
+          await customStatement(
+            'ALTER TABLE watch_products ADD COLUMN rev INTEGER NOT NULL DEFAULT 0',
+          );
+        }
+        await migrator.createTable(watchTombstones);
+        await customStatement(
+          "UPDATE watch_products SET identity_key = store || ':' || "
+          "COALESCE(NULLIF(product_id, ''), canonical_url) "
+          "WHERE identity_key IS NULL OR identity_key = ''",
+        );
+      }
     },
     beforeOpen: (details) async {
       // Index the expenses date column so timeframe drill-down range queries
@@ -411,6 +539,23 @@ class AppDatabase extends _$AppDatabase {
       await customStatement(
         'CREATE INDEX IF NOT EXISTS idx_expenses_date ON expenses (date)',
       );
+      await customStatement(
+        'CREATE INDEX IF NOT EXISTS idx_watch_history_product '
+        'ON watch_price_history (product_id, checked_at)',
+      );
+      await customStatement(
+        'CREATE INDEX IF NOT EXISTS idx_watch_alerts_product '
+        'ON watch_alerts (product_id, created_at)',
+      );
+      await customStatement(
+        'CREATE UNIQUE INDEX IF NOT EXISTS idx_watch_identity '
+        'ON watch_products (identity_key)',
+      );
     },
   );
+
+  Future<bool> _hasColumn(String table, String column) async {
+    final rows = await customSelect('PRAGMA table_info($table)').get();
+    return rows.any((r) => r.read<String>('name') == column);
+  }
 }

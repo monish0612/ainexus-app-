@@ -10,6 +10,7 @@ import '../../../core/services/telegram_logger.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../domain/entities/tutor_entities.dart';
 import '../../widgets/app_toast.dart';
+import '../../widgets/block_selectable.dart';
 import '../settings/settings_controller.dart';
 import '../settings/settings_modal.dart';
 
@@ -300,7 +301,8 @@ class _RephraseLookupScreenState extends ConsumerState<RephraseLookupScreen> {
             ),
           ),
           const SizedBox(height: 20),
-          Container(
+          ArticleSelectionScope(
+            child: Container(
             decoration: BoxDecoration(
               color: colors.bg1,
               borderRadius: BorderRadius.circular(16),
@@ -309,7 +311,8 @@ class _RephraseLookupScreenState extends ConsumerState<RephraseLookupScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Container(
+                NonSelectableChrome(
+                  child: Container(
                   padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
                   decoration: BoxDecoration(
                     color: accent.withValues(alpha: 0.06),
@@ -355,9 +358,10 @@ class _RephraseLookupScreenState extends ConsumerState<RephraseLookupScreen> {
                     ],
                   ),
                 ),
+                ),
                 Padding(
                   padding: const EdgeInsets.all(16),
-                  child: SelectableText(
+                  child: BlockSelectableText(
                     r.rephrasedText,
                     style: GoogleFonts.plusJakartaSans(
                       fontSize: 15,
@@ -368,6 +372,7 @@ class _RephraseLookupScreenState extends ConsumerState<RephraseLookupScreen> {
                 ),
               ],
             ),
+          ),
           ),
         ],
       ),

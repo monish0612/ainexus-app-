@@ -22,18 +22,27 @@ import '../../../core/services/image_search_store.dart';
 import '../../../core/services/nuke_report.dart';
 import '../../../core/services/online_search_store.dart';
 import '../../../core/services/process_text_service.dart';
+import '../../../core/services/followup_history.dart';
+import '../../../core/services/search_share_text.dart';
 import '../../../core/services/summarize_store.dart';
 import '../../../core/services/telegram_logger.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../../core/utils/rephrase_input.dart';
+import '../../../core/utils/tidy_url.dart';
 import '../../../data/local/database/app_database.dart';
 import '../../../data/services/stt_gateway_service.dart';
+import '../../../domain/entities/rephrase_platform.dart';
 import '../../../domain/entities/saved_search.dart';
 import '../../../domain/entities/tutor_entities.dart';
 import '../../widgets/app_shell.dart';
 import '../../widgets/app_toast.dart';
+import '../../providers/profile_photo_provider.dart';
+import '../../widgets/block_selectable.dart';
 import '../../widgets/compact_header.dart';
+import '../../widgets/search_result_actions.dart';
 import '../../widgets/provider_picker.dart';
 import '../../widgets/sources_disclosure.dart';
+import '../news/news_reader_text_scale.dart';
 import '../settings/settings_controller.dart';
 import '../settings/settings_modal.dart';
 import '../expense/widgets/nuke_easter_egg.dart';
@@ -42,6 +51,7 @@ import 'deep_research_sheet.dart';
 import 'image_followup_sheet.dart';
 import 'saved_search_detail_sheet.dart';
 import 'saved_searches_sheet.dart';
+import 'search_answer_text_scale.dart';
 import 'search_followup_sheet.dart';
 
 const int _kMaxRephrase = 5000;
@@ -49,133 +59,9 @@ const int _kMaxCoach = 5000;
 
 // ── Rephrase platform config ─────────────────────────────────────────────────
 
-class _RephrasePlatform {
-  const _RephrasePlatform({
-    required this.id,
-    required this.label,
-    required this.emoji,
-    required this.color,
-    required this.icon,
-  });
+typedef _RephrasePlatform = RephrasePlatform;
 
-  final String id;
-  final String label;
-  final String emoji;
-  final Color color;
-  final IconData icon;
-}
-
-const List<_RephrasePlatform> _rephrasePlatforms = [
-  _RephrasePlatform(
-    id: 'own',
-    label: 'Own',
-    emoji: '✨',
-    color: Color(0xFF0D59F2),
-    icon: LucideIcons.wand2,
-  ),
-  _RephrasePlatform(
-    id: 'casual',
-    label: 'Casual',
-    emoji: '😊',
-    color: Color(0xFF60A5FA),
-    icon: LucideIcons.smile,
-  ),
-  _RephrasePlatform(
-    id: 'sarcastic',
-    label: 'Sarcastic',
-    emoji: '😏',
-    color: Color(0xFFF87171),
-    icon: LucideIcons.flame,
-  ),
-  _RephrasePlatform(
-    id: 'slack',
-    label: 'Slack',
-    emoji: '💬',
-    color: Color(0xFFC084FC),
-    icon: LucideIcons.messageSquare,
-  ),
-  _RephrasePlatform(
-    id: 'email-short',
-    label: 'Email Short',
-    emoji: '✉️',
-    color: Color(0xFFFCD34D),
-    icon: LucideIcons.inbox,
-  ),
-  _RephrasePlatform(
-    id: 'email-long',
-    label: 'Email Long',
-    emoji: '📧',
-    color: Color(0xFFF59E0B),
-    icon: LucideIcons.mail,
-  ),
-  _RephrasePlatform(
-    id: 'whatsapp',
-    label: 'WhatsApp',
-    emoji: '📱',
-    color: Color(0xFF4ADE80),
-    icon: LucideIcons.smartphone,
-  ),
-  _RephrasePlatform(
-    id: 'zoom',
-    label: 'Zoom',
-    emoji: '🎥',
-    color: Color(0xFF60A5FA),
-    icon: LucideIcons.video,
-  ),
-  _RephrasePlatform(
-    id: 'twitter',
-    label: 'Twitter / X',
-    emoji: '𝕏',
-    color: Color(0xFFE7E9EA),
-    icon: LucideIcons.hash,
-  ),
-  _RephrasePlatform(
-    id: 'linkedin',
-    label: 'LinkedIn',
-    emoji: '💼',
-    color: Color(0xFF60A5FA),
-    icon: LucideIcons.briefcase,
-  ),
-  _RephrasePlatform(
-    id: 'forum',
-    label: 'Forum',
-    emoji: '🌐',
-    color: Color(0xFF818CF8),
-    icon: LucideIcons.globe,
-  ),
-];
-
-// ── Own-mode intent parser ──────────────────────────────────────────────────
-
-final _ownDoubleQuote = RegExp(r'"([^"]+)"');
-final _ownSingleQuote = RegExp(r"(?<![a-zA-Z])'([^']+)'");
-final _ownSmartQuote = RegExp(r'\u201c([^\u201d]+)\u201d');
-final _ownPrefixStrip =
-    RegExp(r'^rephrase\b\s*(this\s+)?(it\s+)?(to\s+|as\s+)?', caseSensitive: false);
-
-({String intent, String text}) parseOwnRephraseInput(String raw) {
-  final input = raw.trim();
-  if (input.isEmpty) return (intent: '', text: '');
-
-  for (final pattern in [_ownDoubleQuote, _ownSingleQuote, _ownSmartQuote]) {
-    final match = pattern.firstMatch(input);
-    if (match != null) {
-      final quoted = match.group(1)!.trim();
-      if (quoted.isEmpty) continue;
-
-      final before = input.substring(0, match.start).trim();
-      final intent = before.replaceFirst(_ownPrefixStrip, '').trim();
-      return (intent: intent, text: quoted);
-    }
-  }
-
-  // No quotes found — treat as plain text with no explicit intent
-  final stripped = input.replaceFirst(_ownPrefixStrip, '').trim();
-  if (stripped.length < input.length) {
-    return (intent: '', text: stripped);
-  }
-  return (intent: '', text: input);
-}
+const List<_RephrasePlatform> _rephrasePlatforms = kRephrasePlatforms;
 
 // ── Coach variation tone colours ─────────────────────────────────────────────
 
@@ -312,6 +198,10 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
   /// null and the second tap reads the stale state). Stays `true` for the
   /// duration of the snackbar to also serialise the optional Undo path.
   bool _saveToggleInFlight = false;
+
+  /// Re-entrancy guard for the result share sheet so a double-tap cannot
+  /// open two choosers. Independent of [_saveToggleInFlight].
+  bool _shareInFlight = false;
 
   // ── InsightAI Image (vision) state ───────────────────────────────────
   //
@@ -495,8 +385,7 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
     if (draftId != null) {
       // discardDraftIfAny() is a no-op if the user already promoted to
       // saved, so this is safe regardless of the bookmark state.
-      unawaited(
-          ref.read(savedSearchStoreProvider).discardDraftIfAny(draftId));
+      unawaited(ref.read(savedSearchStoreProvider).discardDraftIfAny(draftId));
     }
     setState(() {
       _summaryUrlCtrl.clear();
@@ -528,9 +417,8 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
     // synthesize a placeholder query so the History card still has a
     // human-readable label.
     if (query.isEmpty && !isImageResult) return;
-    final effectiveQuery = query.isEmpty && isImageResult
-        ? 'Image analysis'
-        : query;
+    final effectiveQuery =
+        query.isEmpty && isImageResult ? 'Image analysis' : query;
     _draftStartInFlight = true;
     final settings = ref.read(settingsProvider);
     final isUrl = !isImageResult && _isUrl(query);
@@ -541,9 +429,7 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
     final provider = isUrl
         ? (settings.summarizeOverride == 'xgrok' ? 'xgrok' : 'gemini')
         : (settings.onlineSearchProvider == 'xgrok' ? 'xgrok' : 'gemini');
-    final mode = isUrl
-        ? null
-        : (_searchUseDeepModel ? 'deep' : 'lite');
+    final mode = isUrl ? null : (_searchUseDeepModel ? 'deep' : 'lite');
     final kind = isImageResult
         ? SavedSearchKind.image
         : (isUrl ? SavedSearchKind.url : SavedSearchKind.query);
@@ -691,16 +577,21 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
         if (id.isEmpty || localIds.contains(id)) continue;
 
         await db.into(db.savedWords).insertOnConflictUpdate(
-          SavedWordsCompanion.insert(
-            id: id,
-            word: r['word']?.toString() ?? '',
-            definition: r['definition']?.toString() ?? '',
-            pronunciation: r['pronunciation']?.toString() ?? '',
-            partOfSpeech: r['part_of_speech']?.toString() ?? r['partOfSpeech']?.toString() ?? '',
-            savedAt: r['saved_at']?.toString() ?? r['savedAt']?.toString() ?? '',
-            responseJson: drift.Value(r['response_json']?.toString() ?? r['responseJson']?.toString() ?? ''),
-          ),
-        );
+              SavedWordsCompanion.insert(
+                id: id,
+                word: r['word']?.toString() ?? '',
+                definition: r['definition']?.toString() ?? '',
+                pronunciation: r['pronunciation']?.toString() ?? '',
+                partOfSpeech: r['part_of_speech']?.toString() ??
+                    r['partOfSpeech']?.toString() ??
+                    '',
+                savedAt:
+                    r['saved_at']?.toString() ?? r['savedAt']?.toString() ?? '',
+                responseJson: drift.Value(r['response_json']?.toString() ??
+                    r['responseJson']?.toString() ??
+                    ''),
+              ),
+            );
         inserted++;
       }
 
@@ -733,7 +624,8 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
         final parsed = parseOwnRephraseInput(raw);
         textToSend = parsed.text.isNotEmpty ? parsed.text : raw;
         intentToSend = parsed.intent.isNotEmpty ? parsed.intent : null;
-        TLog.d('Tutor', 'Own rephrase → intent="${intentToSend ?? ''}", textLen=${textToSend.length}');
+        TLog.d('Tutor',
+            'Own rephrase → intent="${intentToSend ?? ''}", textLen=${textToSend.length}');
       } else {
         textToSend = raw;
         intentToSend = null;
@@ -741,11 +633,11 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
 
       final liteModel = ref.read(settingsProvider).liteModel;
       final result = await ref.read(tutorAiServiceProvider).rephrase(
-        text: textToSend,
-        platform: _selectedPlatform.id,
-        intent: intentToSend,
-        liteModel: liteModel,
-      );
+            text: textToSend,
+            platform: _selectedPlatform.id,
+            intent: intentToSend,
+            liteModel: liteModel,
+          );
       if (!mounted) return;
       setState(() {
         _rephraseResult = result;
@@ -755,9 +647,11 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
       TLog.w('Tutor', 'Rephrase parse error: $e');
       if (!mounted) return;
       setState(() => _rephraseLoading = false);
-      _showMessage('Could not parse your input. Use: your instruction "text to rephrase"');
+      _showMessage(
+          'Could not parse your input. Use: your instruction "text to rephrase"');
     } catch (e) {
-      final aiErr = AiError.fromAny(e, fallbackMessage: 'Rephrase failed. Please try again.');
+      final aiErr = AiError.fromAny(e,
+          fallbackMessage: 'Rephrase failed. Please try again.');
       TLog.e('Tutor', 'Rephrase failed → ${aiErr.code}', error: e);
       if (!mounted) return;
       setState(() => _rephraseLoading = false);
@@ -787,7 +681,8 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
         _coachLoading = false;
       });
     } catch (e) {
-      final aiErr = AiError.fromAny(e, fallbackMessage: 'Coach is unavailable. Please try again.');
+      final aiErr = AiError.fromAny(e,
+          fallbackMessage: 'Coach is unavailable. Please try again.');
       TLog.e('Tutor', 'Coach failed → ${aiErr.code}', error: e);
       if (!mounted) return;
       setState(() => _coachLoading = false);
@@ -811,9 +706,7 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
     // Only surface the "unavailable" toast for genuine engine/permission
     // failures — NOT for super-fast taps where the user already released
     // before init finished (status would be idle/stopping in that case).
-    if (!ok &&
-        mounted &&
-        _voice.status == HoldToSpeakStatus.unsupported) {
+    if (!ok && mounted && _voice.status == HoldToSpeakStatus.unsupported) {
       _showMessage('Voice input is not available on this device');
     }
   }
@@ -866,21 +759,9 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
 
   // ── Summarizer & Tavily ──────────────────────────────────────────────────
 
-  bool _isUrl(String text) {
-    final t = text.trim();
-    if (t.startsWith('http://') || t.startsWith('https://')) return true;
-    final domainPattern = RegExp(r'^[\w-]+(\.[\w-]+)+(/\S*)?$');
-    return domainPattern.hasMatch(t);
-  }
+  bool _isUrl(String text) => TidyUrl.isUrlField(text);
 
-  String _normalizeUrl(String raw) {
-    var url = raw.trim();
-    if (url.isEmpty) return url;
-    if (!url.startsWith('http://') && !url.startsWith('https://')) {
-      url = 'https://$url';
-    }
-    return url;
-  }
+  String _normalizeUrl(String raw) => TidyUrl.normalizeForSummarize(raw);
 
   void _handleSummarizerSubmit() {
     final text = _summaryUrlCtrl.text.trim();
@@ -965,8 +846,8 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
     _searchErrorShown = false;
 
     final settings = ref.read(settingsProvider);
-    final useXGrok = settings.xgrokEnabled &&
-        settings.onlineSearchProvider == 'xgrok';
+    final useXGrok =
+        settings.xgrokEnabled && settings.onlineSearchProvider == 'xgrok';
 
     // Lite is the default; only opt into Deep when the toggle is on. We
     // forward `mode` plus the corresponding deep / lite model hints so the
@@ -1015,6 +896,10 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
   void _runSummarize() {
     final url = _normalizeUrl(_summaryUrlCtrl.text);
     if (url.isEmpty || _summaryLoading) return;
+    if (_summaryUrlCtrl.text.trim() != url) {
+      _summaryUrlCtrl.text = url;
+      _summaryUrlCtrl.selection = TextSelection.collapsed(offset: url.length);
+    }
 
     // Detach from any in-flight online search to prevent its listener from
     // overwriting the URL-summarize loading state.
@@ -1032,10 +917,11 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
     _summarizeErrorShown = false;
 
     final settings = ref.read(settingsProvider);
-    final useXGrok = settings.xgrokEnabled &&
-        settings.summarizeOverride == 'xgrok';
+    final useXGrok =
+        settings.xgrokEnabled && settings.summarizeOverride == 'xgrok';
 
-    TLog.d('Tutor', 'Summarize → $url [provider=${useXGrok ? 'xGrok' : 'Gemini'}]');
+    TLog.d('Tutor',
+        'Summarize → $url [provider=${useXGrok ? 'xGrok' : 'Gemini'}]');
 
     // See [_runTavilySearch] for the rationale on discarding the prior
     // draft when the user kicks off a brand new run without first
@@ -1227,11 +1113,12 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
         setState(() => _pickingImage = false);
         return;
       }
-      TLog.i('Tutor',
+      TLog.i(
+          'Tutor',
           'imageAttached source=${fromCamera ? 'camera' : 'gallery'} '
-          'upload=${(picked.uploadBytes.lengthInBytes / 1024).toStringAsFixed(0)}KB '
-          'thumb=${(picked.thumbnailBytes.lengthInBytes / 1024).toStringAsFixed(1)}KB '
-          '${picked.width}x${picked.height} src=${picked.sourceMediaType}');
+              'upload=${(picked.uploadBytes.lengthInBytes / 1024).toStringAsFixed(0)}KB '
+              'thumb=${(picked.thumbnailBytes.lengthInBytes / 1024).toStringAsFixed(1)}KB '
+              '${picked.width}x${picked.height} src=${picked.sourceMediaType}');
       setState(() {
         _pendingImage = picked;
         _pickingImage = false;
@@ -1294,15 +1181,16 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
     _imageErrorShown = false;
 
     final settings = ref.read(settingsProvider);
-    final useXGrok = settings.xgrokEnabled &&
-        settings.onlineSearchProvider == 'xgrok';
+    final useXGrok =
+        settings.xgrokEnabled && settings.onlineSearchProvider == 'xgrok';
     final mode = _searchUseDeepModel ? 'deep' : 'lite';
 
     final query = _summaryUrlCtrl.text.trim();
     final providerTag = useXGrok ? 'xGrok' : 'Gemini';
-    TLog.i('Tutor',
+    TLog.i(
+        'Tutor',
         'imageSearchStart provider=$providerTag mode=$mode '
-        'queryLen=${query.length} image=${(picked.uploadBytes.lengthInBytes / 1024).toStringAsFixed(0)}KB');
+            'queryLen=${query.length} image=${(picked.uploadBytes.lengthInBytes / 1024).toStringAsFixed(0)}KB');
 
     // Discard prior text/url draft so we don't accumulate orphans for
     // power users who chain searches across modalities.
@@ -1444,16 +1332,16 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
 
     try {
       await db.into(db.savedWords).insert(
-        SavedWordsCompanion.insert(
-          id: id,
-          word: r.word,
-          definition: r.definition,
-          pronunciation: r.pronunciation,
-          partOfSpeech: r.partOfSpeech,
-          savedAt: now,
-          responseJson: drift.Value(json),
-        ),
-      );
+            SavedWordsCompanion.insert(
+              id: id,
+              word: r.word,
+              definition: r.definition,
+              pronunciation: r.pronunciation,
+              partOfSpeech: r.partOfSpeech,
+              savedAt: now,
+              responseJson: drift.Value(json),
+            ),
+          );
     } catch (e) {
       TLog.e('Tutor', 'Failed to save word locally', error: e);
       if (mounted) _showMessage('Failed to save word. Please try again.');
@@ -1475,14 +1363,14 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
 
     try {
       await ref.read(tutorAiServiceProvider).syncSavedWord(
-        id: id,
-        word: r.word,
-        definition: r.definition,
-        pronunciation: r.pronunciation,
-        partOfSpeech: r.partOfSpeech,
-        savedAt: now,
-        responseJson: json,
-      );
+            id: id,
+            word: r.word,
+            definition: r.definition,
+            pronunciation: r.pronunciation,
+            partOfSpeech: r.partOfSpeech,
+            savedAt: now,
+            responseJson: json,
+          );
     } catch (e) {
       TLog.w('Tutor', 'Sync saved word to server failed: $e');
       _showSyncError();
@@ -1558,7 +1446,8 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
       SnackBar(
         content: Row(
           children: [
-            Icon(LucideIcons.cloudOff, size: 16, color: colors.isDark ? Colors.white70 : Colors.white),
+            Icon(LucideIcons.cloudOff,
+                size: 16, color: colors.isDark ? Colors.white70 : Colors.white),
             const SizedBox(width: 8),
             Text(
               'Sync failed — saved locally',
@@ -1583,6 +1472,65 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
   Future<void> _copy(String text) async {
     await Clipboard.setData(ClipboardData(text: text));
     _showMessage('Copied');
+  }
+
+  /// Follow-up turns for the current InsightAI result. Live cache first
+  /// (unsaved drafts), then the persisted draft/saved row. Does not
+  /// mutate save or chat state.
+  Future<List<FollowUpMessage>> _loadSearchShareMessages() async {
+    final query = _summaryUrlCtrl.text.trim();
+    if (query.isNotEmpty) {
+      final live = SearchFollowUpStore.instance.shareMessages(query);
+      if (live.isNotEmpty) return live;
+    }
+    final imageKey = _imageSearchKey;
+    if (imageKey != null) {
+      final img = ImageFollowUpStore.instance.shareMessages(imageKey);
+      if (img.isNotEmpty) return img;
+    }
+    final id = _activeSearchId;
+    if (id == null) return const [];
+    try {
+      final rows = await ref.read(savedSearchStoreProvider).loadMessages(id);
+      return searchShareMessagesFromPersisted(rows);
+    } catch (e) {
+      TLog.w('Tutor', 'Share: could not load follow-up chat', error: e);
+      return const [];
+    }
+  }
+
+  Future<void> _shareCurrentSearch(Object result) async {
+    if (_shareInFlight) return;
+    setState(() => _shareInFlight = true);
+    HapticFeedback.lightImpact();
+    try {
+      final query = _summaryUrlCtrl.text.trim();
+      final messages = await _loadSearchShareMessages();
+      final opened = await shareInsightResult(
+        result: result,
+        query: query,
+        messages: messages,
+      );
+      if (!mounted || opened) return;
+      _showMessage('Could not open share');
+    } finally {
+      if (mounted) {
+        setState(() => _shareInFlight = false);
+      } else {
+        _shareInFlight = false;
+      }
+    }
+  }
+
+  Widget _buildShareSaveCluster({
+    required AppColors colors,
+    required Object result,
+  }) {
+    return SearchShareSaveCluster(
+      colors: colors,
+      onShare: _shareInFlight ? null : () => _shareCurrentSearch(result),
+      saveButton: _buildSaveResultButton(colors: colors, result: result),
+    );
   }
 
   void _openUrl(String url) {
@@ -1611,8 +1559,9 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
   }
 
   void _handleIncomingSummarizerUrl(String url) {
+    final cleaned = TidyUrl.normalizeForSummarize(url);
     _tabController.animateTo(0);
-    _summaryUrlCtrl.text = url;
+    _summaryUrlCtrl.text = cleaned.isNotEmpty ? cleaned : url;
     _handleSummarizerSubmit();
   }
 
@@ -1667,7 +1616,8 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
               _summaryFocusNode.requestFocus();
               TLog.i('Widget', 'Summarizer field focused successfully');
             } else {
-              TLog.w('Widget', 'Tab mismatch: expected 0, got ${_tabController.index}');
+              TLog.w('Widget',
+                  'Tab mismatch: expected 0, got ${_tabController.index}');
             }
           } catch (e) {
             TLog.e('Widget', 'Auto-focus failed', error: e);
@@ -1682,6 +1632,7 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
       children: [
         CompactHeader(
           title: 'Tutor',
+          photoPath: ref.watch(profilePhotoPathProvider),
           onAvatarTap: () => showSettingsModal(context, ref),
         ),
         Material(
@@ -1771,6 +1722,64 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
             ),
           ],
         ),
+        const SizedBox(height: 12),
+        SizedBox(
+          height: 36,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            physics: const BouncingScrollPhysics(),
+            itemCount: kRewritePlatforms.length,
+            separatorBuilder: (_, __) => const SizedBox(width: 8),
+            itemBuilder: (_, index) {
+              final platform = kRewritePlatforms[index];
+              final selected = _selectedPlatform.id == platform.id;
+              return GestureDetector(
+                onTap: () {
+                  HapticFeedback.selectionClick();
+                  setState(() {
+                    _selectedPlatform = platform;
+                    _rephraseResult = null;
+                  });
+                },
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(999),
+                    color: selected
+                        ? platform.color.withValues(alpha: 0.22)
+                        : colors.bg2,
+                    border: Border.all(
+                      color: selected
+                          ? platform.color.withValues(alpha: 0.7)
+                          : colors.border2,
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        platform.icon,
+                        size: 14,
+                        color: selected ? platform.color : colors.text4,
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        platform.label,
+                        style: GoogleFonts.plusJakartaSans(
+                          fontSize: 12,
+                          fontWeight:
+                              selected ? FontWeight.w700 : FontWeight.w600,
+                          color: selected ? platform.color : colors.text3,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
         const SizedBox(height: 16),
         _glassCard(
           colors,
@@ -1844,14 +1853,12 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
           width: double.infinity,
           height: 52,
           child: FilledButton.icon(
-            onPressed:
-                (_rephraseCtrl.text.trim().isEmpty || _rephraseLoading)
-                    ? null
-                    : _runRephrase,
+            onPressed: (_rephraseCtrl.text.trim().isEmpty || _rephraseLoading)
+                ? null
+                : _runRephrase,
             style: FilledButton.styleFrom(
               backgroundColor: AppColors.accent,
-              disabledBackgroundColor:
-                  AppColors.accent.withValues(alpha: 0.25),
+              disabledBackgroundColor: AppColors.accent.withValues(alpha: 0.25),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(16),
               ),
@@ -1916,8 +1923,28 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
             fontWeight: FontWeight.w700,
             color: _selectedPlatform.color,
           ),
-          items: _rephrasePlatforms
-              .map(
+          items: [
+            if (kRewritePlatforms.any((p) => p.id == _selectedPlatform.id))
+              DropdownMenuItem(
+                value: _selectedPlatform.id,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(_selectedPlatform.icon,
+                        size: 14, color: _selectedPlatform.color),
+                    const SizedBox(width: 8),
+                    Text(
+                      _selectedPlatform.label,
+                      style: GoogleFonts.plusJakartaSans(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: colors.text,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ..._rephrasePlatforms.map(
                 (p) => DropdownMenuItem(
                   value: p.id,
                   child: Row(
@@ -1936,12 +1963,12 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
                     ],
                   ),
                 ),
-              )
-              .toList(),
+              ),
+          ],
           onChanged: (id) {
             if (id == null) return;
             setState(() {
-              _selectedPlatform =
+              _selectedPlatform = rephrasePlatformById(id) ??
                   _rephrasePlatforms.firstWhere((p) => p.id == id);
               _rephraseResult = null;
             });
@@ -1977,7 +2004,8 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
           ],
         ),
         const SizedBox(height: 12),
-        Container(
+        ArticleSelectionScope(
+          child: Container(
           decoration: BoxDecoration(
             color: plat.color.withValues(alpha: 0.06),
             borderRadius: BorderRadius.circular(16),
@@ -1986,7 +2014,8 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Padding(
+              NonSelectableChrome(
+                child: Padding(
                 padding: const EdgeInsets.fromLTRB(14, 12, 10, 8),
                 child: Row(
                   children: [
@@ -2020,6 +2049,7 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
                   ],
                 ),
               ),
+              ),
               Padding(
                 padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
                 child: Container(
@@ -2030,7 +2060,7 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
                     border:
                         Border.all(color: plat.color.withValues(alpha: 0.2)),
                   ),
-                  child: SelectableText(
+                  child: BlockSelectableText(
                     result.rephrasedText,
                     style: GoogleFonts.plusJakartaSans(
                       fontSize: 15,
@@ -2042,6 +2072,7 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
               ),
             ],
           ),
+        ),
         ),
         const SizedBox(height: 12),
         OutlinedButton.icon(
@@ -2168,14 +2199,12 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
           width: double.infinity,
           height: 52,
           child: FilledButton.icon(
-            onPressed:
-                (_coachCtrl.text.trim().isEmpty || _coachLoading)
-                    ? null
-                    : _runCoach,
+            onPressed: (_coachCtrl.text.trim().isEmpty || _coachLoading)
+                ? null
+                : _runCoach,
             style: FilledButton.styleFrom(
               backgroundColor: AppColors.accent,
-              disabledBackgroundColor:
-                  AppColors.accent.withValues(alpha: 0.25),
+              disabledBackgroundColor: AppColors.accent.withValues(alpha: 0.25),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(16),
               ),
@@ -2284,7 +2313,8 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
           ),
         ),
         const SizedBox(height: 10),
-        _glassCard(
+        ArticleSelectionScope(
+          child: _glassCard(
           colors,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -2294,7 +2324,8 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
+                    NonSelectableChrome(
+                      child: Row(
                       children: [
                         Icon(LucideIcons.quote, size: 12, color: colors.text5),
                         const SizedBox(width: 6),
@@ -2309,8 +2340,9 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
                         ),
                       ],
                     ),
+                    ),
                     const SizedBox(height: 8),
-                    Text(
+                    BlockSelectableText(
                       _coachCtrl.text,
                       style: GoogleFonts.plusJakartaSans(
                         fontSize: 13.5,
@@ -2337,7 +2369,8 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
+                    NonSelectableChrome(
+                      child: Row(
                       children: [
                         Container(
                           width: 22,
@@ -2390,8 +2423,11 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
                         ),
                       ],
                     ),
+                    ),
                     const SizedBox(height: 12),
-                    _coachViewToggle(colors, addedGreen),
+                    NonSelectableChrome(
+                      child: _coachViewToggle(colors, addedGreen),
+                    ),
                     const SizedBox(height: 14),
                     AnimatedSize(
                       duration: const Duration(milliseconds: 220),
@@ -2405,7 +2441,7 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
                           opacity: anim,
                           child: child,
                         ),
-                        child: SelectableText.rich(
+                        child: Text.rich(
                           key: ValueKey<bool>(_coachShowDiff),
                           TextSpan(
                             style: GoogleFonts.plusJakartaSans(
@@ -2441,17 +2477,19 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        'WHY',
-                        style: GoogleFonts.plusJakartaSans(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w700,
-                          color: colors.text5,
-                          letterSpacing: 1,
+                      NonSelectableChrome(
+                        child: Text(
+                          'WHY',
+                          style: GoogleFonts.plusJakartaSans(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
+                            color: colors.text5,
+                            letterSpacing: 1,
+                          ),
                         ),
                       ),
                       const SizedBox(height: 6),
-                      SelectableText(
+                      BlockSelectableText(
                         result.explanation,
                         style: GoogleFonts.plusJakartaSans(
                           fontSize: 13,
@@ -2465,6 +2503,7 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
               ],
             ],
           ),
+        ),
         ),
         if (result.variations.isNotEmpty) ...[
           const SizedBox(height: 20),
@@ -2584,7 +2623,8 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
-      child: ClipRRect(
+      child: ArticleSelectionScope(
+        child: ClipRRect(
         borderRadius: BorderRadius.circular(16),
         child: Container(
           color: color.withValues(alpha: 0.08),
@@ -2596,7 +2636,8 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Padding(
+                    NonSelectableChrome(
+                      child: Padding(
                       padding: const EdgeInsets.fromLTRB(12, 12, 14, 4),
                       child: Row(
                         children: [
@@ -2620,7 +2661,8 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
                               child: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  Icon(LucideIcons.copy, size: 13, color: colors.text4),
+                                  Icon(LucideIcons.copy,
+                                      size: 13, color: colors.text4),
                                   const SizedBox(width: 4),
                                   Text(
                                     'Copy',
@@ -2637,9 +2679,10 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
                         ],
                       ),
                     ),
+                    ),
                     Padding(
                       padding: const EdgeInsets.fromLTRB(12, 4, 14, 12),
-                      child: SelectableText(
+                      child: BlockSelectableText(
                         v.text,
                         style: GoogleFonts.plusJakartaSans(
                           fontSize: 14,
@@ -2654,6 +2697,7 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
             ],
           ),
         ),
+      ),
       ),
     );
   }
@@ -2794,15 +2838,13 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
                           height: 18,
                           child: CircularProgressIndicator(
                             strokeWidth: 2,
-                            color:
-                                colors.isDark ? colors.text : Colors.white,
+                            color: colors.isDark ? colors.text : Colors.white,
                           ),
                         )
                       : Icon(
                           LucideIcons.sparkles,
                           size: 17,
-                          color:
-                              colors.isDark ? colors.text : Colors.white,
+                          color: colors.isDark ? colors.text : Colors.white,
                         ),
                   label: Text(
                     _dictLoading ? 'Looking up…' : 'Look up',
@@ -2832,7 +2874,8 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
             height: 48,
             child: OutlinedButton.icon(
               onPressed: _openSavedWordsModal,
-              icon: const Icon(LucideIcons.bookmark, size: 16, color: AppColors.accent),
+              icon: const Icon(LucideIcons.bookmark,
+                  size: 16, color: AppColors.accent),
               label: Text(
                 'Saved Words · ${_savedWords.length}',
                 style: GoogleFonts.plusJakartaSans(
@@ -2842,7 +2885,8 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
                 ),
               ),
               style: OutlinedButton.styleFrom(
-                side: BorderSide(color: AppColors.accent.withValues(alpha: 0.3)),
+                side:
+                    BorderSide(color: AppColors.accent.withValues(alpha: 0.3)),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(14),
                 ),
@@ -2864,7 +2908,8 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         const SizedBox(height: 20),
-        Container(
+        ArticleSelectionScope(
+          child: Container(
           decoration: BoxDecoration(
             color: colors.bg1,
             borderRadius: BorderRadius.circular(16),
@@ -2915,12 +2960,10 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
                               vertical: 4,
                             ),
                             decoration: BoxDecoration(
-                              color:
-                                  AppColors.accent.withValues(alpha: 0.12),
+                              color: AppColors.accent.withValues(alpha: 0.12),
                               borderRadius: BorderRadius.circular(20),
                               border: Border.all(
-                                color: AppColors.accent
-                                    .withValues(alpha: 0.28),
+                                color: AppColors.accent.withValues(alpha: 0.28),
                               ),
                             ),
                             child: Text(
@@ -2955,7 +2998,7 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
                       ),
                     ),
                     const SizedBox(height: 8),
-                    Text(
+                    BlockSelectableText(
                       r.definition,
                       style: GoogleFonts.plusJakartaSans(
                         fontSize: 15,
@@ -3028,12 +3071,10 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
                                 decoration: BoxDecoration(
                                   color: colors.bg2,
                                   borderRadius: BorderRadius.circular(12),
-                                  border:
-                                      Border.all(color: colors.border2),
+                                  border: Border.all(color: colors.border2),
                                 ),
                                 child: Row(
-                                  crossAxisAlignment:
-                                      CrossAxisAlignment.start,
+                                  crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Container(
                                       width: 24,
@@ -3050,8 +3091,7 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
                                       ),
                                       child: Text(
                                         '${e.key + 1}',
-                                        style:
-                                            GoogleFonts.plusJakartaSans(
+                                        style: GoogleFonts.plusJakartaSans(
                                           fontSize: 10,
                                           fontWeight: FontWeight.w800,
                                           color: AppColors.accent,
@@ -3060,10 +3100,9 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
                                     ),
                                     const SizedBox(width: 10),
                                     Expanded(
-                                      child: Text(
+                                      child: BlockSelectableText(
                                         e.value,
-                                        style:
-                                            GoogleFonts.plusJakartaSans(
+                                        style: GoogleFonts.plusJakartaSans(
                                           fontSize: 13,
                                           height: 1.65,
                                           fontStyle: FontStyle.italic,
@@ -3136,11 +3175,9 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
                       ClipRRect(
                         borderRadius: BorderRadius.circular(12),
                         child: Container(
-                          color: AppColors.accentCyan
-                              .withValues(alpha: 0.06),
+                          color: AppColors.accentCyan.withValues(alpha: 0.06),
                           child: Row(
-                            crossAxisAlignment:
-                                CrossAxisAlignment.start,
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Container(
                                 width: 3,
@@ -3148,12 +3185,10 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
                               ),
                               Expanded(
                                 child: Padding(
-                                  padding:
-                                      const EdgeInsets.all(14),
-                                  child: Text(
+                                  padding: const EdgeInsets.all(14),
+                                  child: BlockSelectableText(
                                     r.usageGuide,
-                                    style: GoogleFonts
-                                        .plusJakartaSans(
+                                    style: GoogleFonts.plusJakartaSans(
                                       fontSize: 13,
                                       height: 1.7,
                                       color: colors.text,
@@ -3171,7 +3206,8 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
               ],
 
               // Save button
-              Padding(
+              NonSelectableChrome(
+                child: Padding(
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
                 child: FilledButton.icon(
                   onPressed: showSaved ? null : _saveWord,
@@ -3179,9 +3215,8 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
                     backgroundColor: showSaved
                         ? const Color(0xFF34D399).withValues(alpha: 0.15)
                         : AppColors.accent.withValues(alpha: 0.18),
-                    foregroundColor: showSaved
-                        ? const Color(0xFF34D399)
-                        : AppColors.accent,
+                    foregroundColor:
+                        showSaved ? const Color(0xFF34D399) : AppColors.accent,
                     disabledBackgroundColor:
                         const Color(0xFF34D399).withValues(alpha: 0.12),
                     disabledForegroundColor: const Color(0xFF34D399),
@@ -3190,8 +3225,7 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
                       borderRadius: BorderRadius.circular(14),
                       side: BorderSide(
                         color: showSaved
-                            ? const Color(0xFF34D399)
-                                .withValues(alpha: 0.4)
+                            ? const Color(0xFF34D399).withValues(alpha: 0.4)
                             : AppColors.accent.withValues(alpha: 0.45),
                         width: 1.5,
                       ),
@@ -3214,8 +3248,10 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
                   ),
                 ),
               ),
+              ),
             ],
           ),
+        ),
         ),
       ],
     );
@@ -3267,175 +3303,174 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
     // disabled in settings, the picker still shows Gemini until the user
     // re-enables xGrok. Search routing already gates on `xgrokEnabled` via
     // `onlineSearchIsXGrok`, so behaviour stays correct either way.
-    final selectedProviderId = settings.xgrokEnabled
-        ? settings.onlineSearchProvider
-        : 'gemini';
+    final selectedProviderId =
+        settings.xgrokEnabled ? settings.onlineSearchProvider : 'gemini';
 
     return Stack(
       children: [
         ListView(
           padding: EdgeInsets.fromLTRB(16, 16, 16, hasFollowUp ? 120 : 100),
-      children: [
-        Row(
           children: [
-            const Text('🔍', style: TextStyle(fontSize: 22)),
-            const SizedBox(width: 8),
+            Row(
+              children: [
+                const Text('🔍', style: TextStyle(fontSize: 22)),
+                const SizedBox(width: 8),
+                Text(
+                  'InsightAI',
+                  style: GoogleFonts.plusJakartaSans(
+                    fontSize: 22,
+                    fontWeight: FontWeight.w900,
+                    color: colors.text,
+                    letterSpacing: -0.5,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
             Text(
-              'InsightAI',
+              'Summarize any URL or ask anything with real-time web search',
               style: GoogleFonts.plusJakartaSans(
-                fontSize: 22,
-                fontWeight: FontWeight.w900,
-                color: colors.text,
-                letterSpacing: -0.5,
+                fontSize: 13,
+                height: 1.5,
+                color: colors.text3,
               ),
             ),
+            const SizedBox(height: 16),
+            _SearchInputBox(
+              controller: _summaryUrlCtrl,
+              focusNode: _summaryFocusNode,
+              colors: colors,
+              isUrl: _isUrl(_summaryUrlCtrl.text),
+              hasText: _summaryUrlCtrl.text.trim().isNotEmpty,
+              isLoading: _summaryLoading,
+              isListening: _isListening && _voiceTarget == _summaryUrlCtrl,
+              // Image attach controls — wired only for this tab. The voice
+              // assistant + dictionary tabs that share _SearchInputBox don't
+              // pass these and therefore keep their previous chrome.
+              pendingImageThumbnail: _pendingImage?.thumbnailBytes,
+              pendingImageWidth: _pendingImage?.width,
+              pendingImageHeight: _pendingImage?.height,
+              pendingImageSizeKb: _pendingImage == null
+                  ? null
+                  : (_pendingImage!.uploadBytes.lengthInBytes / 1024).round(),
+              isAttachingImage: _pickingImage,
+              onAttachImage: _openImagePickerSheet,
+              onClearPendingImage: _clearPendingImage,
+              onlineSearchProvider: _isUrl(_summaryUrlCtrl.text)
+                  ? (settings.xgrokEnabled &&
+                          settings.summarizeOverride == 'xgrok'
+                      ? 'xGrok'
+                      : 'Gemini')
+                  : (settings.onlineSearchIsXGrok ? 'xGrok' : 'Gemini'),
+              providerOptions: providerOptions,
+              selectedProviderId: selectedProviderId,
+              onProviderChanged: (id) {
+                // Persist immediately. setOnlineSearchProvider already syncs to
+                // SharedPreferences and queues a remote push, so the choice
+                // survives restarts and propagates to the settings page.
+                ref.read(settingsProvider.notifier).setOnlineSearchProvider(id);
+              },
+              searchUseDeepModel: _searchUseDeepModel,
+              onSearchModeToggle: () {
+                // Allow toggling at any time except mid-flight; the chip itself
+                // gates the visual disabled state.
+                if (_summaryLoading) return;
+                setState(() => _searchUseDeepModel = !_searchUseDeepModel);
+              },
+              onChanged: () => setState(() {}),
+              onSubmitted: _handleSummarizerSubmit,
+              onCancel: _cancelSummarize,
+              onPaste: _pasteUrl,
+              onClear: _resetSearchSession,
+              onVoiceDown: () => _startVoice(target: _summaryUrlCtrl),
+              onVoiceUp: _stopVoice,
+              deepResearchUrl: _isUrl(_summaryUrlCtrl.text) &&
+                      _summaryUrlCtrl.text.trim().isNotEmpty
+                  ? _normalizeUrl(_summaryUrlCtrl.text)
+                  : null,
+              // History pill — purple-accented chip that surfaces the saved-
+              // searches sheet. The badge count comes from the live Drift
+              // stream so it updates in real-time as the user saves/deletes.
+              savedCount: ref.watch(savedSearchesStreamProvider).maybeWhen(
+                    data: (rows) => rows.length,
+                    orElse: () => 0,
+                  ),
+              onOpenHistory: _openSavedSearchesSheet,
+            ),
+            if (_summaryLoading) _summarizerLoadingWidget(colors),
+            if (_summaryResult != null && !_summaryLoading)
+              _summarizerResultWidget(colors, _summaryResult!),
+            if (_groundedResult != null && !_summaryLoading)
+              _groundedResultWidget(colors, _groundedResult!),
+            if (_tavilyResult != null && !_summaryLoading)
+              _tavilyResultWidget(colors, _tavilyResult!),
+            if (_imageResult != null && !_summaryLoading)
+              _imageResultWidget(colors, _imageResult!),
           ],
         ),
-        const SizedBox(height: 6),
-        Text(
-          'Summarize any URL or ask anything with real-time web search',
-          style: GoogleFonts.plusJakartaSans(
-            fontSize: 13,
-            height: 1.5,
-            color: colors.text3,
-          ),
-        ),
-        const SizedBox(height: 16),
-        _SearchInputBox(
-          controller: _summaryUrlCtrl,
-          focusNode: _summaryFocusNode,
-          colors: colors,
-          isUrl: _isUrl(_summaryUrlCtrl.text),
-          hasText: _summaryUrlCtrl.text.trim().isNotEmpty,
-          isLoading: _summaryLoading,
-          isListening: _isListening && _voiceTarget == _summaryUrlCtrl,
-          // Image attach controls — wired only for this tab. The voice
-          // assistant + dictionary tabs that share _SearchInputBox don't
-          // pass these and therefore keep their previous chrome.
-          pendingImageThumbnail: _pendingImage?.thumbnailBytes,
-          pendingImageWidth: _pendingImage?.width,
-          pendingImageHeight: _pendingImage?.height,
-          pendingImageSizeKb: _pendingImage == null
-              ? null
-              : (_pendingImage!.uploadBytes.lengthInBytes / 1024).round(),
-          isAttachingImage: _pickingImage,
-          onAttachImage: _openImagePickerSheet,
-          onClearPendingImage: _clearPendingImage,
-          onlineSearchProvider: _isUrl(_summaryUrlCtrl.text)
-              ? (settings.xgrokEnabled &&
-                      settings.summarizeOverride == 'xgrok'
-                  ? 'xGrok'
-                  : 'Gemini')
-              : (settings.onlineSearchIsXGrok ? 'xGrok' : 'Gemini'),
-          providerOptions: providerOptions,
-          selectedProviderId: selectedProviderId,
-          onProviderChanged: (id) {
-            // Persist immediately. setOnlineSearchProvider already syncs to
-            // SharedPreferences and queues a remote push, so the choice
-            // survives restarts and propagates to the settings page.
-            ref.read(settingsProvider.notifier).setOnlineSearchProvider(id);
-          },
-          searchUseDeepModel: _searchUseDeepModel,
-          onSearchModeToggle: () {
-            // Allow toggling at any time except mid-flight; the chip itself
-            // gates the visual disabled state.
-            if (_summaryLoading) return;
-            setState(() => _searchUseDeepModel = !_searchUseDeepModel);
-          },
-          onChanged: () => setState(() {}),
-          onSubmitted: _handleSummarizerSubmit,
-          onCancel: _cancelSummarize,
-          onPaste: _pasteUrl,
-          onClear: _resetSearchSession,
-          onVoiceDown: () => _startVoice(target: _summaryUrlCtrl),
-          onVoiceUp: _stopVoice,
-          deepResearchUrl: _isUrl(_summaryUrlCtrl.text) &&
-                  _summaryUrlCtrl.text.trim().isNotEmpty
-              ? _normalizeUrl(_summaryUrlCtrl.text)
-              : null,
-          // History pill — purple-accented chip that surfaces the saved-
-          // searches sheet. The badge count comes from the live Drift
-          // stream so it updates in real-time as the user saves/deletes.
-          savedCount: ref.watch(savedSearchesStreamProvider).maybeWhen(
-                data: (rows) => rows.length,
-                orElse: () => 0,
-              ),
-          onOpenHistory: _openSavedSearchesSheet,
-        ),
-        if (_summaryLoading) _summarizerLoadingWidget(colors),
-        if (_summaryResult != null && !_summaryLoading)
-          _summarizerResultWidget(colors, _summaryResult!),
-        if (_groundedResult != null && !_summaryLoading)
-          _groundedResultWidget(colors, _groundedResult!),
-        if (_tavilyResult != null && !_summaryLoading)
-          _tavilyResultWidget(colors, _tavilyResult!),
-        if (_imageResult != null && !_summaryLoading)
-          _imageResultWidget(colors, _imageResult!),
-      ],
-    ),
-    if (hasFollowUp)
-      Positioned(
-        right: 16,
-        bottom: 24,
-        child: _imageResult != null && _imageSearchKey != null
-            ? Builder(
-                builder: (_) {
-                  final job =
-                      ImageSearchStore.instance.getJob(_imageSearchKey!);
-                  final bytes = job?.imageBytes;
-                  final mediaType = job?.imageMediaType ?? 'image/jpeg';
-                  if (bytes == null) {
-                    // Bytes evicted (e.g. user navigated away long
-                    // enough for the store to release) — degrade to
-                    // text-only follow-up so the conversation continues.
-                    return SearchFollowUpFab(
-                      query: _summaryUrlCtrl.text.trim().isEmpty
-                          ? 'Image analysis'
-                          : _summaryUrlCtrl.text.trim(),
-                      initialAnswer: _imageResult!.answer,
-                      model: _imageResult!.model,
-                      savedSearchId: _activeSearchId,
-                    );
-                  }
-                  // sessionKey must STAY STABLE across rebuilds. We use
-                  // `_imageSearchKey` (the in-memory session id) and pass
-                  // `_activeSearchId` separately as the Drift draft/save
-                  // id used for cross-device chat mirroring. Don't merge
-                  // the two — the draft id lands a tick AFTER the result,
-                  // so a merged key would flip mid-session, invalidate
-                  // the in-memory bytes registered against the original
-                  // key, and break the chat sheet ("Image not available
-                  // — please re-upload to continue").
-                  return ImageFollowUpFab(
-                    sessionKey: _imageSearchKey!,
-                    query: _summaryUrlCtrl.text.trim().isEmpty
-                        ? 'Image analysis'
-                        : _summaryUrlCtrl.text.trim(),
-                    initialAnswer: _imageResult!.answer,
-                    model: _imageResult!.model,
-                    imageBytes: bytes,
-                    imageMediaType: mediaType,
+        if (hasFollowUp)
+          Positioned(
+            right: 16,
+            bottom: 24,
+            child: _imageResult != null && _imageSearchKey != null
+                ? Builder(
+                    builder: (_) {
+                      final job =
+                          ImageSearchStore.instance.getJob(_imageSearchKey!);
+                      final bytes = job?.imageBytes;
+                      final mediaType = job?.imageMediaType ?? 'image/jpeg';
+                      if (bytes == null) {
+                        // Bytes evicted (e.g. user navigated away long
+                        // enough for the store to release) — degrade to
+                        // text-only follow-up so the conversation continues.
+                        return SearchFollowUpFab(
+                          query: _summaryUrlCtrl.text.trim().isEmpty
+                              ? 'Image analysis'
+                              : _summaryUrlCtrl.text.trim(),
+                          initialAnswer: _imageResult!.answer,
+                          model: _imageResult!.model,
+                          savedSearchId: _activeSearchId,
+                        );
+                      }
+                      // sessionKey must STAY STABLE across rebuilds. We use
+                      // `_imageSearchKey` (the in-memory session id) and pass
+                      // `_activeSearchId` separately as the Drift draft/save
+                      // id used for cross-device chat mirroring. Don't merge
+                      // the two — the draft id lands a tick AFTER the result,
+                      // so a merged key would flip mid-session, invalidate
+                      // the in-memory bytes registered against the original
+                      // key, and break the chat sheet ("Image not available
+                      // — please re-upload to continue").
+                      return ImageFollowUpFab(
+                        sessionKey: _imageSearchKey!,
+                        query: _summaryUrlCtrl.text.trim().isEmpty
+                            ? 'Image analysis'
+                            : _summaryUrlCtrl.text.trim(),
+                        initialAnswer: _imageResult!.answer,
+                        model: _imageResult!.model,
+                        imageBytes: bytes,
+                        imageMediaType: mediaType,
+                        savedSearchId: _activeSearchId,
+                      );
+                    },
+                  )
+                : SearchFollowUpFab(
+                    query: _summaryUrlCtrl.text.trim(),
+                    initialAnswer: _groundedResult?.answer ??
+                        _summaryResult?.summary ??
+                        _tavilyResult?.answer ??
+                        '',
+                    model: _groundedResult?.model ??
+                        _summaryResult?.model ??
+                        'tavily',
+                    // Always pass the active session id so EVERY follow-up
+                    // turn is mirrored to Drift under it from message #1 —
+                    // including turns asked before the user taps the
+                    // bookmark icon. See [SavedSearchStore.startDraft] for
+                    // the draft lifecycle that produces this id.
                     savedSearchId: _activeSearchId,
-                  );
-                },
-              )
-            : SearchFollowUpFab(
-                query: _summaryUrlCtrl.text.trim(),
-                initialAnswer: _groundedResult?.answer ??
-                    _summaryResult?.summary ??
-                    _tavilyResult?.answer ??
-                    '',
-                model: _groundedResult?.model ??
-                    _summaryResult?.model ??
-                    'tavily',
-                // Always pass the active session id so EVERY follow-up
-                // turn is mirrored to Drift under it from message #1 —
-                // including turns asked before the user taps the
-                // bookmark icon. See [SavedSearchStore.startDraft] for
-                // the draft lifecycle that produces this id.
-                savedSearchId: _activeSearchId,
-              ),
-      ),
+                  ),
+          ),
       ],
     );
   }
@@ -3451,9 +3486,8 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
     final badgeLabel = isXGrokResult
         ? 'xGrok Vision \u00b7 ${r.model}'
         : 'Gemini Vision \u00b7 ${r.model.isNotEmpty ? r.model : 'auto'}';
-    final badgeColor = isXGrokResult
-        ? const Color(0xFFE8453C)
-        : const Color(0xFF4285F4);
+    final badgeColor =
+        isXGrokResult ? const Color(0xFFE8453C) : const Color(0xFF4285F4);
 
     final thumbBytes = _decodeThumbDataUrl(r.thumbDataUrl);
     final question = r.question.trim();
@@ -3472,11 +3506,12 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
                 badgeColor,
               ),
             ),
-            _buildSaveResultButton(colors: colors, result: r),
+            _buildShareSaveCluster(colors: colors, result: r),
           ],
         ),
         const SizedBox(height: 10),
-        Container(
+        ArticleSelectionScope(
+          child: Container(
           decoration: BoxDecoration(
             color: colors.bg1,
             borderRadius: BorderRadius.circular(16),
@@ -3496,7 +3531,8 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(children: [
+                    NonSelectableChrome(
+                      child: Row(children: [
                       const Icon(LucideIcons.image,
                           size: 14, color: accentColor),
                       const SizedBox(width: 8),
@@ -3527,6 +3563,7 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
                         ),
                       ),
                     ]),
+                    ),
                     if (thumbBytes != null) ...[
                       const SizedBox(height: 12),
                       Row(
@@ -3548,7 +3585,7 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text(
+                                BlockSelectableText(
                                   question.isEmpty
                                       ? 'What is in this image?'
                                       : question,
@@ -3560,12 +3597,14 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
                                   ),
                                 ),
                                 const SizedBox(height: 4),
-                                Text(
-                                  r.originalMediaType,
-                                  style: GoogleFonts.plusJakartaSans(
-                                    fontSize: 10,
-                                    color: colors.text4,
-                                    letterSpacing: 0.4,
+                                NonSelectableChrome(
+                                  child: Text(
+                                    r.originalMediaType,
+                                    style: GoogleFonts.plusJakartaSans(
+                                      fontSize: 10,
+                                      color: colors.text4,
+                                      letterSpacing: 0.4,
+                                    ),
                                   ),
                                 ),
                               ],
@@ -3583,45 +3622,39 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            'ANSWER',
-                            style: GoogleFonts.plusJakartaSans(
-                              fontSize: 10,
-                              fontWeight: FontWeight.w700,
-                              color: colors.text5,
-                              letterSpacing: 1.2,
-                            ),
-                          ),
-                        ),
-                        GestureDetector(
-                          onTap: () => _copy(r.answer),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(LucideIcons.copy,
-                                  size: 13, color: colors.text4),
-                              const SizedBox(width: 4),
-                              Text(
-                                'Copy',
-                                style: GoogleFonts.plusJakartaSans(
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.w700,
-                                  color: colors.text4,
-                                ),
+                    SearchAnswerSectionHeader(
+                      label: 'ANSWER',
+                      labelStyle: GoogleFonts.plusJakartaSans(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
+                        color: colors.text5,
+                        letterSpacing: 1.2,
+                      ),
+                      trailing: GestureDetector(
+                        onTap: () => _copy(r.answer),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(LucideIcons.copy,
+                                size: 13, color: colors.text4),
+                            const SizedBox(width: 4),
+                            Text(
+                              'Copy',
+                              style: GoogleFonts.plusJakartaSans(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w700,
+                                color: colors.text4,
                               ),
-                            ],
-                          ),
+                            ),
+                          ],
                         ),
-                      ],
+                      ),
                     ),
                     const SizedBox(height: 12),
-                    SelectionArea(
-                      child: MarkdownBody(
+                    ArticleReaderProse(
+                      child: BlockSelectableMarkdown(
                         data: r.answer,
-                        selectable: false,
+                        ownSelectionScope: false,
                         onTapLink: (_, href, __) {
                           if (href != null) _openUrl(href);
                         },
@@ -3633,6 +3666,7 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
               ),
             ],
           ),
+        ),
         ),
         if (r.sources.isNotEmpty)
           Padding(
@@ -3657,8 +3691,8 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
           ),
           style: OutlinedButton.styleFrom(
             side: BorderSide(color: colors.border),
-            shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12)),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             padding: const EdgeInsets.symmetric(vertical: 14),
           ),
         ),
@@ -3696,12 +3730,13 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
                   const Color(0xFFF59E0B),
                 ),
               ),
-              _buildSaveResultButton(colors: colors, result: result),
+              _buildShareSaveCluster(colors: colors, result: result),
             ],
           ),
           const SizedBox(height: 10),
           if (result.answer.isNotEmpty) ...[
-            Container(
+            ArticleSelectionScope(
+              child: Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
                 gradient: LinearGradient(
@@ -3712,26 +3747,26 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
                 ),
                 borderRadius: BorderRadius.circular(16),
                 border: Border.all(
-                  color: _summarizeGradientStart.withValues(alpha: 0.2)),
+                    color: _summarizeGradientStart.withValues(alpha: 0.2)),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(children: [
-                    const Icon(LucideIcons.sparkles, size: 16,
-                        color: _summarizeGradientStart),
-                    const SizedBox(width: 8),
-                    Text('AI ANSWER',
-                        style: GoogleFonts.plusJakartaSans(
-                            fontSize: 10, fontWeight: FontWeight.w700,
-                            color: _summarizeGradientStart,
-                            letterSpacing: 1.2)),
-                  ]),
+                  SearchAnswerSectionHeader(
+                    leading: const Icon(LucideIcons.sparkles,
+                        size: 16, color: _summarizeGradientStart),
+                    label: 'AI ANSWER',
+                    labelStyle: GoogleFonts.plusJakartaSans(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
+                        color: _summarizeGradientStart,
+                        letterSpacing: 1.2),
+                  ),
                   const SizedBox(height: 12),
-                  SelectionArea(
-                    child: MarkdownBody(
+                  ArticleReaderProse(
+                    child: BlockSelectableMarkdown(
                       data: result.answer,
-                      selectable: false,
+                      ownSelectionScope: false,
                       onTapLink: (_, href, __) {
                         if (href != null) _openUrl(href);
                       },
@@ -3740,6 +3775,7 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
                   ),
                 ],
               ),
+            ),
             ),
             const SizedBox(height: 16),
           ],
@@ -3754,8 +3790,7 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
                 body: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: result.results
-                      .map((r) =>
-                          _TavilySourceCard(result: r, colors: colors))
+                      .map((r) => _TavilySourceCard(result: r, colors: colors))
                       .toList(),
                 ),
               ),
@@ -3766,13 +3801,14 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
             icon: Icon(LucideIcons.rotateCcw, size: 16, color: colors.text4),
             label: Text('Search Again',
                 style: GoogleFonts.plusJakartaSans(
-                    fontSize: 13, fontWeight: FontWeight.w600,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
                     color: colors.text3)),
             style: OutlinedButton.styleFrom(
-              side: BorderSide(color: colors.border),
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12)),
-              padding: const EdgeInsets.symmetric(vertical: 14)),
+                side: BorderSide(color: colors.border),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12)),
+                padding: const EdgeInsets.symmetric(vertical: 14)),
           ),
         ],
       ),
@@ -3844,7 +3880,9 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
             child: Icon(
               isSaved ? Icons.bookmark_rounded : Icons.bookmark_outline_rounded,
               size: 20,
-              color: isSaved ? const Color(0xFFC084FC) : colors.text3,
+              color: isSaved
+                  ? kSearchActionAccent
+                  : searchActionIconColor(colors, enabled: !inFlight),
             ),
           ),
         ),
@@ -4110,9 +4148,8 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
     final badgeLabel = isXGrokResult
         ? 'xGrok · ${r.model}'
         : 'Google · ${r.model.isNotEmpty ? r.model : "Gemini"}';
-    final badgeColor = isXGrokResult
-        ? const Color(0xFFE8453C)
-        : const Color(0xFF4285F4);
+    final badgeColor =
+        isXGrokResult ? const Color(0xFFE8453C) : const Color(0xFF4285F4);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -4128,11 +4165,12 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
                 badgeColor,
               ),
             ),
-            _buildSaveResultButton(colors: colors, result: r),
+            _buildShareSaveCluster(colors: colors, result: r),
           ],
         ),
         const SizedBox(height: 10),
-        Container(
+        ArticleSelectionScope(
+          child: Container(
           decoration: BoxDecoration(
             color: colors.bg1,
             borderRadius: BorderRadius.circular(16),
@@ -4141,7 +4179,8 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Container(
+              NonSelectableChrome(
+                child: Container(
                 padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
                 decoration: BoxDecoration(
                   gradient: LinearGradient(colors: [
@@ -4153,7 +4192,8 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Row(children: [
-                      const Icon(LucideIcons.globe, size: 14, color: accentColor),
+                      const Icon(LucideIcons.globe,
+                          size: 14, color: accentColor),
                       const SizedBox(width: 8),
                       Text(
                         'GROUNDED SEARCH',
@@ -4221,51 +4261,46 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
                   ],
                 ),
               ),
+              ),
               Divider(height: 1, color: colors.border2),
               Padding(
                 padding: const EdgeInsets.all(16),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            'ANSWER',
-                            style: GoogleFonts.plusJakartaSans(
-                              fontSize: 10,
-                              fontWeight: FontWeight.w700,
-                              color: colors.text5,
-                              letterSpacing: 1.2,
-                            ),
-                          ),
-                        ),
-                        GestureDetector(
-                          onTap: () => _copy(r.answer),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(LucideIcons.copy,
-                                  size: 13, color: colors.text4),
-                              const SizedBox(width: 4),
-                              Text(
-                                'Copy',
-                                style: GoogleFonts.plusJakartaSans(
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.w700,
-                                  color: colors.text4,
-                                ),
+                    SearchAnswerSectionHeader(
+                      label: 'ANSWER',
+                      labelStyle: GoogleFonts.plusJakartaSans(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
+                        color: colors.text5,
+                        letterSpacing: 1.2,
+                      ),
+                      trailing: GestureDetector(
+                        onTap: () => _copy(r.answer),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(LucideIcons.copy,
+                                size: 13, color: colors.text4),
+                            const SizedBox(width: 4),
+                            Text(
+                              'Copy',
+                              style: GoogleFonts.plusJakartaSans(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w700,
+                                color: colors.text4,
                               ),
-                            ],
-                          ),
+                            ),
+                          ],
                         ),
-                      ],
+                      ),
                     ),
                     const SizedBox(height: 12),
-                    SelectionArea(
-                      child: MarkdownBody(
+                    ArticleReaderProse(
+                      child: BlockSelectableMarkdown(
                         data: r.answer,
-                        selectable: false,
+                        ownSelectionScope: false,
                         onTapLink: (_, href, __) {
                           if (href != null) _openUrl(href);
                         },
@@ -4277,6 +4312,7 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
               ),
             ],
           ),
+        ),
         ),
         // Source links live behind a collapsed-by-default disclosure pill so
         // the answer stays the focal point of the screen and we no longer
@@ -4305,8 +4341,8 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
           ),
           style: OutlinedButton.styleFrom(
             side: BorderSide(color: colors.border),
-            shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12)),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             padding: const EdgeInsets.symmetric(vertical: 14),
           ),
         ),
@@ -4493,9 +4529,8 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
   Widget _summarizerResultWidget(AppColors colors, SummarizerResult r) {
     final isXGrokResult = r.isXGrok;
     final providerLabel = isXGrokResult ? 'xGrok' : 'Gemini';
-    final providerColor = isXGrokResult
-        ? const Color(0xFFE8453C)
-        : const Color(0xFF4285F4);
+    final providerColor =
+        isXGrokResult ? const Color(0xFFE8453C) : const Color(0xFF4285F4);
 
     final badges = <Widget>[];
 
@@ -4565,7 +4600,7 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
               Expanded(
                 child: Wrap(spacing: 6, runSpacing: 6, children: badges),
               ),
-              _buildSaveResultButton(colors: colors, result: r),
+              _buildShareSaveCluster(colors: colors, result: r),
             ],
           ),
           const SizedBox(height: 10),
@@ -4600,7 +4635,8 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
           ),
           const SizedBox(height: 10),
         ],
-        Container(
+        ArticleSelectionScope(
+          child: Container(
           decoration: BoxDecoration(
             color: colors.bg1,
             borderRadius: BorderRadius.circular(16),
@@ -4624,7 +4660,7 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     if (r.title.isNotEmpty)
-                      SelectableText(
+                      BlockSelectableText(
                         r.title,
                         style: GoogleFonts.plusJakartaSans(
                           fontSize: 20,
@@ -4634,13 +4670,16 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
                         ),
                       ),
                     const SizedBox(height: 10),
-                    Wrap(
+                    NonSelectableChrome(
+                      child: Wrap(
                       spacing: 8,
                       runSpacing: 6,
                       children: [
                         if (r.category.isNotEmpty)
-                          _summaryChip(colors, LucideIcons.tag, r.category, _summarizeGradientStart),
-                        _summaryChip(colors, LucideIcons.clock, '${r.readTime} min read', colors.text3),
+                          _summaryChip(colors, LucideIcons.tag, r.category,
+                              _summarizeGradientStart),
+                        _summaryChip(colors, LucideIcons.clock,
+                            '${r.readTime} min read', colors.text3),
                         _summaryChip(
                           colors,
                           _extractionIcon(r.extractionMethod),
@@ -4650,7 +4689,8 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
                               : const Color(0xFF34D399),
                         ),
                         if (r.source.isNotEmpty)
-                          _summaryChip(colors, LucideIcons.globe, r.source, colors.text3),
+                          _summaryChip(colors, LucideIcons.globe, r.source,
+                              colors.text3),
                         _summaryChip(
                           colors,
                           isXGrokResult ? LucideIcons.zap : LucideIcons.cpu,
@@ -4662,6 +4702,7 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
                               : const Color(0xFF818CF8),
                         ),
                       ],
+                    ),
                     ),
                   ],
                 ),
@@ -4675,44 +4716,39 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            'DETAILED BREAKDOWN',
-                            style: GoogleFonts.plusJakartaSans(
-                              fontSize: 10,
-                              fontWeight: FontWeight.w700,
-                              color: colors.text5,
-                              letterSpacing: 1.2,
-                            ),
-                          ),
-                        ),
-                        GestureDetector(
-                          onTap: () => _copy(r.summary),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(LucideIcons.copy, size: 13, color: colors.text4),
-                              const SizedBox(width: 4),
-                              Text(
-                                'Copy all',
-                                style: GoogleFonts.plusJakartaSans(
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.w700,
-                                  color: colors.text4,
-                                ),
+                    SearchAnswerSectionHeader(
+                      label: 'DETAILED BREAKDOWN',
+                      labelStyle: GoogleFonts.plusJakartaSans(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
+                        color: colors.text5,
+                        letterSpacing: 1.2,
+                      ),
+                      trailing: GestureDetector(
+                        onTap: () => _copy(r.summary),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(LucideIcons.copy,
+                                size: 13, color: colors.text4),
+                            const SizedBox(width: 4),
+                            Text(
+                              'Copy all',
+                              style: GoogleFonts.plusJakartaSans(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w700,
+                                color: colors.text4,
                               ),
-                            ],
-                          ),
+                            ),
+                          ],
                         ),
-                      ],
+                      ),
                     ),
                     const SizedBox(height: 14),
-                    SelectionArea(
-                      child: MarkdownBody(
+                    ArticleReaderProse(
+                      child: BlockSelectableMarkdown(
                         data: r.summary,
-                        selectable: false,
+                        ownSelectionScope: false,
                         onTapLink: (_, href, __) {
                           if (href != null) _openUrl(href);
                         },
@@ -4731,9 +4767,11 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Row(
+                      NonSelectableChrome(
+                        child: Row(
                         children: [
-                          const Icon(LucideIcons.listChecks, size: 14, color: _summarizeGradientStart),
+                          const Icon(LucideIcons.listChecks,
+                              size: 14, color: _summarizeGradientStart),
                           const SizedBox(width: 6),
                           Text(
                             'KEY TAKEAWAYS',
@@ -4746,9 +4784,11 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
                           ),
                           const SizedBox(width: 8),
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 2),
                             decoration: BoxDecoration(
-                              color: _summarizeGradientStart.withValues(alpha: 0.12),
+                              color: _summarizeGradientStart.withValues(
+                                  alpha: 0.12),
                               borderRadius: BorderRadius.circular(20),
                             ),
                             child: Text(
@@ -4762,46 +4802,50 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
                           ),
                         ],
                       ),
+                      ),
                       const SizedBox(height: 12),
                       ...r.keyPoints.asMap().entries.map(
-                        (e) => Padding(
-                          padding: const EdgeInsets.only(bottom: 8),
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Container(
-                                width: 22,
-                                height: 22,
-                                alignment: Alignment.center,
-                                margin: const EdgeInsets.only(top: 2),
-                                decoration: BoxDecoration(
-                                  shape: BoxShape.circle,
-                                  color: _summarizeGradientStart.withValues(alpha: 0.12),
-                                ),
-                                child: Text(
-                                  '${e.key + 1}',
-                                  style: GoogleFonts.plusJakartaSans(
-                                    fontSize: 9,
-                                    fontWeight: FontWeight.w800,
-                                    color: _summarizeGradientStart,
+                            (e) => Padding(
+                              padding: const EdgeInsets.only(bottom: 8),
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Container(
+                                    width: 22,
+                                    height: 22,
+                                    alignment: Alignment.center,
+                                    margin: const EdgeInsets.only(top: 2),
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      color: _summarizeGradientStart.withValues(
+                                          alpha: 0.12),
+                                    ),
+                                    child: Text(
+                                      '${e.key + 1}',
+                                      style: GoogleFonts.plusJakartaSans(
+                                        fontSize: 9,
+                                        fontWeight: FontWeight.w800,
+                                        color: _summarizeGradientStart,
+                                      ),
+                                    ),
                                   ),
-                                ),
-                              ),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: SelectableText(
-                                  e.value,
-                                  style: GoogleFonts.plusJakartaSans(
-                                    fontSize: 13,
-                                    height: 1.65,
-                                    color: colors.text,
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: ArticleReaderProse(
+                                      child: BlockSelectableText(
+                                        e.value,
+                                        style: GoogleFonts.plusJakartaSans(
+                                          fontSize: 13,
+                                          height: 1.65,
+                                          color: colors.text,
+                                        ),
+                                      ),
+                                    ),
                                   ),
-                                ),
+                                ],
                               ),
-                            ],
+                            ),
                           ),
-                        ),
-                      ),
                     ],
                   ),
                 ),
@@ -4809,25 +4853,29 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
             ],
           ),
         ),
+        ),
         const SizedBox(height: 12),
         OutlinedButton.icon(
           onPressed: _resetSearchSession,
           icon: Icon(LucideIcons.rotateCcw, size: 16, color: colors.text4),
           label: Text(
             'Summarize Another URL',
-            style: GoogleFonts.plusJakartaSans(fontSize: 13, fontWeight: FontWeight.w600, color: colors.text4),
+            style: GoogleFonts.plusJakartaSans(
+                fontSize: 13, fontWeight: FontWeight.w600, color: colors.text4),
           ),
           style: OutlinedButton.styleFrom(
             minimumSize: const Size(double.infinity, 48),
             side: BorderSide(color: colors.border),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           ),
         ),
       ],
     );
   }
 
-  Widget _summaryChip(AppColors colors, IconData icon, String label, Color accentColor) {
+  Widget _summaryChip(
+      AppColors colors, IconData icon, String label, Color accentColor) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
@@ -4840,7 +4888,11 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
         children: [
           Icon(icon, size: 12, color: accentColor),
           const SizedBox(width: 5),
-          Text(label, style: GoogleFonts.plusJakartaSans(fontSize: 10, fontWeight: FontWeight.w700, color: accentColor)),
+          Text(label,
+              style: GoogleFonts.plusJakartaSans(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w700,
+                  color: accentColor)),
         ],
       ),
     );
@@ -4935,7 +4987,8 @@ class _SavedWordsSheetState extends State<_SavedWordsSheet> {
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
               child: Row(
                 children: [
-                  const Icon(LucideIcons.bookmark, size: 18, color: AppColors.accent),
+                  const Icon(LucideIcons.bookmark,
+                      size: 18, color: AppColors.accent),
                   const SizedBox(width: 8),
                   Text(
                     'Saved Words',
@@ -4947,7 +5000,8 @@ class _SavedWordsSheetState extends State<_SavedWordsSheet> {
                   ),
                   const SizedBox(width: 8),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                     decoration: BoxDecoration(
                       color: AppColors.accent.withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(20),
@@ -4975,9 +5029,11 @@ class _SavedWordsSheetState extends State<_SavedWordsSheet> {
               child: TextField(
                 controller: _searchCtrl,
                 onChanged: (_) => setState(() {}),
-                style: GoogleFonts.plusJakartaSans(fontSize: 13, color: colors.text),
+                style: GoogleFonts.plusJakartaSans(
+                    fontSize: 13, color: colors.text),
                 decoration: InputDecoration(
-                  prefixIcon: Icon(LucideIcons.search, size: 16, color: colors.text4),
+                  prefixIcon:
+                      Icon(LucideIcons.search, size: 16, color: colors.text4),
                   hintText: 'Search word or definition…',
                   hintStyle: GoogleFonts.plusJakartaSans(color: colors.text5),
                   filled: true,
@@ -4994,7 +5050,8 @@ class _SavedWordsSheetState extends State<_SavedWordsSheet> {
                     borderRadius: BorderRadius.circular(12),
                     borderSide: const BorderSide(color: AppColors.accent),
                   ),
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 ),
               ),
             ),
@@ -5025,10 +5082,13 @@ class _SavedWordsSheetState extends State<_SavedWordsSheet> {
                         DictionaryResult? parsed;
                         if (isExpanded && w.responseJson.isNotEmpty) {
                           try {
-                            final json = jsonDecode(w.responseJson) as Map<String, dynamic>;
+                            final json = jsonDecode(w.responseJson)
+                                as Map<String, dynamic>;
                             parsed = DictionaryResult.fromJson(json);
                           } catch (e) {
-                            TLog.w('Tutor', 'Failed to parse dictionary JSON for word ${w.id}', error: e);
+                            TLog.w('Tutor',
+                                'Failed to parse dictionary JSON for word ${w.id}',
+                                error: e);
                           }
                         }
 
@@ -5041,13 +5101,16 @@ class _SavedWordsSheetState extends State<_SavedWordsSheet> {
                             padding: const EdgeInsets.only(right: 16),
                             margin: const EdgeInsets.only(bottom: 8),
                             decoration: BoxDecoration(
-                              color: const Color(0xFFF87171).withValues(alpha: 0.15),
+                              color: const Color(0xFFF87171)
+                                  .withValues(alpha: 0.15),
                               borderRadius: BorderRadius.circular(12),
                             ),
-                            child: const Icon(LucideIcons.trash2, color: Color(0xFFF87171), size: 20),
+                            child: const Icon(LucideIcons.trash2,
+                                color: Color(0xFFF87171), size: 20),
                           ),
                           child: GestureDetector(
-                            onTap: () => setState(() => _expandedId = isExpanded ? null : w.id),
+                            onTap: () => setState(
+                                () => _expandedId = isExpanded ? null : w.id),
                             child: AnimatedContainer(
                               duration: const Duration(milliseconds: 200),
                               margin: const EdgeInsets.only(bottom: 8),
@@ -5071,9 +5134,12 @@ class _SavedWordsSheetState extends State<_SavedWordsSheet> {
                                     children: [
                                       CircleAvatar(
                                         radius: 18,
-                                        backgroundColor: AppColors.accent.withValues(alpha: 0.12),
+                                        backgroundColor: AppColors.accent
+                                            .withValues(alpha: 0.12),
                                         child: Text(
-                                          w.word.isNotEmpty ? w.word[0].toUpperCase() : '?',
+                                          w.word.isNotEmpty
+                                              ? w.word[0].toUpperCase()
+                                              : '?',
                                           style: GoogleFonts.plusJakartaSans(
                                             fontWeight: FontWeight.w900,
                                             fontSize: 14,
@@ -5084,11 +5150,13 @@ class _SavedWordsSheetState extends State<_SavedWordsSheet> {
                                       const SizedBox(width: 10),
                                       Expanded(
                                         child: Column(
-                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
                                           children: [
                                             Text(
                                               w.word,
-                                              style: GoogleFonts.plusJakartaSans(
+                                              style:
+                                                  GoogleFonts.plusJakartaSans(
                                                 fontSize: 16,
                                                 fontWeight: FontWeight.w800,
                                                 color: colors.text,
@@ -5100,7 +5168,8 @@ class _SavedWordsSheetState extends State<_SavedWordsSheet> {
                                                 w.definition,
                                                 maxLines: 1,
                                                 overflow: TextOverflow.ellipsis,
-                                                style: GoogleFonts.plusJakartaSans(
+                                                style:
+                                                    GoogleFonts.plusJakartaSans(
                                                   fontSize: 11,
                                                   color: colors.text3,
                                                 ),
@@ -5110,7 +5179,9 @@ class _SavedWordsSheetState extends State<_SavedWordsSheet> {
                                         ),
                                       ),
                                       Icon(
-                                        isExpanded ? LucideIcons.chevronUp : LucideIcons.chevronDown,
+                                        isExpanded
+                                            ? LucideIcons.chevronUp
+                                            : LucideIcons.chevronDown,
                                         size: 16,
                                         color: colors.text4,
                                       ),
@@ -5123,7 +5194,8 @@ class _SavedWordsSheetState extends State<_SavedWordsSheet> {
                                     Divider(height: 1, color: colors.border2),
 
                                     // Pronunciation + Part of Speech
-                                    if (parsed.pronunciation.isNotEmpty || parsed.partOfSpeech.isNotEmpty)
+                                    if (parsed.pronunciation.isNotEmpty ||
+                                        parsed.partOfSpeech.isNotEmpty)
                                       Padding(
                                         padding: const EdgeInsets.only(top: 10),
                                         child: Wrap(
@@ -5132,14 +5204,19 @@ class _SavedWordsSheetState extends State<_SavedWordsSheet> {
                                           children: [
                                             if (parsed.pronunciation.isNotEmpty)
                                               Container(
-                                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                        horizontal: 8,
+                                                        vertical: 4),
                                                 decoration: BoxDecoration(
                                                   color: colors.bg3,
-                                                  borderRadius: BorderRadius.circular(8),
+                                                  borderRadius:
+                                                      BorderRadius.circular(8),
                                                 ),
                                                 child: Text(
                                                   parsed.pronunciation,
-                                                  style: GoogleFonts.plusJakartaSans(
+                                                  style: GoogleFonts
+                                                      .plusJakartaSans(
                                                     fontSize: 12,
                                                     color: colors.text2,
                                                     fontStyle: FontStyle.italic,
@@ -5148,14 +5225,20 @@ class _SavedWordsSheetState extends State<_SavedWordsSheet> {
                                               ),
                                             if (parsed.partOfSpeech.isNotEmpty)
                                               Container(
-                                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                        horizontal: 8,
+                                                        vertical: 4),
                                                 decoration: BoxDecoration(
-                                                  color: AppColors.accent.withValues(alpha: 0.1),
-                                                  borderRadius: BorderRadius.circular(8),
+                                                  color: AppColors.accent
+                                                      .withValues(alpha: 0.1),
+                                                  borderRadius:
+                                                      BorderRadius.circular(8),
                                                 ),
                                                 child: Text(
                                                   parsed.partOfSpeech,
-                                                  style: GoogleFonts.plusJakartaSans(
+                                                  style: GoogleFonts
+                                                      .plusJakartaSans(
                                                     fontSize: 11,
                                                     fontWeight: FontWeight.w700,
                                                     color: AppColors.accent,
@@ -5185,11 +5268,15 @@ class _SavedWordsSheetState extends State<_SavedWordsSheet> {
                                         padding: const EdgeInsets.only(top: 14),
                                         child: Row(
                                           children: [
-                                            Icon(LucideIcons.quote, size: 13, color: AppColors.accent.withValues(alpha: 0.7)),
+                                            Icon(LucideIcons.quote,
+                                                size: 13,
+                                                color: AppColors.accent
+                                                    .withValues(alpha: 0.7)),
                                             const SizedBox(width: 6),
                                             Text(
                                               'EXAMPLES · ${parsed.examples.length}',
-                                              style: GoogleFonts.plusJakartaSans(
+                                              style:
+                                                  GoogleFonts.plusJakartaSans(
                                                 fontSize: 10,
                                                 fontWeight: FontWeight.w700,
                                                 color: colors.text5,
@@ -5201,45 +5288,55 @@ class _SavedWordsSheetState extends State<_SavedWordsSheet> {
                                       ),
                                       const SizedBox(height: 8),
                                       ...parsed.examples.asMap().entries.map(
-                                        (e) => Padding(
-                                          padding: const EdgeInsets.only(bottom: 6),
-                                          child: Row(
-                                            crossAxisAlignment: CrossAxisAlignment.start,
-                                            children: [
-                                              Container(
-                                                width: 20,
-                                                height: 20,
-                                                alignment: Alignment.center,
-                                                margin: const EdgeInsets.only(top: 2),
-                                                decoration: BoxDecoration(
-                                                  shape: BoxShape.circle,
-                                                  color: AppColors.accent.withValues(alpha: 0.1),
-                                                ),
-                                                child: Text(
-                                                  '${e.key + 1}',
-                                                  style: GoogleFonts.plusJakartaSans(
-                                                    fontSize: 9,
-                                                    fontWeight: FontWeight.w800,
-                                                    color: AppColors.accent,
+                                            (e) => Padding(
+                                              padding: const EdgeInsets.only(
+                                                  bottom: 6),
+                                              child: Row(
+                                                crossAxisAlignment:
+                                                    CrossAxisAlignment.start,
+                                                children: [
+                                                  Container(
+                                                    width: 20,
+                                                    height: 20,
+                                                    alignment: Alignment.center,
+                                                    margin:
+                                                        const EdgeInsets.only(
+                                                            top: 2),
+                                                    decoration: BoxDecoration(
+                                                      shape: BoxShape.circle,
+                                                      color: AppColors.accent
+                                                          .withValues(
+                                                              alpha: 0.1),
+                                                    ),
+                                                    child: Text(
+                                                      '${e.key + 1}',
+                                                      style: GoogleFonts
+                                                          .plusJakartaSans(
+                                                        fontSize: 9,
+                                                        fontWeight:
+                                                            FontWeight.w800,
+                                                        color: AppColors.accent,
+                                                      ),
+                                                    ),
                                                   ),
-                                                ),
-                                              ),
-                                              const SizedBox(width: 8),
-                                              Expanded(
-                                                child: Text(
-                                                  e.value,
-                                                  style: GoogleFonts.plusJakartaSans(
-                                                    fontSize: 12,
-                                                    fontStyle: FontStyle.italic,
-                                                    color: colors.text2,
-                                                    height: 1.55,
+                                                  const SizedBox(width: 8),
+                                                  Expanded(
+                                                    child: Text(
+                                                      e.value,
+                                                      style: GoogleFonts
+                                                          .plusJakartaSans(
+                                                        fontSize: 12,
+                                                        fontStyle:
+                                                            FontStyle.italic,
+                                                        color: colors.text2,
+                                                        height: 1.55,
+                                                      ),
+                                                    ),
                                                   ),
-                                                ),
+                                                ],
                                               ),
-                                            ],
+                                            ),
                                           ),
-                                        ),
-                                      ),
                                     ],
 
                                     // FULL usage guide (no truncation)
@@ -5248,11 +5345,15 @@ class _SavedWordsSheetState extends State<_SavedWordsSheet> {
                                         padding: const EdgeInsets.only(top: 14),
                                         child: Row(
                                           children: [
-                                            Icon(LucideIcons.lightbulb, size: 13, color: const Color(0xFFF59E0B).withValues(alpha: 0.8)),
+                                            Icon(LucideIcons.lightbulb,
+                                                size: 13,
+                                                color: const Color(0xFFF59E0B)
+                                                    .withValues(alpha: 0.8)),
                                             const SizedBox(width: 6),
                                             Text(
                                               'WHERE & WHEN TO USE',
-                                              style: GoogleFonts.plusJakartaSans(
+                                              style:
+                                                  GoogleFonts.plusJakartaSans(
                                                 fontSize: 10,
                                                 fontWeight: FontWeight.w700,
                                                 color: colors.text5,
@@ -5267,10 +5368,13 @@ class _SavedWordsSheetState extends State<_SavedWordsSheet> {
                                         width: double.infinity,
                                         padding: const EdgeInsets.all(12),
                                         decoration: BoxDecoration(
-                                          color: const Color(0xFFF59E0B).withValues(alpha: 0.06),
-                                          borderRadius: BorderRadius.circular(10),
+                                          color: const Color(0xFFF59E0B)
+                                              .withValues(alpha: 0.06),
+                                          borderRadius:
+                                              BorderRadius.circular(10),
                                           border: Border.all(
-                                            color: const Color(0xFFF59E0B).withValues(alpha: 0.15),
+                                            color: const Color(0xFFF59E0B)
+                                                .withValues(alpha: 0.15),
                                           ),
                                         ),
                                         child: Text(
@@ -5327,8 +5431,8 @@ class _TavilySourceCard extends StatelessWidget {
               children: [
                 Row(
                   children: [
-                    const Icon(LucideIcons.externalLink, size: 14,
-                        color: Color(0xFF6366F1)),
+                    const Icon(LucideIcons.externalLink,
+                        size: 14, color: Color(0xFF6366F1)),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
@@ -5631,8 +5735,7 @@ class _SearchInputBoxState extends State<_SearchInputBox> {
                       border: InputBorder.none,
                       enabledBorder: InputBorder.none,
                       focusedBorder: InputBorder.none,
-                      contentPadding:
-                          const EdgeInsets.fromLTRB(16, 14, 16, 4),
+                      contentPadding: const EdgeInsets.fromLTRB(16, 14, 16, 4),
                     ),
                   ),
                 ),
@@ -5668,13 +5771,10 @@ class _SearchInputBoxState extends State<_SearchInputBox> {
                         duration: const Duration(milliseconds: 200),
                         transitionBuilder: (child, anim) => FadeTransition(
                           opacity: anim,
-                          child:
-                              ScaleTransition(scale: anim, child: child),
+                          child: ScaleTransition(scale: anim, child: child),
                         ),
                         child: Icon(
-                          widget.isUrl
-                              ? LucideIcons.link
-                              : LucideIcons.globe,
+                          widget.isUrl ? LucideIcons.link : LucideIcons.globe,
                           key: ValueKey(
                               widget.isUrl ? 'url-hint' : 'search-hint'),
                           size: 14,
@@ -5943,8 +6043,7 @@ class _SearchInputBoxState extends State<_SearchInputBox> {
               const SizedBox(width: 6),
               Container(
                 constraints: const BoxConstraints(minWidth: 16),
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 5, vertical: 1),
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
                 decoration: BoxDecoration(
                   color: accent,
                   borderRadius: BorderRadius.circular(10),
@@ -6071,10 +6170,10 @@ class _SearchInputBoxState extends State<_SearchInputBox> {
   /// an × button to drop the attachment without submitting.
   Widget _buildPendingImageChip(AppColors colors) {
     final thumb = widget.pendingImageThumbnail!;
-    final dims = widget.pendingImageWidth != null &&
-            widget.pendingImageHeight != null
-        ? '${widget.pendingImageWidth}\u00d7${widget.pendingImageHeight}'
-        : null;
+    final dims =
+        widget.pendingImageWidth != null && widget.pendingImageHeight != null
+            ? '${widget.pendingImageWidth}\u00d7${widget.pendingImageHeight}'
+            : null;
     final size = widget.pendingImageSizeKb != null
         ? '${widget.pendingImageSizeKb} KB'
         : null;
@@ -6280,8 +6379,7 @@ class _SearchInputBoxState extends State<_SearchInputBox> {
   /// non-empty text; the image-vision path accepts text-empty submissions
   /// (the AI will describe what's in the picture). Either way the parent
   /// handler short-circuits if [widget.isLoading] is true.
-  bool get _canSubmit =>
-      widget.hasText || widget.pendingImageThumbnail != null;
+  bool get _canSubmit => widget.hasText || widget.pendingImageThumbnail != null;
 
   // ── Provider chip ──────────────────────────────────────────────────────────
 

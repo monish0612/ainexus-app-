@@ -6,6 +6,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
 import '../../../core/theme/app_colors.dart';
+import '../../widgets/nexus_brand_mark.dart';
 
 /// Onboarding / welcome screen — follows the selected app theme.
 class LandingScreen extends StatefulWidget {
@@ -107,7 +108,7 @@ class _LandingScreenState extends State<LandingScreen>
                   opacity: _orbEnter,
                   child: ScaleTransition(
                     scale: _pulseScale,
-                    child: const _HeroOrb(),
+                    child: const NexusBrandMark(size: 128),
                   ),
                 ),
                 const SizedBox(height: 36),
@@ -291,106 +292,11 @@ class _BlurOrb extends StatelessWidget {
           shape: BoxShape.circle,
           gradient: RadialGradient(
             colors: colors,
-            stops: colors.length == 3 ? const [0.0, 0.45, 1.0] : const [0.0, 1.0],
+            stops:
+                colors.length == 3 ? const [0.0, 0.45, 1.0] : const [0.0, 1.0],
           ),
         ),
       ),
     );
   }
-}
-
-/// 128px pulsing core with [SweepGradient] ring (accent → cyan).
-class _HeroOrb extends StatelessWidget {
-  const _HeroOrb();
-
-  static const double _size = 128;
-  static const double _ringWidth = 3;
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: _size,
-      height: _size,
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          CustomPaint(
-            size: const Size(_size, _size),
-            painter: _SweepRingPainter(
-              strokeWidth: _ringWidth,
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.all(_ringWidth + 2),
-            child: Container(
-              decoration: const BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: RadialGradient(
-                  colors: [
-                    Color(0xFF1A4A9E),
-                    AppColors.accent,
-                    AppColors.accentCyan,
-                  ],
-                  stops: [0.0, 0.55, 1.0],
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: Color(0x660D59F2),
-                    blurRadius: 32,
-                    spreadRadius: 0,
-                  ),
-                  BoxShadow(
-                    color: Color(0x4422D3EE),
-                    blurRadius: 24,
-                    spreadRadius: -4,
-                  ),
-                ],
-              ),
-              child: const Center(
-                child: Icon(
-                  LucideIcons.sparkles,
-                  size: 40,
-                  color: Color(0xE6FFFFFF),
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _SweepRingPainter extends CustomPainter {
-  _SweepRingPainter({required this.strokeWidth});
-
-  final double strokeWidth;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final center = Offset(size.width / 2, size.height / 2);
-    final radius = (size.shortestSide - strokeWidth) / 2;
-    final rect = Rect.fromCircle(center: center, radius: radius);
-    final paint = Paint()
-      ..shader = const SweepGradient(
-        colors: [
-          AppColors.accent,
-          AppColors.accentCyan,
-          Color(0xFF38BDF8),
-          AppColors.accent,
-        ],
-        stops: [0.0, 0.35, 0.65, 1.0],
-        startAngle: 0,
-        endAngle: 6.2831853,
-        transform: GradientRotation(-1.2),
-      ).createShader(rect)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = strokeWidth;
-
-    canvas.drawCircle(center, radius, paint);
-  }
-
-  @override
-  bool shouldRepaint(covariant _SweepRingPainter oldDelegate) =>
-      oldDelegate.strokeWidth != strokeWidth;
 }

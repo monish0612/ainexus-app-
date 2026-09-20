@@ -1,14 +1,25 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
+import '../../../bubble/bubble_settings_channel.dart';
 import '../../../core/auth/auth_service.dart';
 import '../../../core/constants/app_constants.dart';
 import '../../../core/di/injection.dart';
 import '../../../core/network/ai_error.dart';
+import '../../../core/platform/platform_capabilities.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../data/services/ai_models_service.dart';
+import '../../../data/services/profile_photo_service.dart';
+import '../../../data/services/sms_auto_expense/sms_auto_expense_service.dart';
+import '../../../data/services/price_watch/watch_scheduler.dart';
+import '../../providers/profile_photo_provider.dart';
+import '../../widgets/user_avatar.dart';
+import '../watch/watch_providers.dart';
+import 'bubble_setup_sheet.dart';
+import 'sms_auto_setup_sheet.dart';
 import 'settings_controller.dart';
 
 const _signOutRed = Color(0xFFEF4444);
@@ -169,6 +180,21 @@ class _SettingsSheet extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(height: 24),
+                      const Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 18),
+                        child: _BubbleSection(),
+                      ),
+                      const SizedBox(height: 24),
+                      const Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 18),
+                        child: _SmsAutoSection(),
+                      ),
+                      const SizedBox(height: 24),
+                      const Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 18),
+                        child: _WatchSection(),
+                      ),
+                      const SizedBox(height: 24),
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 18),
                         child: _BanksSection(
@@ -206,54 +232,788 @@ class _SettingsSheet extends StatelessWidget {
   }
 }
 
+// ── Floating rephrase bubble ─────────────────────────────────────────────────
+
+/// Master switch for the system-wide rephrase bubble, plus a shortcut into the
+/// setup sheet. Status is re-read whenever the sheet is rebuilt or the user
+/// returns from system settings.
+class _BubbleSection extends StatefulWidget {
+  const _BubbleSection();
+
+  @override
+  State<_BubbleSection> createState() => _BubbleSectionState();
+}
+
+class _BubbleSectionState extends State<_BubbleSection>
+    with WidgetsBindingObserver {
+  static const _channel = BubbleSettingsChannel();
+
+  BubbleStatus _status = const BubbleStatus.unknown();
+  bool _loaded = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _refresh();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _refresh();
+  }
+
+  Future<void> _refresh() async {
+    final status = await _channel.status();
+    if (!mounted) return;
+    setState(() {
+      _status = status;
+      _loaded = true;
+    });
+  }
+
+  Future<void> _toggle(bool value) async {
+    setState(() => _status = BubbleStatus(
+          serviceEnabled: _status.serviceEnabled,
+          enabled: value,
+          minChars: _status.minChars,
+          batteryUnrestricted: _status.batteryUnrestricted,
+        ));
+    await _channel.setEnabled(value);
+    if (value && !_status.serviceEnabled && mounted) {
+      await showBubbleSetupSheet(context);
+      await _refresh();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_channel.supported) return const SizedBox.shrink();
+    final colors = Theme.of(context).extension<AppColors>()!;
+
+    final subtitle = !_loaded
+        ? 'Checking…'
+        : _status.active
+            ? 'Active — type in any app and pause'
+            : _status.enabled
+                ? 'Accessibility service is off — tap Set up'
+                : 'Off';
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          'REPHRASE BUBBLE',
+          style: GoogleFonts.plusJakartaSans(
+            fontSize: 10,
+            fontWeight: FontWeight.w800,
+            color: colors.text3,
+            letterSpacing: 1.6,
+          ),
+        ),
+        const SizedBox(height: 10),
+        Container(
+          padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
+          decoration: BoxDecoration(
+            color: colors.bg2,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: colors.border),
+          ),
+          child: Column(
+            children: [
+              Row(
+                children: [
+                  Icon(
+                    LucideIcons.wand2,
+                    size: 17,
+                    color: _status.active
+                        ? const Color(0xFF0D59F2)
+                        : colors.text3,
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Floating bubble',
+                          style: GoogleFonts.plusJakartaSans(
+                            fontSize: 13.5,
+                            fontWeight: FontWeight.w700,
+                            color: colors.text,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          subtitle,
+                          style: GoogleFonts.plusJakartaSans(
+                            fontSize: 11,
+                            color: colors.text3,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Switch.adaptive(
+                    value: _status.enabled,
+                    activeThumbColor: const Color(0xFF0D59F2),
+                    onChanged: _toggle,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              SizedBox(
+                height: 36,
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: () async {
+                    await showBubbleSetupSheet(context);
+                    await _refresh();
+                  },
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: const Color(0xFF0D59F2),
+                    side: BorderSide(
+                      color: const Color(0xFF0D59F2).withValues(alpha: 0.45),
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  icon: const Icon(LucideIcons.settings2, size: 15),
+                  label: Text(
+                    _status.serviceEnabled ? 'Setup & test' : 'Set up',
+                    style: GoogleFonts.plusJakartaSans(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// ── SMS auto-log ──────────────────────────────────────────────────────────────
+
+/// Master switch for bank-debit SMS auto-log. Off until setup grants
+/// RECEIVE_SMS. Does not change the + add-expense button.
+class _SmsAutoSection extends ConsumerStatefulWidget {
+  const _SmsAutoSection();
+
+  @override
+  ConsumerState<_SmsAutoSection> createState() => _SmsAutoSectionState();
+}
+
+class _SmsAutoSectionState extends ConsumerState<_SmsAutoSection>
+    with WidgetsBindingObserver {
+  SmsExpenseStatus _status = const SmsExpenseStatus.unknown();
+  bool _loaded = false;
+
+  SmsAutoExpenseController get _ctrl =>
+      ref.read(smsAutoExpenseProvider.notifier);
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _refresh();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _refresh();
+  }
+
+  Future<void> _refresh() async {
+    final status = await _ctrl.status();
+    if (!mounted) return;
+    setState(() {
+      _status = status;
+      _loaded = true;
+    });
+  }
+
+  Future<void> _toggle(bool value) async {
+    setState(() {
+      _status = SmsExpenseStatus(
+        enabled: value,
+        mode: _status.mode,
+        permissionGranted: _status.permissionGranted,
+        batteryUnrestricted: _status.batteryUnrestricted,
+        notificationGranted: _status.notificationGranted,
+      );
+    });
+    await _ctrl.setEnabled(value);
+    if (!mounted) return;
+    if (value) {
+      final st = await _ctrl.status();
+      if (!mounted) return;
+      if (!st.permissionGranted) {
+        await showSmsAutoSetupSheet(context, _ctrl);
+      }
+    }
+    await _refresh();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!PlatformCapabilities.canUseSmsAutoExpense) {
+      return const SizedBox.shrink();
+    }
+    final colors = Theme.of(context).extension<AppColors>()!;
+
+    final subtitle = !_loaded
+        ? 'Checking…'
+        : !_status.permissionGranted
+            ? 'Needs SMS permission — tap Set up'
+            : !_status.enabled
+                ? 'Off'
+                : _status.auto
+                    ? 'Auto-save on — saves in the background, review later in the list'
+                    : 'Ask before saving';
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          'SMS AUTO-LOG',
+          style: GoogleFonts.plusJakartaSans(
+            fontSize: 10,
+            fontWeight: FontWeight.w800,
+            color: colors.text3,
+            letterSpacing: 1.6,
+          ),
+        ),
+        const SizedBox(height: 10),
+        Container(
+          padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
+          decoration: BoxDecoration(
+            color: colors.bg2,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: colors.border),
+          ),
+          child: Column(
+            children: [
+              Row(
+                children: [
+                  Icon(
+                    LucideIcons.smartphoneNfc,
+                    size: 17,
+                    color: _status.ready
+                        ? const Color(0xFF0D59F2)
+                        : colors.text3,
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Bank debit SMS',
+                          style: GoogleFonts.plusJakartaSans(
+                            fontSize: 13.5,
+                            fontWeight: FontWeight.w700,
+                            color: colors.text,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          subtitle,
+                          style: GoogleFonts.plusJakartaSans(
+                            fontSize: 11,
+                            color: colors.text3,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Switch.adaptive(
+                    value: _status.enabled,
+                    activeThumbColor: const Color(0xFF0D59F2),
+                    onChanged: _toggle,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              SizedBox(
+                height: 36,
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: () async {
+                    await showSmsAutoSetupSheet(context, _ctrl);
+                    await _refresh();
+                  },
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: const Color(0xFF0D59F2),
+                    side: BorderSide(
+                      color: const Color(0xFF0D59F2).withValues(alpha: 0.45),
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  icon: const Icon(LucideIcons.settings2, size: 15),
+                  label: Text(
+                    _status.ready ? 'Setup & try' : 'Set up',
+                    style: GoogleFonts.plusJakartaSans(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// ── Price Watch ─────────────────────────────────────────────────────────────
+
+class _WatchSection extends ConsumerStatefulWidget {
+  const _WatchSection();
+
+  @override
+  ConsumerState<_WatchSection> createState() => _WatchSectionState();
+}
+
+class _WatchSectionState extends ConsumerState<_WatchSection> {
+  static const _intervals = <(int, String)>[
+    (15, '15m'),
+    (30, '30m'),
+    (60, '1h'),
+    (180, '3h'),
+    (360, '6h'),
+    (1440, '1d'),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).extension<AppColors>()!;
+    final prefs = ref.read(watchPrefsProvider);
+    const accent = Color(0xFFF59E0B);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          'PRICE WATCH',
+          style: GoogleFonts.plusJakartaSans(
+            fontSize: 10,
+            fontWeight: FontWeight.w800,
+            color: colors.text3,
+            letterSpacing: 1.6,
+          ),
+        ),
+        const SizedBox(height: 10),
+        Container(
+          padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
+          decoration: BoxDecoration(
+            color: colors.bg2,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: colors.border),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  Icon(
+                    LucideIcons.tag,
+                    size: 17,
+                    color: prefs.enabled ? accent : colors.text3,
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Background checks',
+                          style: GoogleFonts.plusJakartaSans(
+                            fontSize: 13.5,
+                            fontWeight: FontWeight.w700,
+                            color: colors.text,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          prefs.enabled
+                              ? 'On this phone · ${_intervalLabel(prefs.intervalMinutes)} (Android min 15m)'
+                              : 'Paused — open Watch to check by hand',
+                          style: GoogleFonts.plusJakartaSans(
+                            fontSize: 11,
+                            color: colors.text3,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Switch.adaptive(
+                    value: prefs.enabled,
+                    activeThumbColor: accent,
+                    onChanged: (v) async {
+                      await prefs.setEnabled(v);
+                      if (v) {
+                        await scheduleWatchChecks(replace: true);
+                      } else {
+                        await cancelWatchChecks();
+                      }
+                      if (mounted) setState(() {});
+                    },
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: [
+                  for (final opt in _intervals)
+                    _WatchChip(
+                      label: opt.$2,
+                      selected: prefs.intervalMinutes == opt.$1,
+                      colors: colors,
+                      onTap: () async {
+                        await prefs.setIntervalMinutes(opt.$1);
+                        await ref
+                            .read(watchRepositoryProvider)
+                            .applyIntervalToAll(opt.$1);
+                        if (mounted) setState(() {});
+                      },
+                    ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              _WatchToggleRow(
+                label: 'Notify on drop',
+                value: prefs.notifyDecrease,
+                colors: colors,
+                onChanged: (v) async {
+                  await prefs.setNotifyDecrease(v);
+                  if (mounted) setState(() {});
+                },
+              ),
+              _WatchToggleRow(
+                label: 'Notify on target',
+                value: prefs.notifyTarget,
+                colors: colors,
+                onChanged: (v) async {
+                  await prefs.setNotifyTarget(v);
+                  if (mounted) setState(() {});
+                },
+              ),
+              _WatchToggleRow(
+                label: 'Notify on increase',
+                value: prefs.notifyIncrease,
+                colors: colors,
+                onChanged: (v) async {
+                  await prefs.setNotifyIncrease(v);
+                  if (mounted) setState(() {});
+                },
+              ),
+              _WatchToggleRow(
+                label: 'Quiet hours 10pm–8am',
+                value: prefs.quietHours,
+                colors: colors,
+                onChanged: (v) async {
+                  await prefs.setQuietHours(v);
+                  if (mounted) setState(() {});
+                },
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  String _intervalLabel(int minutes) {
+    for (final opt in _intervals) {
+      if (opt.$1 == minutes) return opt.$2;
+    }
+    if (minutes < 60) return '${minutes}m';
+    if (minutes % 1440 == 0) return '${minutes ~/ 1440}d';
+    if (minutes % 60 == 0) return '${minutes ~/ 60}h';
+    return '${minutes}m';
+  }
+}
+
+class _WatchChip extends StatelessWidget {
+  const _WatchChip({
+    required this.label,
+    required this.selected,
+    required this.colors,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool selected;
+  final AppColors colors;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 160),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: selected ? colors.bg3 : colors.bg,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: selected
+                ? const Color(0xFFF59E0B).withValues(alpha: 0.55)
+                : colors.border,
+          ),
+        ),
+        child: Text(
+          label,
+          style: GoogleFonts.plusJakartaSans(
+            fontSize: 11,
+            fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
+            color: selected ? colors.text : colors.text3,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _WatchToggleRow extends StatelessWidget {
+  const _WatchToggleRow({
+    required this.label,
+    required this.value,
+    required this.colors,
+    required this.onChanged,
+  });
+
+  final String label;
+  final bool value;
+  final AppColors colors;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 4),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              label,
+              style: GoogleFonts.plusJakartaSans(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w600,
+                color: colors.text,
+              ),
+            ),
+          ),
+          Switch.adaptive(
+            value: value,
+            activeThumbColor: const Color(0xFFF59E0B),
+            onChanged: onChanged,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 // ── Profile ──────────────────────────────────────────────────────────────────
 
-class _ProfileSection extends StatelessWidget {
+class _ProfileSection extends ConsumerStatefulWidget {
   const _ProfileSection({required this.colors});
 
   final AppColors colors;
 
   @override
+  ConsumerState<_ProfileSection> createState() => _ProfileSectionState();
+}
+
+class _ProfileSectionState extends ConsumerState<_ProfileSection> {
+  var _busy = false;
+
+  Future<void> _setFromSource(ImageSource source) async {
+    try {
+      final picked = await ImagePicker().pickImage(
+        source: source,
+        imageQuality: 95,
+      );
+      if (picked == null) return;
+      setState(() => _busy = true);
+      final bytes = await picked.readAsBytes();
+      await ref.read(profilePhotoPathProvider.notifier).setFromBytes(bytes);
+    } catch (e) {
+      if (!mounted) return;
+      final msg = avatarPickerErrorMessage(e);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(msg)),
+      );
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _removePhoto() async {
+    setState(() => _busy = true);
+    try {
+      await ref.read(profilePhotoPathProvider.notifier).clear();
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _openPicker() async {
+    if (_busy) return;
+    final colors = widget.colors;
+    final hasPhoto = hasStoredProfilePhoto(ref.read(profilePhotoPathProvider));
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: colors.bg1,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+      ),
+      builder: (ctx) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: colors.text5,
+                    borderRadius: BorderRadius.circular(99),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                Text(
+                  'Profile photo',
+                  style: GoogleFonts.plusJakartaSans(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                    color: colors.text,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Shown on Expense home and in the header.',
+                  style: GoogleFonts.plusJakartaSans(
+                    fontSize: 12,
+                    color: colors.text3,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                ListTile(
+                  leading: const Icon(LucideIcons.camera, size: 20),
+                  title: Text(
+                    'Take photo',
+                    style: GoogleFonts.plusJakartaSans(
+                      fontWeight: FontWeight.w600,
+                      color: colors.text,
+                    ),
+                  ),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _setFromSource(ImageSource.camera);
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(LucideIcons.image, size: 20),
+                  title: Text(
+                    'Choose from gallery',
+                    style: GoogleFonts.plusJakartaSans(
+                      fontWeight: FontWeight.w600,
+                      color: colors.text,
+                    ),
+                  ),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _setFromSource(ImageSource.gallery);
+                  },
+                ),
+                if (hasPhoto)
+                  ListTile(
+                    leading: const Icon(
+                      LucideIcons.trash2,
+                      size: 20,
+                      color: _signOutRed,
+                    ),
+                    title: Text(
+                      'Remove photo',
+                      style: GoogleFonts.plusJakartaSans(
+                        fontWeight: FontWeight.w600,
+                        color: _signOutRed,
+                      ),
+                    ),
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      _removePhoto();
+                    },
+                  ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final colors = widget.colors;
     final displayName = AuthService.instance.username;
     final initial = displayName.isNotEmpty ? displayName[0].toUpperCase() : '?';
+    final photoPath = ref.watch(profilePhotoPathProvider);
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(18, 20, 18, 24),
       child: Column(
         children: [
-          Container(
-            width: 88,
-            height: 88,
-            decoration: const BoxDecoration(
-              shape: BoxShape.circle,
-              gradient: LinearGradient(
-                colors: [AppColors.accent, AppColors.accentCyan],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-            ),
-            padding: const EdgeInsets.all(2),
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: colors.isDark ? const Color(0xFF111111) : Colors.white,
-                border: Border.all(
-                  color: colors.isDark
-                      ? Colors.black
-                      : const Color(0xFFE2E8F0),
-                  width: 2,
-                ),
-              ),
-              child: const Center(
-                child: Text(
-                  '😎',
-                  style: TextStyle(fontSize: 34),
-                ),
+          UserAvatar(
+            size: 88,
+            photoPath: photoPath,
+            showEditBadge: true,
+            busy: _busy,
+            onTap: _openPicker,
+          ),
+          const SizedBox(height: 10),
+          TextButton(
+            onPressed: _busy ? null : _openPicker,
+            child: Text(
+              hasStoredProfilePhoto(photoPath)
+                  ? 'Change photo'
+                  : 'Set profile photo',
+              style: GoogleFonts.plusJakartaSans(
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+                color: AppColors.accent,
               ),
             ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 4),
           Text(
             displayName.isNotEmpty ? displayName : 'User',
             style: GoogleFonts.plusJakartaSans(

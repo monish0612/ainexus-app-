@@ -40,6 +40,7 @@ class NewsActionFab extends StatefulWidget {
     required this.activeCategory,
     required this.onAction,
     this.clearOnly = false,
+    this.dockInset = 0,
   });
 
   final AppColors colors;
@@ -63,6 +64,9 @@ class NewsActionFab extends StatefulWidget {
   /// hidden. Set by the host for chips whose feed is in
   /// `kNoSummarizeCategories` (Movies, General).
   final bool clearOnly;
+
+  /// Extra lift so the FAB sits above the News category rail.
+  final double dockInset;
 
   @override
   State<NewsActionFab> createState() => _NewsActionFabState();
@@ -115,11 +119,9 @@ class _NewsActionFabState extends State<NewsActionFab>
   }
 
   int get _scopeCount {
-    // Movies / General etc. → only the current-category count is meaningful.
-    // The "All categories" pile deliberately excludes those feeds (see
-    // `kNoSummarizeCategories` in news_entities.dart), so falling back to
-    // [widget.unreadCount] would render a misleading "Mark 17 as read"
-    // when only e.g. 3 General articles actually exist.
+    // Movies / General etc. → only the current-category count is meaningful
+    // when the user is on that rail tab. "All categories" now includes every
+    // unread+unsaved row (AI, Finance, Movies, General).
     if (widget.clearOnly) return widget.unreadCountInCategory;
     if (widget.activeCategory == 'All') return widget.unreadCount;
     return _scope == NewsFabScope.all
@@ -146,6 +148,8 @@ class _NewsActionFabState extends State<NewsActionFab>
     if (visibleCount <= 0) return const SizedBox.shrink();
 
     return Stack(
+      fit: StackFit.expand,
+      clipBehavior: Clip.none,
       children: [
         // ── Backdrop dim + blur (only when expanded) ────────────────────
         if (_expandCtrl.value > 0 || _open)
@@ -175,7 +179,7 @@ class _NewsActionFabState extends State<NewsActionFab>
         // ── Action cards (slide + fade up) ──────────────────────────────
         Positioned(
           right: 16,
-          bottom: 96,
+          bottom: 96 + widget.dockInset,
           child: AnimatedBuilder(
             animation: _expand,
             builder: (_, __) {
@@ -224,12 +228,13 @@ class _NewsActionFabState extends State<NewsActionFab>
         // ── The FAB itself ─────────────────────────────────────────────
         Positioned(
           right: 16,
-          bottom: 24,
+          bottom: 24 + widget.dockInset,
           child: _FabCircle(
             pulse: _pulseCtrl,
             expand: _expand,
             unreadCount: visibleCount,
             clearOnly: widget.clearOnly,
+            isDark: widget.colors.isDark,
             onTap: _toggle,
           ),
         ),
@@ -244,6 +249,7 @@ class _FabCircle extends StatelessWidget {
     required this.expand,
     required this.unreadCount,
     required this.onTap,
+    required this.isDark,
     this.clearOnly = false,
   });
 
@@ -251,6 +257,7 @@ class _FabCircle extends StatelessWidget {
   final Animation<double> expand;
   final int unreadCount;
   final VoidCallback onTap;
+  final bool isDark;
 
   /// In `clearOnly` mode (Movies/General chips) the FAB swaps the sparkles
   /// icon for an eraser so the user reads the affordance correctly before
@@ -264,48 +271,51 @@ class _FabCircle extends StatelessWidget {
       builder: (_, __) {
         final scale = 1.0 + 0.04 * pulse.value;
         final rotate = expand.value * 0.785; // 45deg
+        final glowA = isDark ? 0.45 : 0.22;
+        final glowB = isDark ? 0.30 : 0.14;
         return Transform.scale(
           scale: scale,
-          child: Material(
-            color: Colors.transparent,
-            child: InkWell(
-              onTap: onTap,
-              customBorder: const CircleBorder(),
-              child: Ink(
-                width: 60,
-                height: 60,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  gradient: LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: clearOnly
-                        ? const [Color(0xFFEF4444), Color(0xFFF97316)]
-                        : const [Color(0xFF6366F1), Color(0xFFA855F7)],
-                  ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: (clearOnly
-                              ? const Color(0xFFEF4444)
-                              : const Color(0xFF6366F1))
-                          .withValues(alpha: 0.45),
-                      blurRadius: 22,
-                      spreadRadius: 1,
+          child: GestureDetector(
+            onTap: onTap,
+            child: SizedBox(
+              width: 60,
+              height: 60,
+              child: Stack(
+                alignment: Alignment.center,
+                clipBehavior: Clip.none,
+                children: [
+                  Container(
+                    width: 60,
+                    height: 60,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      gradient: LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: clearOnly
+                            ? const [Color(0xFFEF4444), Color(0xFFF97316)]
+                            : const [Color(0xFF6366F1), Color(0xFFA855F7)],
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: (clearOnly
+                                  ? const Color(0xFFEF4444)
+                                  : const Color(0xFF6366F1))
+                              .withValues(alpha: glowA),
+                          blurRadius: isDark ? 22 : 16,
+                          spreadRadius: isDark ? 1 : 0,
+                        ),
+                        BoxShadow(
+                          color: (clearOnly
+                                  ? const Color(0xFFF97316)
+                                  : const Color(0xFFA855F7))
+                              .withValues(alpha: glowB),
+                          blurRadius: isDark ? 32 : 20,
+                          offset: const Offset(0, 10),
+                        ),
+                      ],
                     ),
-                    BoxShadow(
-                      color: (clearOnly
-                              ? const Color(0xFFF97316)
-                              : const Color(0xFFA855F7))
-                          .withValues(alpha: 0.30),
-                      blurRadius: 32,
-                      offset: const Offset(0, 12),
-                    ),
-                  ],
-                ),
-                child: Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    Transform.rotate(
+                    child: Transform.rotate(
                       angle: rotate,
                       child: Icon(
                         clearOnly ? LucideIcons.eraser : LucideIcons.sparkles,
@@ -313,38 +323,38 @@ class _FabCircle extends StatelessWidget {
                         color: Colors.white,
                       ),
                     ),
-                    if (unreadCount > 0)
-                      Positioned(
-                        top: 4,
-                        right: 4,
-                        child: Container(
-                          constraints: const BoxConstraints(
-                            minWidth: 18,
-                            minHeight: 18,
+                  ),
+                  if (unreadCount > 0)
+                    Positioned(
+                      top: -2,
+                      right: -2,
+                      child: Container(
+                        constraints: const BoxConstraints(
+                          minWidth: 18,
+                          minHeight: 18,
+                        ),
+                        padding: const EdgeInsets.symmetric(horizontal: 5),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFEF4444),
+                          borderRadius: BorderRadius.circular(999),
+                          border: Border.all(
+                            color: Colors.white.withValues(alpha: 0.85),
+                            width: 1.5,
                           ),
-                          padding: const EdgeInsets.symmetric(horizontal: 5),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFEF4444),
-                            borderRadius: BorderRadius.circular(999),
-                            border: Border.all(
-                              color: Colors.white.withValues(alpha: 0.85),
-                              width: 1.5,
-                            ),
-                          ),
-                          alignment: Alignment.center,
-                          child: Text(
-                            unreadCount > 99 ? '99+' : '$unreadCount',
-                            style: GoogleFonts.plusJakartaSans(
-                              fontSize: 9,
-                              fontWeight: FontWeight.w800,
-                              color: Colors.white,
-                              height: 1.0,
-                            ),
+                        ),
+                        alignment: Alignment.center,
+                        child: Text(
+                          unreadCount > 99 ? '99+' : '$unreadCount',
+                          style: GoogleFonts.plusJakartaSans(
+                            fontSize: 9,
+                            fontWeight: FontWeight.w800,
+                            color: Colors.white,
+                            height: 1.0,
                           ),
                         ),
                       ),
-                  ],
-                ),
+                    ),
+                ],
               ),
             ),
           ),
@@ -464,8 +474,8 @@ class _SheetContent extends StatelessWidget {
                     Expanded(
                       child: Text(
                         clearOnly
-                            ? 'Tip: swipe a card left or right to delete just that one'
-                            : 'Saved articles are never touched',
+                            ? 'Tip: swipe a card left or right, then confirm, to delete just that one'
+                            : 'Swipe a card left or right to delete it — you will be asked to confirm. Saved articles are never touched',
                         style: GoogleFonts.plusJakartaSans(
                           fontSize: 11,
                           fontWeight: FontWeight.w500,

@@ -9,7 +9,7 @@
     android:maxResizeWidth="530dp"
     android:maxResizeHeight="80dp"
     android:previewImage="@drawable/widget_search_preview"
-    android:previewLayout="@layout/widget_search"
+    android:previewLayout="@layout/widget_search_preview"
     android:resizeMode="horizontal"
     android:targetCellWidth="4"
     android:targetCellHeight="1"

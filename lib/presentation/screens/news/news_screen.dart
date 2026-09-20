@@ -10,7 +10,6 @@ import 'package:lucide_icons/lucide_icons.dart';
 import '../../../core/di/injection.dart';
 import '../../../core/services/news_summarize_store.dart';
 import '../../../core/services/notification_service.dart';
-import '../../../core/services/nuke_report.dart';
 import '../../../core/services/telegram_logger.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/utils/retry.dart';
@@ -20,70 +19,19 @@ import '../../providers/profile_photo_provider.dart';
 import '../../widgets/compact_header.dart';
 import '../../widgets/news_action_fab.dart';
 import '../../widgets/swipe_to_delete.dart';
-import '../expense/widgets/nuke_easter_egg.dart';
 import '../settings/settings_controller.dart';
 import '../settings/settings_modal.dart';
-import 'article_detail_modal.dart';
 import 'article_followup_sheet.dart';
+import 'news_article_nav.dart';
+import 'news_category_rail.dart';
+import 'news_chrome.dart';
 import 'news_controller.dart';
+import 'news_feed_filters.dart';
 import 'news_review_meta.dart';
+import 'news_saved_page.dart';
 import 'summary_reader_screen.dart';
 
-class _NewsNotif {
-  const _NewsNotif({
-    required this.id,
-    required this.title,
-    required this.time,
-    required this.read,
-    required this.articleId,
-    required this.icon,
-    required this.color,
-  });
-
-  final String id;
-  final String title;
-  final String time;
-  final bool read;
-  final String articleId;
-  final IconData icon;
-  final Color color;
-}
-
-/// Single source of truth for the icon used to represent a news category.
-/// Shared by the notification panel, the featured card badge, and the
-/// list-row badge so every surface stays in sync when a new category is
-/// added in [CATEGORIES].
-IconData newsCategoryIcon(String category) {
-  switch (category) {
-    case 'Finance':
-      return LucideIcons.trendingUp;
-    case 'AI News':
-      return LucideIcons.cpu;
-    case 'Movies':
-      return LucideIcons.film;
-    case 'General':
-      return LucideIcons.globe;
-    default:
-      return LucideIcons.newspaper;
-  }
-}
-
-IconData _notifIconForCategory(String category) => newsCategoryIcon(category);
-
-Color _notifColorForCategory(String category) {
-  switch (category) {
-    case 'Finance':
-      return const Color(0xFF34D399);
-    case 'AI News':
-      return const Color(0xFFF59E0B);
-    case 'Movies':
-      return const Color(0xFFEC4899);
-    case 'General':
-      return const Color(0xFF38BDF8);
-    default:
-      return AppColors.accent;
-  }
-}
+export 'news_chrome.dart' show newsCategoryIcon, newsCategoryColor;
 
 class NewsScreen extends ConsumerStatefulWidget {
   const NewsScreen({super.key});
@@ -92,15 +40,8 @@ class NewsScreen extends ConsumerStatefulWidget {
   ConsumerState<NewsScreen> createState() => _NewsScreenState();
 }
 
-class _NewsScreenState extends ConsumerState<NewsScreen>
-    with SingleTickerProviderStateMixin {
-  late final TabController _tabCtrl;
-  late final TextEditingController _savedSearchCtrl;
+class _NewsScreenState extends ConsumerState<NewsScreen> {
   String _category = 'All';
-  bool _showNotif = false;
-  bool _notifSeen = false;
-  String _savedSearch = '';
-  final Set<String> _dismissedNotifIds = {};
 
   /// Listener bound to [NewsSummarizeStore] so the "Resume summary" pill
   /// rebuilds when a background session progresses or completes.
@@ -110,14 +51,8 @@ class _NewsScreenState extends ConsumerState<NewsScreen>
   @override
   void initState() {
     super.initState();
-    _tabCtrl = TabController(length: 2, vsync: this)
-      ..addListener(_onTabChanged);
-    _savedSearchCtrl = TextEditingController();
     _summarizeListener = () {
       if (!mounted) return;
-      // The store also raises notifyListeners when [requestReaderReopen]
-      // sets the pending-reopen flag — handle that here so cold-start /
-      // notification-tap flows don't depend on payload-stream timing.
       if (NewsSummarizeStore.instance.consumePendingReopen()) {
         _reopenReaderForActiveSession();
       }
@@ -125,21 +60,15 @@ class _NewsScreenState extends ConsumerState<NewsScreen>
     };
     NewsSummarizeStore.instance.addListener(_summarizeListener);
 
-    // Listen for the deep-link payload fired when the user taps the
-    // "summary ready" notification. We pop any active route stack down to
-    // the news screen and reopen the reader for the live session.
     _payloadSub = notificationPayloadStream.stream.listen((payload) {
       if (!mounted) return;
       if (payload != NewsSummarizeStore.kReopenPayload) return;
       _reopenReaderForActiveSession();
     });
 
-    // If the user reached the news screen via the completion-notification
-    // tap that fired before we had a chance to subscribe, the reopen flag
-    // will already be set on the store. Drain it on the next frame so the
-    // reader opens the moment the screen is laid out.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
+      unawaited(ref.read(newsControllerProvider.notifier).ensureFresh(force: true));
       if (NewsSummarizeStore.instance.consumePendingReopen()) {
         _reopenReaderForActiveSession();
       }
@@ -148,18 +77,9 @@ class _NewsScreenState extends ConsumerState<NewsScreen>
 
   @override
   void dispose() {
-    _tabCtrl.removeListener(_onTabChanged);
     NewsSummarizeStore.instance.removeListener(_summarizeListener);
     _payloadSub?.cancel();
-    _savedSearchCtrl.dispose();
-    _tabCtrl.dispose();
     super.dispose();
-  }
-
-  void _onTabChanged() {
-    if (_showNotif && _tabCtrl.indexIsChanging) {
-      setState(() => _showNotif = false);
-    }
   }
 
   /// Re-opens the [SummaryReaderScreen] for the current background session.
@@ -170,8 +90,6 @@ class _NewsScreenState extends ConsumerState<NewsScreen>
     final session = store.articles;
     if (session.isEmpty) return;
     if (!mounted) return;
-    // Make sure the For You tab is in front when we navigate.
-    if (_tabCtrl.index != 0) _tabCtrl.animateTo(0);
     await Navigator.of(context).push<void>(
       MaterialPageRoute<void>(
         fullscreenDialog: true,
@@ -180,59 +98,14 @@ class _NewsScreenState extends ConsumerState<NewsScreen>
     );
   }
 
-  List<_NewsNotif> _buildNotifications(List<Article> articles) {
-    return articles
-        .where((a) =>
-            !a.isRead && !a.isSaved && !_dismissedNotifIds.contains(a.id))
-        .take(8)
-        .map(
-          (article) => _NewsNotif(
-            id: 'notif-${article.id}',
-            title: article.title,
-            time: article.timeAgo ?? article.date,
-            read: false,
-            articleId: article.id,
-            icon: _notifIconForCategory(article.category),
-            color: _notifColorForCategory(article.category),
-          ),
-        )
-        .toList(growable: false);
-  }
-
-  /// Saved-search box handler. Doubles as the entry point for the hidden
-  /// `nuke` command: typing it (exact, case-insensitive) wipes EVERY article —
-  /// including saved ones — locally and on the server, instead of filtering.
-  /// Intercepted before it ever becomes a search query.
-  void _onSavedSearch(String value) {
-    if (value.trim().toLowerCase() == 'nuke') {
-      _savedSearchCtrl.clear();
-      setState(() => _savedSearch = '');
-      unawaited(_handleNewsNuke());
-      return;
-    }
-    setState(() => _savedSearch = value);
-  }
-
-  /// Runs the news-scope nuke easter egg: friction-y confirm → wipe all
-  /// articles (saved + unread + read) local + server → cinematic report.
-  Future<void> _handleNewsNuke() async {
-    final confirmed = await NukeEasterEgg.confirm(context, NukeScope.news);
-    if (!mounted || !confirmed) return;
-
-    TLog.w('News', '☢️ News nuke confirmed — wiping ALL articles incl. saved');
-    final report = await ref.read(newsNukeServiceProvider).nuke();
-    if (!mounted) return;
-    await NukeEasterEgg.showReport(context, report);
-  }
-
+  /// Manual pull-to-refresh. Auto-load via [NewsController.ensureFresh] is
+  /// the primary path; this still POSTs `/news/refresh` so the user can
+  /// force a fetch as a secondary option (not throttled by the auto window).
   Future<void> _handleRefresh() async {
     try {
       final newCount =
           await ref.read(newsControllerProvider.notifier).refresh();
       if (!mounted) return;
-      if (newCount > 0) {
-        setState(() => _notifSeen = false);
-      }
       ScaffoldMessenger.of(context)
         ..clearSnackBars()
         ..showSnackBar(
@@ -249,7 +122,7 @@ class _NewsScreenState extends ConsumerState<NewsScreen>
             behavior: SnackBarBehavior.floating,
             shape:
                 RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            margin: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+            margin: kNewsSnackBarMargin,
             duration: const Duration(seconds: 3),
             backgroundColor: newCount > 0
                 ? const Color(0xFF34D399)
@@ -273,62 +146,27 @@ class _NewsScreenState extends ConsumerState<NewsScreen>
             behavior: SnackBarBehavior.floating,
             shape:
                 RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            margin: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+            margin: kNewsSnackBarMargin,
             duration: const Duration(seconds: 3),
           ),
         );
     }
   }
 
-  Future<void> _openArticle(Article raw) async {
-    final article =
-        await ref.read(newsControllerProvider.notifier).loadArticle(raw.id) ??
-            raw;
-    if (!mounted) return;
-
-    final feed = ref.read(newsControllerProvider).valueOrNull ?? const <Article>[];
-    Navigator.of(context).push<void>(
-      MaterialPageRoute<void>(
-        fullscreenDialog: true,
-        builder: (_) => ArticleDetailModal(
-          article: article,
-          queue: feed,
-          onToggleSave: (_) {
-            ref.read(newsControllerProvider.notifier).toggleSaved(raw.id);
-          },
-          onMarkRead: () {
-            ref.read(newsControllerProvider.notifier).markRead(raw.id);
-          },
-        ),
-      ),
-    );
+  Future<void> _openArticle(Article raw) {
+    return openNewsArticle(context: context, ref: ref, raw: raw);
   }
 
-  /// Handles an action picked from the For You speed-dial FAB. The full feed
-  /// list is computed once in `build()` and forwarded here so we don't redo
-  /// the filter work and so we always operate on the user's current view.
+  /// Handles an action picked from the speed-dial FAB. All + current-category
+  /// scopes both include Movies and General — Summarize All covers the
+  /// entire unread pile and skips articles that already have summaryShort.
   Future<void> _handleFabAction({
     required NewsFabAction action,
     required NewsFabScope scope,
     required List<Article> unfilteredFeed,
     required List<Article> filteredFeed,
   }) async {
-    var target = scope == NewsFabScope.all ? unfilteredFeed : filteredFeed;
-
-    // EDGE CASE GUARD — when the user is on a Movies/General chip and picks
-    // "summarize current category", the inline scope picker still routes
-    // through `filteredFeed`, which is the (full-content) Movies/General
-    // articles. Those must NEVER be batch-summarized by the AI — the whole
-    // point of the skip_summary feeds is to show the original body. Strip
-    // them defensively here so a future scope-picker change can't sneak
-    // them into the summarize pipeline. "Clear" action is unaffected:
-    // marking Movies/General articles as read in bulk is still valid.
-    if (action == NewsFabAction.summarize) {
-      target = target
-          .where((a) => !kNoSummarizeCategories.contains(a.category))
-          .toList(growable: false);
-    }
-
+    final target = scope == NewsFabScope.all ? unfilteredFeed : filteredFeed;
     if (target.isEmpty) return;
 
     switch (action) {
@@ -396,7 +234,7 @@ class _NewsScreenState extends ConsumerState<NewsScreen>
             behavior: SnackBarBehavior.floating,
             shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12)),
-            margin: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+            margin: kNewsSnackBarMargin,
             duration: const Duration(seconds: 3),
             backgroundColor: const Color(0xFFEF4444),
           ),
@@ -419,7 +257,7 @@ class _NewsScreenState extends ConsumerState<NewsScreen>
           behavior: SnackBarBehavior.floating,
           shape:
               RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          margin: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+          margin: kNewsSnackBarMargin,
           duration: const Duration(milliseconds: 1600),
           backgroundColor: const Color(0xFF34D399),
         ),
@@ -437,8 +275,15 @@ class _NewsScreenState extends ConsumerState<NewsScreen>
     final repo = ref.read(newsRepositoryProvider);
     final liteModel = ref.read(settingsProvider).liteModel;
 
+    List<Article> hydrated = articles;
+    try {
+      hydrated = await repo.mergeCachedSummaries(articles);
+    } catch (e) {
+      TLog.w('News', 'Could not hydrate cached summaries: $e', error: e);
+    }
+
     NewsSummarizeStore.instance.start(
-      articles: articles,
+      articles: hydrated,
       service: service,
       repository: repo,
       liteModel: liteModel,
@@ -448,7 +293,7 @@ class _NewsScreenState extends ConsumerState<NewsScreen>
     await Navigator.of(context).push<void>(
       MaterialPageRoute<void>(
         fullscreenDialog: true,
-        builder: (_) => SummaryReaderScreen(articles: articles),
+        builder: (_) => SummaryReaderScreen(articles: hydrated),
       ),
     );
   }
@@ -517,7 +362,7 @@ class _NewsScreenState extends ConsumerState<NewsScreen>
             behavior: SnackBarBehavior.floating,
             shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12)),
-            margin: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+            margin: kNewsSnackBarMargin,
             duration: const Duration(seconds: 3),
             backgroundColor: const Color(0xFFEF4444),
           ),
@@ -545,7 +390,7 @@ class _NewsScreenState extends ConsumerState<NewsScreen>
           behavior: SnackBarBehavior.floating,
           shape:
               RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          margin: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+          margin: kNewsSnackBarMargin,
           duration: const Duration(seconds: 2),
           backgroundColor: const Color(0xFF34D399),
         ),
@@ -557,215 +402,78 @@ class _NewsScreenState extends ConsumerState<NewsScreen>
     final colors = Theme.of(context).extension<AppColors>()!;
     final newsState = ref.watch(newsControllerProvider);
     final allArticles = newsState.valueOrNull ?? const <Article>[];
-    final notifications = _buildNotifications(allArticles);
-    final unreadNotifCount = notifications.where((n) => !n.read).length;
-
-    // All unread+unsaved articles regardless of category. Drives the
-    // per-category chip (Movies / General etc.) and the notification panel
-    // so those tabs always reflect the true article pool.
-    final unreadUnsaved =
-        allArticles.where((a) => !a.isRead && !a.isSaved).toList();
-
-    // The "All" chip + FAB "summarize-all" scope deliberately EXCLUDE the
-    // no-summarize categories (Movies, General). Those feeds carry the
-    // FULL article body — the catch-up summarize flow is designed for
-    // AI-condensed pieces, and the user explicitly asked for them to be
-    // segregated from the "All" pile.
-    final unfilteredFeed = unreadUnsaved
-        .where((a) => !kNoSummarizeCategories.contains(a.category))
-        .toList(growable: false);
-
-    final List<Article> feed = _category == 'All'
-        ? unfilteredFeed
-        : unreadUnsaved.where((a) => a.category == _category).toList();
-    final featured = feed.isEmpty ? null : feed.first;
-    final featuredArticle = featured;
+    final unreadUnsaved = unreadUnsavedArticles(allArticles);
+    final unfilteredFeed = unreadUnsaved;
+    final feed = newsFeedForCategory(unreadUnsaved, _category);
+    final featuredArticle = feed.isEmpty ? null : feed.first;
     final rest = featuredArticle == null
         ? feed
         : feed.where((a) => a.id != featuredArticle.id).toList();
-
-    final savedArticles = allArticles.where((a) => a.isSaved).toList();
-    final q = _savedSearch.trim().toLowerCase();
-    final filteredSaved = q.isEmpty
-        ? savedArticles
-        : savedArticles
-            .where(
-              (a) =>
-                  a.title.toLowerCase().contains(q) ||
-                  a.category.toLowerCase().contains(q) ||
-                  a.source.toLowerCase().contains(q),
-            )
-            .toList();
+    final savedCount = allArticles.where((a) => a.isSaved).length;
+    final railCounts = {
+      for (final label in kNewsCategoryRailLabels)
+        label: newsCategoryCount(unreadUnsaved, label),
+    };
 
     return Column(
       children: [
         CompactHeader(
           title: 'News',
           photoPath: ref.watch(profilePhotoPathProvider),
-          actionIcon: LucideIcons.bell,
-          actionBadgeCount:
-              (!_notifSeen && unreadNotifCount > 0) ? unreadNotifCount : null,
+          actionIcon: LucideIcons.bookmark,
+          actionTooltip: 'Saved',
+          actionBadgeCount: savedCount > 0 ? savedCount : null,
           onAvatarTap: () => showSettingsModal(context, ref),
-          onActionTap: () => setState(() {
-            _showNotif = true;
-            _notifSeen = true;
-          }),
-        ),
-        Material(
-          color: colors.headerBg,
-          child: TabBar(
-            controller: _tabCtrl,
-            indicatorColor:
-                colors.isDark ? const Color(0xFF818CF8) : AppColors.accent,
-            indicatorWeight: 2,
-            labelColor: colors.text,
-            unselectedLabelColor: colors.text3,
-            dividerColor: colors.border,
-            labelStyle: GoogleFonts.plusJakartaSans(
-              fontSize: 13,
-              fontWeight: FontWeight.w700,
-            ),
-            unselectedLabelStyle: GoogleFonts.plusJakartaSans(
-              fontSize: 13,
-              fontWeight: FontWeight.w500,
-            ),
-            tabs: [
-              const Tab(text: 'For You'),
-              Tab(
-                text: savedArticles.isEmpty
-                    ? 'Saved'
-                    : 'Saved (${savedArticles.length})',
-              ),
-            ],
-          ),
+          onActionTap: () => NewsSavedPage.open(context),
         ),
         Expanded(
-          child: PopScope(
-            canPop: !_showNotif,
-            onPopInvokedWithResult: (didPop, _) {
-              if (!didPop && _showNotif) {
-                setState(() => _showNotif = false);
-              }
-            },
-            child: Stack(
-              children: [
-                ColoredBox(
-                  color: colors.bg,
-                  child: TabBarView(
-                    controller: _tabCtrl,
-                    // Cards on every For You chip swipe-delete left or
-                    // right. If this view also pages horizontally, that
-                    // same gesture jumps to the Saved tab — the bug on
-                    // All / AI News / Finance. Switch tabs by tapping
-                    // For You or Saved only.
-                    physics: const NeverScrollableScrollPhysics(),
-                    children: [
-                      _ForYouTab(
-                        colors: colors,
-                        category: _category,
-                        onCategory: (c) => setState(() => _category = c),
-                        featured: featuredArticle,
-                        rest: rest,
-                        loading: newsState.isLoading && allArticles.isEmpty,
-                        hasError: newsState.hasError && allArticles.isEmpty,
-                        feedEmpty: feed.isEmpty,
-                        onRefresh: _handleRefresh,
-                        onOpen: _openArticle,
-                        unreadCountAll: unfilteredFeed.length,
-                        unreadCountInCategory: feed.length,
-                        // Movies / General chips swap to the clearOnly FAB
-                        // (single "Clear All" action, no Summarize, no
-                        // scope toggle). Swipe-to-delete is on EVERY For
-                        // You chip — All, AI News, Finance, Movies, General.
-                        clearOnly:
-                            kNoSummarizeCategories.contains(_category),
-                        onSwipeDelete: _deleteArticle,
-                        onFabAction: (action, scope) => _handleFabAction(
-                          action: action,
-                          scope: scope,
-                          unfilteredFeed: unfilteredFeed,
-                          filteredFeed: feed,
-                        ),
-                        // The pill showing "Catch-up summary ready" is
-                        // driven by the singleton store and rebuilt via
-                        // [_summarizeListener] above. We use the
-                        // RELEVANCE-aware check ([hasRelevantSession]) so
-                        // the pill auto-hides if the user has marked all
-                        // of the session's articles as read by some other
-                        // path (article-detail modal mark-read, multi-
-                        // device sync, etc.) — without that check, the
-                        // pill would stay even when "No articles in this
-                        // category" is showing below it.
-                        activeSummaryProgress: NewsSummarizeStore.instance
-                                .hasRelevantSession({
-                          for (final a in unfilteredFeed) a.id,
-                        })
-                            ? NewsSummarizeStore.instance.progress
-                            : null,
-                        onResumeSummary: _reopenReaderForActiveSession,
-                      ),
-                      _SavedTab(
-                        colors: colors,
-                        searchController: _savedSearchCtrl,
-                        search: _savedSearch,
-                        onSearch: _onSavedSearch,
-                        savedEmpty: savedArticles.isEmpty,
-                        filteredEmpty:
-                            filteredSaved.isEmpty && savedArticles.isNotEmpty,
-                        articles: filteredSaved,
-                        onRefresh: _handleRefresh,
-                        onOpen: _openArticle,
-                        onRemove: (id) {
-                          // Removing from Saved deletes the article outright
-                          // (local row + server delete + tombstone) so it
-                          // never resurfaces in the feed or on the website.
-                          ref
-                              .read(newsControllerProvider.notifier)
-                              .deleteArticle(id);
-                        },
-                      ),
-                    ],
+          child: Stack(
+            children: [
+              ColoredBox(
+                color: colors.bg,
+                child: _ForYouTab(
+                  colors: colors,
+                  category: _category,
+                  featured: featuredArticle,
+                  rest: rest,
+                  loading: newsState.isLoading && allArticles.isEmpty,
+                  hasError: newsState.hasError && allArticles.isEmpty,
+                  feedEmpty: feed.isEmpty,
+                  onRefresh: _handleRefresh,
+                  onOpen: _openArticle,
+                  unreadCountAll: unfilteredFeed.length,
+                  unreadCountInCategory: feed.length,
+                  onSwipeDelete: _deleteArticle,
+                  onFabAction: (action, scope) => _handleFabAction(
+                    action: action,
+                    scope: scope,
+                    unfilteredFeed: unfilteredFeed,
+                    filteredFeed: feed,
                   ),
+                  activeSummaryProgress: NewsSummarizeStore.instance
+                          .hasRelevantSession({
+                    for (final a in unfilteredFeed) a.id,
+                  })
+                      ? NewsSummarizeStore.instance.progress
+                      : null,
+                  onResumeSummary: _reopenReaderForActiveSession,
                 ),
-                if (_showNotif) ...[
-                  Positioned.fill(
-                    child: GestureDetector(
-                      onTap: () => setState(() => _showNotif = false),
-                      behavior: HitTestBehavior.opaque,
-                      child: ColoredBox(
-                        color: colors.scrim,
-                      ),
-                    ),
-                  ),
-                  _NotificationPanel(
-                    notifications: notifications,
-                    colors: colors,
-                    onClose: () => setState(() => _showNotif = false),
-                    onClearAll: () {
-                      setState(() {
-                        for (final n in notifications) {
-                          _dismissedNotifIds.add(n.articleId);
-                        }
-                        _showNotif = false;
-                      });
-                    },
-                    onOpenArticle: (id) {
-                      Article? art;
-                      for (final article in allArticles) {
-                        if (article.id == id) {
-                          art = article;
-                          break;
-                        }
-                      }
-                      if (art != null) {
-                        _openArticle(art);
-                      }
-                      setState(() => _showNotif = false);
-                    },
-                  ),
-                ],
-              ],
-            ),
+              ),
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: NewsCategoryRail(
+                  colors: colors,
+                  selected: _category,
+                  counts: railCounts,
+                  onSelected: (c) {
+                    ScaffoldMessenger.of(context).clearSnackBars();
+                    setState(() => _category = c);
+                  },
+                ),
+              ),
+            ],
           ),
         ),
       ],
@@ -777,7 +485,6 @@ class _ForYouTab extends StatelessWidget {
   const _ForYouTab({
     required this.colors,
     required this.category,
-    required this.onCategory,
     required this.featured,
     required this.rest,
     required this.loading,
@@ -790,13 +497,11 @@ class _ForYouTab extends StatelessWidget {
     required this.onFabAction,
     required this.activeSummaryProgress,
     required this.onResumeSummary,
-    required this.clearOnly,
     required this.onSwipeDelete,
   });
 
   final AppColors colors;
   final String category;
-  final ValueChanged<String> onCategory;
   final Article? featured;
   final List<Article> rest;
   final bool loading;
@@ -821,28 +526,25 @@ class _ForYouTab extends StatelessWidget {
   /// Re-opens the reader bound to the live session.
   final VoidCallback onResumeSummary;
 
-  /// `true` when the active chip is in `kNoSummarizeCategories` (Movies
-  /// or General). Drives the FAB layout (clear-only mode). Swipe-to-delete
-  /// is always on for For You rows, including All / AI News / Finance.
-  /// The parent TabBarView must NOT page on horizontal drag, otherwise
-  /// those swipes open the Saved tab instead of deleting.
-  final bool clearOnly;
-
   /// Per-article delete handler — invoked from the swipe-to-delete
-  /// affordance on every For You row. Hosted by the parent screen so
-  /// it can run with retry + Telegram logging + show snackbars.
+  /// affordance on every feed row (All, AI News, Finance, Movies, General).
   final ValueChanged<Article> onSwipeDelete;
 
   @override
   Widget build(BuildContext context) {
     return Stack(
+      clipBehavior: Clip.none,
+      fit: StackFit.expand,
       children: [
         RefreshIndicator(
+          key: const Key('news-feed-refresh'),
           onRefresh: onRefresh,
           color: AppColors.accent,
+          backgroundColor: colors.bg1,
+          displacement: 48,
           child: ListView(
             physics: const AlwaysScrollableScrollPhysics(),
-            padding: const EdgeInsets.only(bottom: 96),
+            padding: const EdgeInsets.only(bottom: kNewsFeedBottomInset),
             children: [
           if (activeSummaryProgress != null)
             Padding(
@@ -859,6 +561,10 @@ class _ForYouTab extends StatelessWidget {
               child: SwipeToDelete(
                 key: ValueKey<String>('swipe-featured-${featured!.id}'),
                 onDelete: () => onSwipeDelete(featured!),
+                headline: 'Delete this article?',
+                title: featured!.title,
+                message:
+                    'Remove from ${featured!.category}. It will not come back on refresh.',
                 borderRadius: 24,
                 contentHeight: 280,
                 child: _FeaturedCard(
@@ -869,33 +575,6 @@ class _ForYouTab extends StatelessWidget {
               ),
             ),
           ],
-          SizedBox(
-            height: 40,
-            child: ListView(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              children: [
-                _Chip(
-                  label: 'All',
-                  selected: category == 'All',
-                  colors: colors,
-                  onTap: () => onCategory('All'),
-                ),
-                ...CATEGORIES.map(
-                  (c) => Padding(
-                    padding: const EdgeInsets.only(left: 8),
-                    child: _Chip(
-                      label: c,
-                      selected: category == c,
-                      colors: colors,
-                      onTap: () => onCategory(c),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 8),
           if (loading)
             const Padding(
               padding: EdgeInsets.only(top: 72),
@@ -920,6 +599,14 @@ class _ForYouTab extends StatelessWidget {
                       color: colors.text4,
                     ),
                   ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Pull down to try again',
+                    style: GoogleFonts.plusJakartaSans(
+                      fontSize: 12,
+                      color: colors.text5,
+                    ),
+                  ),
                 ],
               ),
             )
@@ -938,6 +625,14 @@ class _ForYouTab extends StatelessWidget {
                       color: colors.text4,
                     ),
                   ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Pull down to refresh',
+                    style: GoogleFonts.plusJakartaSans(
+                      fontSize: 12,
+                      color: colors.text5,
+                    ),
+                  ),
                 ],
               ),
             )
@@ -950,6 +645,11 @@ class _ForYouTab extends StatelessWidget {
                     SwipeToDelete(
                       key: ValueKey<String>('swipe-row-${rest[i].id}'),
                       onDelete: () => onSwipeDelete(rest[i]),
+                      headline: 'Delete this article?',
+                      title: rest[i].title,
+                      message:
+                          'Remove from ${rest[i].category}. It will not come back on refresh.',
+                      borderRadius: 14,
                       child: _NewsListCard(
                         article: rest[i],
                         colors: colors,
@@ -963,17 +663,16 @@ class _ForYouTab extends StatelessWidget {
             ],
           ),
         ),
+        // Overlay only: empty space must not swallow vertical overscroll
+        // so pull-to-refresh stays usable as a secondary fetch.
         Positioned.fill(
-          child: IgnorePointer(
-            ignoring: false,
-            child: NewsActionFab(
-              colors: colors,
-              unreadCount: unreadCountAll,
-              unreadCountInCategory: unreadCountInCategory,
-              activeCategory: category,
-              clearOnly: clearOnly,
-              onAction: onFabAction,
-            ),
+          child: NewsActionFab(
+            colors: colors,
+            unreadCount: unreadCountAll,
+            unreadCountInCategory: unreadCountInCategory,
+            activeCategory: category,
+            dockInset: kNewsCategoryRailHeight,
+            onAction: onFabAction,
           ),
         ),
       ],
@@ -997,24 +696,27 @@ class _FeaturedCard extends StatelessWidget {
     final cat = newsCategoryColor(article.category);
     final rating = NewsReviewMeta.ratingLabelOf(article.summaryMarkdown);
 
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
+    return DecoratedBox(
+      decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(24),
-        child: Ink(
-          height: 280,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(24),
-            boxShadow: [
-              BoxShadow(
-                color: colors.shadowColor,
-                blurRadius: 32,
-                offset: const Offset(0, 16),
-              ),
-            ],
+        boxShadow: [
+          BoxShadow(
+            color: colors.shadowColor,
+            blurRadius: colors.isDark ? 32 : 18,
+            offset: const Offset(0, 16),
           ),
-          child: ClipRRect(
+        ],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(24),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(24),
+          child: SizedBox(
+            height: 280,
+            child: ClipRRect(
             borderRadius: BorderRadius.circular(24),
             child: Stack(
               fit: StackFit.expand,
@@ -1205,56 +907,6 @@ class _FeaturedCard extends StatelessWidget {
             ),
           ),
         ),
-      ),
-    );
-  }
-}
-
-class _Chip extends StatelessWidget {
-  const _Chip({
-    required this.label,
-    required this.selected,
-    required this.colors,
-    required this.onTap,
-  });
-
-  final String label;
-  final bool selected;
-  final AppColors colors;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final fill = selected
-        ? (colors.isDark ? Colors.white : const Color(0xFF0F172A))
-        : colors.bg2;
-    final border = selected
-        ? (colors.isDark ? Colors.white : const Color(0xFF0F172A))
-        : colors.border;
-    final fg =
-        selected ? (colors.isDark ? Colors.black : Colors.white) : colors.text2;
-
-    return Material(
-      color: fill,
-      borderRadius: BorderRadius.circular(999),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(999),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(999),
-            border: Border.all(color: border),
-          ),
-          alignment: Alignment.center,
-          child: Text(
-            label,
-            style: GoogleFonts.plusJakartaSans(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: fg,
-            ),
-          ),
         ),
       ),
     );
@@ -1465,642 +1117,6 @@ class _NewsListCard extends StatelessWidget {
   }
 }
 
-class _SavedTab extends StatelessWidget {
-  const _SavedTab({
-    required this.colors,
-    required this.searchController,
-    required this.search,
-    required this.onSearch,
-    required this.savedEmpty,
-    required this.filteredEmpty,
-    required this.articles,
-    required this.onRefresh,
-    required this.onOpen,
-    required this.onRemove,
-  });
-
-  final AppColors colors;
-  final TextEditingController searchController;
-  final String search;
-  final ValueChanged<String> onSearch;
-  final bool savedEmpty;
-  final bool filteredEmpty;
-  final List<Article> articles;
-  final Future<void> Function() onRefresh;
-  final ValueChanged<Article> onOpen;
-  final ValueChanged<String> onRemove;
-
-  @override
-  Widget build(BuildContext context) {
-    return RefreshIndicator(
-      onRefresh: onRefresh,
-      color: AppColors.accent,
-      child: ListView(
-        physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-        children: [
-          _SavedSearchField(
-            colors: colors,
-            controller: searchController,
-            value: search,
-            onChanged: onSearch,
-          ),
-          const SizedBox(height: 12),
-          if (savedEmpty)
-            Padding(
-              padding: const EdgeInsets.only(top: 40),
-              child: Column(
-                children: [
-                  Icon(LucideIcons.bookmark, size: 42, color: colors.text5),
-                  const SizedBox(height: 12),
-                  Text(
-                    'No saved articles yet',
-                    style: GoogleFonts.plusJakartaSans(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w700,
-                      color: colors.text4,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    'Open an article and tap Save to read it later',
-                    textAlign: TextAlign.center,
-                    style: GoogleFonts.plusJakartaSans(
-                      fontSize: 12,
-                      color: colors.text5,
-                    ),
-                  ),
-                ],
-              ),
-            )
-          else if (filteredEmpty)
-            Padding(
-              padding: const EdgeInsets.only(top: 32),
-              child: Column(
-                children: [
-                  Icon(LucideIcons.search, size: 28, color: colors.text5),
-                  const SizedBox(height: 8),
-                  Text(
-                    'No results for "$search"',
-                    style: GoogleFonts.plusJakartaSans(
-                      fontSize: 14,
-                      color: colors.text4,
-                    ),
-                  ),
-                ],
-              ),
-            )
-          else
-            ...articles.map(
-              (a) => _SavedRow(
-                article: a,
-                colors: colors,
-                query: search.trim(),
-                onOpen: () => onOpen(a),
-                onRemove: () => onRemove(a.id),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-}
-
-class _SavedSearchField extends StatelessWidget {
-  const _SavedSearchField({
-    required this.colors,
-    required this.controller,
-    required this.value,
-    required this.onChanged,
-  });
-
-  final AppColors colors;
-  final TextEditingController controller;
-  final String value;
-  final ValueChanged<String> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    final active = value.isNotEmpty;
-
-    return Container(
-      height: 44,
-      padding: const EdgeInsets.symmetric(horizontal: 14),
-      decoration: BoxDecoration(
-        color: colors.bg2,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: active
-              ? const Color(0xFFA78BFA).withValues(alpha: 0.55)
-              : colors.border,
-          width: 1,
-        ),
-        boxShadow: active
-            ? [
-                BoxShadow(
-                  color: const Color(0xFF7C3AED).withValues(alpha: 0.12),
-                  blurRadius: 0,
-                  spreadRadius: 3,
-                ),
-              ]
-            : null,
-      ),
-      child: Row(
-        children: [
-          Icon(
-            LucideIcons.search,
-            size: 15,
-            color: active ? const Color(0xFFA78BFA) : colors.text4,
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: TextField(
-              controller: controller,
-              onChanged: onChanged,
-              style:
-                  GoogleFonts.plusJakartaSans(fontSize: 14, color: colors.text),
-              cursorColor: AppColors.accent,
-              decoration: InputDecoration(
-                isDense: true,
-                border: InputBorder.none,
-                hintText: 'Search saved articles…',
-                hintStyle: GoogleFonts.plusJakartaSans(
-                  fontSize: 14,
-                  color: colors.text4,
-                ),
-              ),
-            ),
-          ),
-          if (active)
-            IconButton(
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-              onPressed: () {
-                controller.clear();
-                onChanged('');
-              },
-              icon: Icon(LucideIcons.x, size: 15, color: colors.text4),
-            ),
-        ],
-      ),
-    );
-  }
-}
-
-class _SavedRow extends StatelessWidget {
-  const _SavedRow({
-    required this.article,
-    required this.colors,
-    required this.query,
-    required this.onOpen,
-    required this.onRemove,
-  });
-
-  final Article article;
-  final AppColors colors;
-  final String query;
-  final VoidCallback onOpen;
-  final VoidCallback onRemove;
-
-  @override
-  Widget build(BuildContext context) {
-    final cat = newsCategoryColor(article.category);
-
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onOpen,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 14),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              ClipRRect(
-                borderRadius: BorderRadius.circular(10),
-                child: SizedBox(
-                  width: 72,
-                  height: 72,
-                  child: CachedNetworkImage(
-                    imageUrl: article.imageUrl,
-                    fit: BoxFit.cover,
-                    placeholder: (_, __) => Container(color: colors.bg2),
-                    errorWidget: (_, __, ___) => Container(color: colors.bg2),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Expanded(
-                          child: _HighlightTitle(
-                            text: article.title,
-                            query: query,
-                            cat: cat,
-                            colors: colors,
-                          ),
-                        ),
-                        Material(
-                          color: const Color(0x1AEF4444),
-                          borderRadius: BorderRadius.circular(8),
-                          child: InkWell(
-                            onTap: onRemove,
-                            borderRadius: BorderRadius.circular(8),
-                            child: Container(
-                              width: 28,
-                              height: 28,
-                              alignment: Alignment.center,
-                              decoration: BoxDecoration(
-                                borderRadius: BorderRadius.circular(8),
-                                border: Border.all(
-                                  color: const Color(0x33EF4444),
-                                ),
-                              ),
-                              child: const Icon(
-                                LucideIcons.trash2,
-                                size: 12,
-                                color: Color(0xFFEF4444),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 6),
-                    Wrap(
-                      spacing: 8,
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 8, vertical: 3),
-                          decoration: BoxDecoration(
-                            color: cat.withValues(alpha: 0.12),
-                            borderRadius: BorderRadius.circular(999),
-                          ),
-                          child: Text(
-                            article.category,
-                            style: GoogleFonts.plusJakartaSans(
-                              fontSize: 9,
-                              fontWeight: FontWeight.w700,
-                              color: cat,
-                            ),
-                          ),
-                        ),
-                        Text(
-                          '${article.source} · ${article.date}',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: GoogleFonts.plusJakartaSans(
-                            fontSize: 10,
-                            color: colors.text4,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _HighlightTitle extends StatelessWidget {
-  const _HighlightTitle({
-    required this.text,
-    required this.query,
-    required this.cat,
-    required this.colors,
-  });
-
-  final String text;
-  final String query;
-  final Color cat;
-  final AppColors colors;
-
-  @override
-  Widget build(BuildContext context) {
-    if (query.isEmpty) {
-      return Text(
-        text,
-        style: GoogleFonts.plusJakartaSans(
-          fontSize: 13,
-          fontWeight: FontWeight.w700,
-          height: 1.35,
-          color: colors.text,
-        ),
-      );
-    }
-    final lower = text.toLowerCase();
-    final q = query.toLowerCase();
-    final idx = lower.indexOf(q);
-    if (idx < 0) {
-      return Text(
-        text,
-        style: GoogleFonts.plusJakartaSans(
-          fontSize: 13,
-          fontWeight: FontWeight.w700,
-          height: 1.35,
-          color: colors.text,
-        ),
-      );
-    }
-    return Text.rich(
-      TextSpan(
-        style: GoogleFonts.plusJakartaSans(
-          fontSize: 13,
-          fontWeight: FontWeight.w700,
-          height: 1.35,
-          color: colors.text,
-        ),
-        children: [
-          TextSpan(text: text.substring(0, idx)),
-          TextSpan(
-            text: text.substring(idx, idx + query.length),
-            style: TextStyle(
-              backgroundColor: cat.withValues(alpha: 0.22),
-              color: cat,
-            ),
-          ),
-          TextSpan(text: text.substring(idx + query.length)),
-        ],
-      ),
-    );
-  }
-}
-
-class _NotificationPanel extends StatefulWidget {
-  const _NotificationPanel({
-    required this.notifications,
-    required this.colors,
-    required this.onClose,
-    required this.onClearAll,
-    required this.onOpenArticle,
-  });
-
-  final List<_NewsNotif> notifications;
-  final AppColors colors;
-  final VoidCallback onClose;
-  final VoidCallback onClearAll;
-  final ValueChanged<String> onOpenArticle;
-
-  @override
-  State<_NotificationPanel> createState() => _NotificationPanelState();
-}
-
-class _NotificationPanelState extends State<_NotificationPanel>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _anim;
-  late final Animation<Offset> _slide;
-
-  List<_NewsNotif> get notifications => widget.notifications;
-  AppColors get colors => widget.colors;
-  VoidCallback get onClose => widget.onClose;
-  VoidCallback get onClearAll => widget.onClearAll;
-  ValueChanged<String> get onOpenArticle => widget.onOpenArticle;
-
-  @override
-  void initState() {
-    super.initState();
-    _anim = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 250),
-    )..forward();
-    _slide = Tween<Offset>(
-      begin: const Offset(0, -1),
-      end: Offset.zero,
-    ).animate(CurvedAnimation(parent: _anim, curve: Curves.easeOutCubic));
-  }
-
-  @override
-  void dispose() {
-    _anim.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Positioned(
-      left: 0,
-      right: 0,
-      top: 0,
-      child: SlideTransition(
-        position: _slide,
-        child: Material(
-          color: colors.isDark ? const Color(0xFF080808) : colors.bg1,
-          elevation: 8,
-          borderRadius:
-              const BorderRadius.vertical(bottom: Radius.circular(20)),
-          clipBehavior: Clip.antiAlias,
-          child: ConstrainedBox(
-            constraints: BoxConstraints(
-              maxHeight: MediaQuery.sizeOf(context).height * 0.65,
-            ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                decoration: BoxDecoration(
-                  border: Border(bottom: BorderSide(color: colors.border2)),
-                ),
-                child: Row(
-                  children: [
-                    Text(
-                      'Notifications',
-                      style: GoogleFonts.plusJakartaSans(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w800,
-                        color: colors.text,
-                      ),
-                    ),
-                    const Spacer(),
-                    if (notifications.isNotEmpty)
-                      Padding(
-                        padding: const EdgeInsets.only(right: 8),
-                        child: Material(
-                          color: Colors.transparent,
-                          borderRadius: BorderRadius.circular(8),
-                          child: InkWell(
-                            onTap: onClearAll,
-                            borderRadius: BorderRadius.circular(8),
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 10,
-                                vertical: 5,
-                              ),
-                              child: Text(
-                                'Clear all',
-                                style: GoogleFonts.plusJakartaSans(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600,
-                                  color: const Color(0xFFEF4444),
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    Material(
-                      color: colors.bg3,
-                      borderRadius: BorderRadius.circular(10),
-                      child: InkWell(
-                        onTap: onClose,
-                        borderRadius: BorderRadius.circular(10),
-                        child: SizedBox(
-                          width: 30,
-                          height: 30,
-                          child: Icon(LucideIcons.x,
-                              size: 14, color: colors.text3),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              Flexible(
-                child: ListView(
-                  shrinkWrap: true,
-                  padding: EdgeInsets.zero,
-                  children: notifications.isEmpty
-                      ? [
-                          Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 24,
-                              vertical: 40,
-                            ),
-                            child: Column(
-                              children: [
-                                Icon(
-                                  LucideIcons.bellOff,
-                                  size: 34,
-                                  color: colors.text4,
-                                ),
-                                const SizedBox(height: 12),
-                                Text(
-                                  'No new article alerts yet',
-                                  style: GoogleFonts.plusJakartaSans(
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.w700,
-                                    color: colors.text4,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ]
-                      : [
-                          for (final n in notifications)
-                            Material(
-                              color: Colors.transparent,
-                              child: InkWell(
-                                onTap: () => onOpenArticle(n.articleId),
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 16, vertical: 12),
-                                  decoration: BoxDecoration(
-                                    border: Border(
-                                        bottom:
-                                            BorderSide(color: colors.border2)),
-                                  ),
-                                  child: Row(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Container(
-                                        width: 34,
-                                        height: 34,
-                                        margin: const EdgeInsets.only(top: 2),
-                                        decoration: BoxDecoration(
-                                          color:
-                                              n.color.withValues(alpha: 0.12),
-                                          borderRadius:
-                                              BorderRadius.circular(10),
-                                          border: Border.all(
-                                              color: n.color
-                                                  .withValues(alpha: 0.18)),
-                                        ),
-                                        child: Icon(n.icon,
-                                            size: 15, color: n.color),
-                                      ),
-                                      const SizedBox(width: 12),
-                                      Expanded(
-                                        child: Column(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.start,
-                                          children: [
-                                            Text(
-                                              n.title,
-                                              style:
-                                                  GoogleFonts.plusJakartaSans(
-                                                fontSize: 13,
-                                                fontWeight: n.read
-                                                    ? FontWeight.w500
-                                                    : FontWeight.w700,
-                                                height: 1.4,
-                                                color: n.read
-                                                    ? colors.text3
-                                                    : colors.text,
-                                              ),
-                                            ),
-                                            const SizedBox(height: 4),
-                                            Text(
-                                              n.time,
-                                              style:
-                                                  GoogleFonts.plusJakartaSans(
-                                                fontSize: 11,
-                                                color: colors.text5,
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                      if (!n.read)
-                                        Container(
-                                          width: 7,
-                                          height: 7,
-                                          margin: const EdgeInsets.only(top: 6),
-                                          decoration: BoxDecoration(
-                                            shape: BoxShape.circle,
-                                            color: n.color,
-                                            boxShadow: [
-                                              BoxShadow(
-                                                color: n.color
-                                                    .withValues(alpha: 0.6),
-                                                blurRadius: 6,
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            ),
-                        ],
-                ),
-              ),
-            ],
-          ),
-        ),
-        ),
-      ),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────
-// Clear-All confirmation bottom sheet
-// ─────────────────────────────────────────────────────────────────────────
-
 class _ClearAllConfirmSheet extends StatelessWidget {
   const _ClearAllConfirmSheet({
     required this.colors,
@@ -2125,7 +1141,7 @@ class _ClearAllConfirmSheet extends StatelessWidget {
         : 'Clear all unread?';
     final bodyText = scopeLabel != null
         ? '$count article${count == 1 ? '' : 's'} from $scopeLabel will be removed from your feed. Saved articles are not affected.'
-        : '$count article${count == 1 ? '' : 's'} will be removed from For You. Saved articles are not affected.';
+        : '$count article${count == 1 ? '' : 's'} will be removed from your News feed. Saved articles are not affected.';
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Container(

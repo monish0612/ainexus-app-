@@ -27,7 +27,7 @@ class MainActivity : AudioServiceActivity() {
         private const val TAG = "NexusShortcut"
         private const val CHANNEL = "app.ainexus.ai_nexus/process_text"
         private const val SHORTCUT_CHANNEL = "app.ainexus.ai_nexus/shortcuts"
-        private const val EXPENSE_WIDGET_CHANNEL = "app.ainexus.ai_nexus/expense_widget"
+        private const val SHARE_CHANNEL = "app.ainexus.ai_nexus/share"
         private const val SHORTCUT_ACTION = "app.ainexus.SHORTCUT"
         private const val SMS_PERM_REQ = 4401
     }
@@ -43,8 +43,19 @@ class MainActivity : AudioServiceActivity() {
     private var smsPermissionResult: MethodChannel.Result? = null
     private var pendingSmsOpenId: String? = null
 
+    override fun provideFlutterEngine(context: Context): FlutterEngine? {
+        val engine = super.provideFlutterEngine(context)
+        if (engine != null) {
+            // Bind before returning so Dart's first widget refresh can find
+            // the channel. audio_service starts Dart inside getFlutterEngine().
+            ExpenseWidgetPlugin.registerWith(engine)
+        }
+        return engine
+    }
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        ExpenseWidgetPlugin.registerWith(flutterEngine)
 
         nativeTtsPlugin = NativeTtsPlugin(applicationContext, flutterEngine)
 
@@ -94,20 +105,8 @@ class MainActivity : AudioServiceActivity() {
 
         MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
-            EXPENSE_WIDGET_CHANNEL
-        ).setMethodCallHandler { call, result ->
-            try {
-                if (call.method == "updateExpenseWidget") {
-                    ExpenseWidgetProvider.triggerUpdate(applicationContext)
-                    result.success(null)
-                } else {
-                    result.notImplemented()
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Expense widget channel error", e)
-                result.error("WIDGET_ERROR", e.message, null)
-            }
-        }
+            SHARE_CHANNEL
+        ).setMethodCallHandler(::handleShareCall)
 
         MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
@@ -120,6 +119,36 @@ class MainActivity : AudioServiceActivity() {
         ).also { ch ->
             SmsBridge.methodChannel = ch
             ch.setMethodCallHandler(::handleSmsExpenseCall)
+        }
+    }
+
+    private fun handleShareCall(
+        call: io.flutter.plugin.common.MethodCall,
+        result: MethodChannel.Result
+    ) {
+        if (call.method != "shareText") {
+            result.notImplemented()
+            return
+        }
+        val text = call.argument<String>("text")?.trim().orEmpty()
+        val subject = call.argument<String>("subject")?.trim()
+            .orEmpty()
+            .ifEmpty { "Nexus AI" }
+        if (text.isEmpty()) {
+            result.error("empty", "Nothing to share", null)
+            return
+        }
+        try {
+            val send = Intent(Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(Intent.EXTRA_TEXT, text)
+                putExtra(Intent.EXTRA_SUBJECT, subject)
+            }
+            startActivity(Intent.createChooser(send, "Share article"))
+            result.success(true)
+        } catch (e: Exception) {
+            Log.w(TAG, "shareText failed", e)
+            result.error("share_failed", e.message, null)
         }
     }
 

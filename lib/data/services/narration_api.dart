@@ -22,9 +22,10 @@ class NarrationApi {
       if (e.response?.statusCode == 404) {
         return const NarrationJob(status: NarrationJobStatus.unknown);
       }
+      // Unreachable / 5xx / 401: keep trying ensure + poll. Do NOT mark
+      // configured:false — that used to skip ensure and latch on-device TTS.
       return const NarrationJob(
-        status: NarrationJobStatus.fallback,
-        configured: false,
+        status: NarrationJobStatus.unknown,
         reason: 'unreachable',
       );
     }
@@ -47,8 +48,7 @@ class NarrationApi {
       );
     } on DioException {
       return const NarrationJob(
-        status: NarrationJobStatus.fallback,
-        configured: false,
+        status: NarrationJobStatus.unknown,
         reason: 'unreachable',
       );
     }

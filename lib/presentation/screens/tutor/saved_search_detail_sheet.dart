@@ -4,7 +4,6 @@ import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:lucide_icons/lucide_icons.dart';
@@ -12,13 +11,19 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../../core/di/injection.dart';
+import '../../../core/services/followup_history.dart';
 import '../../../core/services/saved_search_store.dart';
+import '../../../core/services/search_share_text.dart';
+import '../../../core/services/share_sheet.dart';
 import '../../../core/services/telegram_logger.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../domain/entities/saved_search.dart';
 import '../../../domain/entities/tutor_entities.dart';
 import '../../widgets/provider_picker.dart';
+import '../../widgets/block_selectable.dart';
+import '../news/news_reader_text_scale.dart';
 import '../settings/settings_controller.dart';
+import 'search_answer_text_scale.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  SavedSearchDetailSheet — opens a saved search's snapshot + chat history
@@ -53,6 +58,7 @@ class _SavedSearchDetailSheetState
   bool _snapshotExpanded = false;
   bool _useDeep = false;
   bool _sending = false;
+  bool _shareInFlight = false;
   String _provider = 'gemini'; // 'gemini' | 'xgrok'
 
   final TextEditingController _inputCtrl = TextEditingController();
@@ -259,6 +265,11 @@ class _SavedSearchDetailSheetState
             ),
           ),
           IconButton(
+            tooltip: 'Share',
+            onPressed: _shareInFlight ? null : () => _shareEntry(entry),
+            icon: Icon(LucideIcons.share2, size: 18, color: colors.text3),
+          ),
+          IconButton(
             tooltip: 'Delete',
             onPressed: () => _confirmDelete(entry),
             icon: Icon(LucideIcons.trash2, size: 18, color: colors.text3),
@@ -358,23 +369,31 @@ class _SavedSearchDetailSheetState
                     letterSpacing: 1.1,
                   ),
                 ),
-                const Spacer(),
-                if (body.length > 320 || sources.isNotEmpty)
-                  TextButton.icon(
-                    onPressed: () => setState(
-                        () => _snapshotExpanded = !_snapshotExpanded),
-                    icon: Icon(
-                      _snapshotExpanded
-                          ? LucideIcons.chevronUp
-                          : LucideIcons.chevronDown,
-                      size: 14,
-                    ),
-                    label: Text(
-                      _snapshotExpanded ? 'Collapse' : 'Expand',
-                      style: GoogleFonts.plusJakartaSans(
-                          fontSize: 12, fontWeight: FontWeight.w700),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Align(
+                    alignment: Alignment.centerRight,
+                    child: SearchAnswerHeaderActions(
+                      trailing: (body.length > 320 || sources.isNotEmpty)
+                          ? TextButton.icon(
+                              onPressed: () => setState(
+                                  () => _snapshotExpanded = !_snapshotExpanded),
+                              icon: Icon(
+                                _snapshotExpanded
+                                    ? LucideIcons.chevronUp
+                                    : LucideIcons.chevronDown,
+                                size: 14,
+                              ),
+                              label: Text(
+                                _snapshotExpanded ? 'Collapse' : 'Expand',
+                                style: GoogleFonts.plusJakartaSans(
+                                    fontSize: 12, fontWeight: FontWeight.w700),
+                              ),
+                            )
+                          : null,
                     ),
                   ),
+                ),
               ],
             ),
           ),
@@ -412,12 +431,16 @@ class _SavedSearchDetailSheetState
                   physics: _snapshotExpanded
                       ? const NeverScrollableScrollPhysics()
                       : const ClampingScrollPhysics(),
-                  child: MarkdownBody(
-                    data: body.isEmpty ? '_(empty)_' : body,
-                    selectable: true,
-                    onTapLink: (_, href, __) {
-                      if (href != null) _openUrl(href);
-                    },
+                  child: ArticleReaderProse(
+                    child: ArticleSelectionScope(
+                      child: BlockSelectableMarkdown(
+                        data: body.isEmpty ? '_(empty)_' : body,
+                        ownSelectionScope: false,
+                        onTapLink: (_, href, __) {
+                          if (href != null) _openUrl(href);
+                        },
+                      ),
+                    ),
                   ),
                 ),
               ),
@@ -709,13 +732,21 @@ class _SavedSearchDetailSheetState
           crossAxisAlignment:
               isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start,
           children: [
-            MarkdownBody(
-              data: m.text,
-              selectable: true,
-              onTapLink: (_, href, __) {
-                if (href != null) _openUrl(href);
-              },
-            ),
+            isUser
+                ? BlockSelectableMarkdown(
+                    data: m.text,
+                    onTapLink: (_, href, __) {
+                      if (href != null) _openUrl(href);
+                    },
+                  )
+                : ArticleReaderProse(
+                    child: BlockSelectableMarkdown(
+                      data: m.text,
+                      onTapLink: (_, href, __) {
+                        if (href != null) _openUrl(href);
+                      },
+                    ),
+                  ),
             if (m.sources.isNotEmpty) ...[
               const SizedBox(height: 8),
               Wrap(
@@ -1018,6 +1049,55 @@ class _SavedSearchDetailSheetState
   }
 
   // ── Misc ──────────────────────────────────────────────────────────────────
+
+  Future<void> _shareEntry(SavedSearchEntry entry) async {
+    if (_shareInFlight) return;
+    setState(() => _shareInFlight = true);
+    HapticFeedback.lightImpact();
+    try {
+      final result = entry.decodedResult();
+      var messages = const <FollowUpMessage>[];
+      try {
+        final rows =
+            await ref.read(savedSearchStoreProvider).loadMessages(entry.id);
+        messages = searchShareMessagesFromPersisted(rows);
+      } catch (e) {
+        TLog.w('SavedSearch', 'Share: could not load follow-up chat', error: e);
+      }
+      final opened = result != null
+          ? await shareInsightResult(
+              result: result,
+              query: entry.query,
+              messages: messages,
+            )
+          : await ShareSheet.shareText(
+              text: formatSearchShareText(
+                query: entry.query,
+                response: '',
+                messages: messages,
+              ),
+              subject: entry.title.isNotEmpty ? entry.title : entry.query,
+            );
+      if (!mounted || opened) return;
+      final colors = Theme.of(context).extension<AppColors>()!;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Could not open share',
+            style: GoogleFonts.plusJakartaSans(color: Colors.white),
+          ),
+          backgroundColor: colors.text,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _shareInFlight = false);
+      } else {
+        _shareInFlight = false;
+      }
+    }
+  }
 
   Future<void> _confirmDelete(SavedSearchEntry entry) async {
     final shouldDelete = await showDialog<bool>(

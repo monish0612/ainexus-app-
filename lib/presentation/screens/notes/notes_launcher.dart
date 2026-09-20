@@ -33,14 +33,14 @@ class NotesLauncher extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
             child: Row(
               children: [
-                Icon(LucideIcons.notebook, color: colors.textPrimary, size: 18),
+                Icon(LucideIcons.bookOpen, color: colors.text, size: 18),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
                     'MonishNotes',
                     style: GoogleFonts.dmSans(
                       fontWeight: FontWeight.w700,
-                      color: colors.textPrimary,
+                      color: colors.text,
                     ),
                   ),
                 ),
@@ -48,7 +48,7 @@ class NotesLauncher extends StatelessWidget {
                   'Open',
                   style: GoogleFonts.dmSans(
                     fontSize: 12,
-                    color: colors.textPrimary.withValues(alpha: 0.55),
+                    color: colors.text.withValues(alpha: 0.55),
                   ),
                 ),
               ],
