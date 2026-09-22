@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' hide ProcessTextService;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:google_fonts/google_fonts.dart';
 
 import 'dart:async';
 
@@ -13,6 +12,11 @@ import '../../core/services/notification_tap.dart';
 import '../../core/services/process_text_service.dart';
 import '../../core/services/telegram_logger.dart';
 import '../../core/theme/app_colors.dart';
+import '../../core/theme/app_elevation.dart';
+import '../../core/theme/app_motion.dart';
+import '../../core/theme/app_radii.dart';
+import '../../core/theme/app_spacing.dart';
+import '../../core/utils/reduced_motion.dart';
 import '../../core/utils/tidy_url.dart';
 import '../../core/utils/time_greeting.dart';
 import '../../data/services/price_watch/store_url.dart';
@@ -469,7 +473,13 @@ class _AppShellState extends ConsumerState<AppShell>
         bottom: false,
         child: IndexedStack(
           index: currentTab,
-          children: _screens,
+          children: [
+            for (var i = 0; i < _screens.length; i++)
+              TickerMode(
+                enabled: currentTab == i,
+                child: _screens[i],
+              ),
+          ],
         ),
       ),
       bottomNavigationBar: BottomNav(
@@ -497,21 +507,34 @@ class _ProcessTextChooserState extends State<_ProcessTextChooser>
   late final AnimationController _anim;
   late final Animation<double> _slide;
   late final Animation<double> _fade;
+  bool _settled = false;
 
   @override
   void initState() {
     super.initState();
     _anim = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 350),
+      duration: AppMotion.emphasizedEnter,
     );
     _slide = Tween<double>(begin: 40, end: 0).animate(
-      CurvedAnimation(parent: _anim, curve: Curves.easeOutCubic),
+      CurvedAnimation(parent: _anim, curve: AppMotion.emphasizedDecelerate),
     );
     _fade = Tween<double>(begin: 0, end: 1).animate(
-      CurvedAnimation(parent: _anim, curve: Curves.easeOut),
+      CurvedAnimation(parent: _anim, curve: AppMotion.standardDecelerate),
     );
-    _anim.forward();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_settled) return;
+    _settled = true;
+    // Reduced motion lands the panel already in place — no slide, no fade-in.
+    if (reducedMotion(context)) {
+      _anim.value = 1;
+    } else {
+      _anim.forward();
+    }
   }
 
   @override
@@ -523,6 +546,7 @@ class _ProcessTextChooserState extends State<_ProcessTextChooser>
   @override
   Widget build(BuildContext context) {
     final colors = widget.colors;
+    final text = Theme.of(context).textTheme;
     final preview = widget.text.length > 60
         ? '${widget.text.substring(0, 60)}...'
         : widget.text;
@@ -536,42 +560,30 @@ class _ProcessTextChooserState extends State<_ProcessTextChooser>
       child: Container(
         margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
         decoration: BoxDecoration(
-          color: colors.bg1,
-          borderRadius: BorderRadius.circular(20),
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: <Color>[colors.cardGradientTop, colors.cardGradientBottom],
+          ),
+          borderRadius: AppRadii.brSheet,
           border: Border.all(color: colors.border, width: 1),
-          boxShadow: [
-            BoxShadow(
-              color: colors.shadowColor,
-              blurRadius: 24,
-              offset: const Offset(0, 6),
-            ),
-          ],
+          boxShadow: AppElevation.high(colors),
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const SizedBox(height: 12),
-            Container(
-              width: 36,
-              height: 4,
-              decoration: BoxDecoration(
-                color: colors.text5,
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-            const SizedBox(height: 16),
+            AppSpacing.gapMd,
+            _Grabber(colors: colors),
+            AppSpacing.gapLg,
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
+              padding: AppSpacing.pageH,
               child: Text(
                 'What would you like to do?',
-                style: GoogleFonts.plusJakartaSans(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w700,
-                  color: colors.text,
-                ),
+                textAlign: TextAlign.center,
+                style: text.titleLarge,
               ),
             ),
-            const SizedBox(height: 6),
+            AppSpacing.gapS,
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20),
               child: Text(
@@ -579,17 +591,15 @@ class _ProcessTextChooserState extends State<_ProcessTextChooser>
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 textAlign: TextAlign.center,
-                style: GoogleFonts.plusJakartaSans(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w500,
+                style: text.bodySmall?.copyWith(
                   color: colors.text3,
                   fontStyle: FontStyle.italic,
                 ),
               ),
             ),
-            const SizedBox(height: 20),
+            AppSpacing.gapXl,
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
+              padding: AppSpacing.pageH,
               child: Row(
                 children: [
                   Expanded(
@@ -597,29 +607,29 @@ class _ProcessTextChooserState extends State<_ProcessTextChooser>
                       emoji: '📖',
                       label: 'Dictionary',
                       sublabel: 'Look up meaning',
-                      color: const Color(0xFF339AF0),
+                      color: AppColors.categoryTransport,
                       colors: colors,
                       onTap: () => Navigator.of(context).pop('dictionary'),
                     ),
                   ),
-                  const SizedBox(width: 8),
+                  AppSpacing.hGapSm,
                   Expanded(
                     child: _ChooserOption(
                       emoji: '✨',
                       label: 'Rephrase',
                       sublabel: 'Rewrite text',
-                      color: const Color(0xFFC084FC),
+                      color: AppColors.deepViolet,
                       colors: colors,
                       onTap: () => Navigator.of(context).pop('rephrase'),
                     ),
                   ),
-                  const SizedBox(width: 8),
+                  AppSpacing.hGapSm,
                   Expanded(
                     child: _ChooserOption(
                       emoji: '🔍',
                       label: 'Search',
                       sublabel: 'Search the web',
-                      color: const Color(0xFF34D399),
+                      color: AppColors.successGreen,
                       colors: colors,
                       onTap: () => Navigator.of(context).pop('search'),
                     ),
@@ -630,6 +640,25 @@ class _ProcessTextChooserState extends State<_ProcessTextChooser>
             SizedBox(height: 12 + MediaQuery.of(context).padding.bottom),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// Shared sheet grabber.
+class _Grabber extends StatelessWidget {
+  const _Grabber({required this.colors});
+
+  final AppColors colors;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 40,
+      height: 4,
+      decoration: BoxDecoration(
+        color: colors.text5,
+        borderRadius: AppRadii.brPill,
       ),
     );
   }
@@ -654,42 +683,51 @@ class _ChooserOption extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
     return Material(
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: AppRadii.brCard,
         child: Ink(
           decoration: BoxDecoration(
-            color: color.withValues(alpha: 0.1),
-            borderRadius: BorderRadius.circular(14),
+            color: color.withValues(alpha: 0.10),
+            borderRadius: AppRadii.brCard,
             border: Border.all(
-              color: color.withValues(alpha: 0.2),
+              color: color.withValues(alpha: 0.22),
               width: 1,
             ),
           ),
-          padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 14),
+          padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 10),
           child: Column(
             children: [
-              Text(emoji, style: const TextStyle(fontSize: 28)),
-              const SizedBox(height: 8),
+              // Halo behind the glyph so the three options read as a set of
+              // tokens rather than three loose emoji.
+              Container(
+                width: 44,
+                height: 44,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.14),
+                  shape: BoxShape.circle,
+                  border: Border.all(color: color.withValues(alpha: 0.24)),
+                ),
+                child: Text(emoji, style: const TextStyle(fontSize: 22)),
+              ),
+              AppSpacing.gapSm,
               Text(
                 label,
-                style: GoogleFonts.plusJakartaSans(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w700,
-                  color: colors.text,
-                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: text.titleSmall,
               ),
-              const SizedBox(height: 2),
+              AppSpacing.gapXxs,
               Text(
                 sublabel,
                 textAlign: TextAlign.center,
-                style: GoogleFonts.plusJakartaSans(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w500,
-                  color: colors.text3,
-                ),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: text.labelMedium?.copyWith(color: colors.text3),
               ),
             ],
           ),
@@ -725,21 +763,35 @@ class _ShareChooserState extends State<_ShareChooser>
   late final AnimationController _anim;
   late final Animation<double> _slide;
   late final Animation<double> _fade;
+  bool _settled = false;
 
   @override
   void initState() {
     super.initState();
     _anim = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 400),
+      duration: AppMotion.emphasizedEnter,
     );
     _slide = Tween<double>(begin: 60, end: 0).animate(
-      CurvedAnimation(parent: _anim, curve: Curves.easeOutCubic),
+      CurvedAnimation(parent: _anim, curve: AppMotion.emphasizedDecelerate),
     );
     _fade = Tween<double>(begin: 0, end: 1).animate(
-      CurvedAnimation(parent: _anim, curve: Curves.easeOut),
+      CurvedAnimation(parent: _anim, curve: AppMotion.standardDecelerate),
     );
-    _anim.forward();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_settled) return;
+    _settled = true;
+    // Reduced motion lands the panel already in place, and the per-option
+    // stagger below collapses with it.
+    if (reducedMotion(context)) {
+      _anim.value = 1;
+    } else {
+      _anim.forward();
+    }
   }
 
   @override
@@ -751,6 +803,7 @@ class _ShareChooserState extends State<_ShareChooser>
   @override
   Widget build(BuildContext context) {
     final c = widget.colors;
+    final text = Theme.of(context).textTheme;
     final preview = widget.text != null
         ? (widget.text!.length > 50
             ? '${widget.text!.substring(0, 50)}…'
@@ -766,40 +819,23 @@ class _ShareChooserState extends State<_ShareChooser>
       child: Container(
         margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
         decoration: BoxDecoration(
-          color: c.bg1,
-          borderRadius: BorderRadius.circular(24),
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: <Color>[c.cardGradientTop, c.cardGradientBottom],
+          ),
+          borderRadius: AppRadii.brSheet,
           border: Border.all(color: c.border),
-          boxShadow: [
-            BoxShadow(
-              color: c.shadowColor,
-              blurRadius: 30,
-              offset: const Offset(0, 8),
-            ),
-          ],
+          boxShadow: AppElevation.high(c),
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const SizedBox(height: 12),
-            Container(
-              width: 36,
-              height: 4,
-              decoration: BoxDecoration(
-                color: c.text5,
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'Send to…',
-              style: GoogleFonts.plusJakartaSans(
-                fontSize: 17,
-                fontWeight: FontWeight.w800,
-                color: c.text,
-                letterSpacing: -0.3,
-              ),
-            ),
-            const SizedBox(height: 6),
+            AppSpacing.gapMd,
+            _Grabber(colors: c),
+            AppSpacing.gapLg,
+            Text('Send to…', style: text.titleLarge),
+            AppSpacing.gapS,
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 24),
               child: Text(
@@ -807,23 +843,22 @@ class _ShareChooserState extends State<_ShareChooser>
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 textAlign: TextAlign.center,
-                style: GoogleFonts.plusJakartaSans(
-                  fontSize: 12,
-                  color: c.text4,
+                style: text.bodySmall?.copyWith(
+                  color: c.text3,
                   fontStyle: FontStyle.italic,
                 ),
               ),
             ),
-            const SizedBox(height: 20),
+            AppSpacing.gapXl,
             if (widget.hasWatch)
               Padding(
                 padding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
                 child: Material(
-                  color: const Color(0xFFF59E0B).withValues(alpha: 0.14),
-                  borderRadius: BorderRadius.circular(16),
+                  color: c.warning.withValues(alpha: 0.14),
+                  borderRadius: AppRadii.brCard,
                   child: InkWell(
                     onTap: () => Navigator.of(context).pop('watch'),
-                    borderRadius: BorderRadius.circular(16),
+                    borderRadius: AppRadii.brCard,
                     child: Padding(
                       padding: const EdgeInsets.symmetric(
                         horizontal: 14,
@@ -831,19 +866,12 @@ class _ShareChooserState extends State<_ShareChooser>
                       ),
                       child: Row(
                         children: [
-                          const Icon(
-                            Icons.local_offer_outlined,
-                            color: Color(0xFFF59E0B),
-                          ),
-                          const SizedBox(width: 10),
+                          Icon(Icons.local_offer_outlined, color: c.warning),
+                          AppSpacing.hGapMd,
                           Expanded(
                             child: Text(
                               'Watch this price',
-                              style: GoogleFonts.plusJakartaSans(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w700,
-                                color: c.text,
-                              ),
+                              style: text.titleSmall,
                             ),
                           ),
                           Icon(Icons.chevron_right, color: c.text3),
@@ -861,41 +889,41 @@ class _ShareChooserState extends State<_ShareChooser>
                     icon: Icons.receipt_long_rounded,
                     label: 'Expense',
                     sublabel: 'Scan receipt',
-                    color: const Color(0xFFFF6B6B),
+                    color: AppColors.categoryFood,
                     colors: c,
                     delay: 0,
                     parentAnim: _anim,
                     onTap: () => Navigator.of(context).pop('expense'),
                   ),
-                  const SizedBox(width: 8),
+                  AppSpacing.hGapSm,
                   _ShareOption(
                     icon: Icons.link_rounded,
                     label: 'Summarize',
                     sublabel: 'URL summary',
-                    color: const Color(0xFF339AF0),
+                    color: AppColors.categoryTransport,
                     colors: c,
                     delay: 1,
                     parentAnim: _anim,
                     onTap: () => Navigator.of(context).pop('summarizer'),
                   ),
-                  const SizedBox(width: 8),
+                  AppSpacing.hGapSm,
                   _ShareOption(
                     icon: Icons.menu_book_rounded,
                     label: 'Dictionary',
                     sublabel: 'Look up',
-                    color: const Color(0xFF51CF66),
+                    color: AppColors.categoryGrocery,
                     colors: c,
                     delay: 2,
                     parentAnim: _anim,
                     enabled: widget.text != null,
                     onTap: () => Navigator.of(context).pop('dictionary'),
                   ),
-                  const SizedBox(width: 8),
+                  AppSpacing.hGapSm,
                   _ShareOption(
                     icon: Icons.auto_fix_high_rounded,
                     label: 'Rephrase',
                     sublabel: 'Rewrite',
-                    color: const Color(0xFFC084FC),
+                    color: AppColors.deepViolet,
                     colors: c,
                     delay: 3,
                     parentAnim: _anim,
@@ -961,7 +989,85 @@ class _ShareOptionState extends State<_ShareOption>
   @override
   Widget build(BuildContext context) {
     final c = widget.colors;
+    final text = Theme.of(context).textTheme;
     final alpha = widget.enabled ? 1.0 : 0.35;
+    final still = reducedMotion(context);
+
+    final tile = GestureDetector(
+      onTapDown: widget.enabled ? (_) => setState(() => _scale = 0.92) : null,
+      onTapUp: widget.enabled
+          ? (_) {
+              setState(() => _scale = 1.0);
+              widget.onTap();
+            }
+          : null,
+      onTapCancel: () => setState(() => _scale = 1.0),
+      child: AnimatedScale(
+        scale: still ? 1.0 : _scale,
+        duration: still ? Duration.zero : AppMotion.microPress,
+        curve: AppMotion.standard,
+        child: Opacity(
+          opacity: alpha,
+          child: Container(
+            padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 6),
+            decoration: BoxDecoration(
+              color: widget.color.withValues(alpha: 0.08),
+              borderRadius: AppRadii.brCard,
+              border: Border.all(color: widget.color.withValues(alpha: 0.20)),
+            ),
+            child: Column(
+              children: [
+                Container(
+                  width: 42,
+                  height: 42,
+                  decoration: BoxDecoration(
+                    gradient: RadialGradient(
+                      colors: <Color>[
+                        widget.color.withValues(alpha: 0.26),
+                        widget.color.withValues(alpha: 0.10),
+                      ],
+                    ),
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: widget.color.withValues(alpha: 0.28),
+                    ),
+                  ),
+                  child: Icon(widget.icon, size: 20, color: widget.color),
+                ),
+                AppSpacing.gapSm,
+                // Four columns share the width, so "Dictionary" and
+                // "Summarize" are already at the edge at 100% text scale.
+                // Wrapping to a second line beats ellipsising the word away
+                // the moment the user bumps the system font size.
+                Text(
+                  widget.label,
+                  maxLines: 2,
+                  textAlign: TextAlign.center,
+                  overflow: TextOverflow.ellipsis,
+                  style: text.labelMedium?.copyWith(
+                    color: c.text,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 1),
+                Text(
+                  widget.sublabel,
+                  maxLines: 2,
+                  textAlign: TextAlign.center,
+                  overflow: TextOverflow.ellipsis,
+                  // text4, not text5 — this is readable copy.
+                  style: text.labelSmall?.copyWith(color: c.text4),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+
+    // Reduced motion keeps the same layout and option order; the staggered
+    // rise collapses to the panel's own cross-fade.
+    if (still) return Expanded(child: tile);
 
     return Expanded(
       child: AnimatedBuilder(
@@ -973,73 +1079,7 @@ class _ShareOptionState extends State<_ShareOption>
             child: child,
           ),
         ),
-        child: GestureDetector(
-          onTapDown:
-              widget.enabled ? (_) => setState(() => _scale = 0.92) : null,
-          onTapUp: widget.enabled
-              ? (_) {
-                  setState(() => _scale = 1.0);
-                  widget.onTap();
-                }
-              : null,
-          onTapCancel: () => setState(() => _scale = 1.0),
-          child: AnimatedScale(
-            scale: _scale,
-            duration: const Duration(milliseconds: 120),
-            curve: Curves.easeOutCubic,
-            child: Opacity(
-              opacity: alpha,
-              child: Container(
-                padding:
-                    const EdgeInsets.symmetric(vertical: 14, horizontal: 6),
-                decoration: BoxDecoration(
-                  color: widget.color.withValues(alpha: 0.08),
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(
-                    color: widget.color.withValues(alpha: 0.18),
-                  ),
-                ),
-                child: Column(
-                  children: [
-                    Container(
-                      width: 42,
-                      height: 42,
-                      decoration: BoxDecoration(
-                        color: widget.color.withValues(alpha: 0.14),
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                          color: widget.color.withValues(alpha: 0.25),
-                        ),
-                      ),
-                      child: Icon(widget.icon, size: 20, color: widget.color),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      widget.label,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: GoogleFonts.plusJakartaSans(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
-                        color: c.text,
-                      ),
-                    ),
-                    const SizedBox(height: 1),
-                    Text(
-                      widget.sublabel,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: GoogleFonts.plusJakartaSans(
-                        fontSize: 9.5,
-                        color: c.text4,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ),
+        child: tile,
       ),
     );
   }

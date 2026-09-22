@@ -201,6 +201,17 @@ void main() {
       expect(taps, 1);
     });
 
+    test('onPause and onResume fire from native engine lifecycle', () async {
+      var pauses = 0;
+      var resumes = 0;
+      bridge.onPause = () => pauses++;
+      bridge.onResume = () => resumes++;
+      await send('onPause');
+      await send('onResume');
+      expect(pauses, 1);
+      expect(resumes, 1);
+    });
+
     test('an unknown incoming method is ignored', () async {
       await send('somethingElse');
     });

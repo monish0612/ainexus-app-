@@ -41,6 +41,16 @@ class OverlayBridgeHost(private val service: RephraseAccessibilityService) {
         invoke("onTap", null)
     }
 
+    /** Overlay window left the screen — Dart stops breath/sheen tickers. */
+    fun notifyPause() {
+        invoke("onPause", null)
+    }
+
+    /** Overlay window is about to show again — Dart may restart tickers. */
+    fun notifyResume() {
+        invoke("onResume", null)
+    }
+
     private fun invoke(method: String, args: Any?) {
         try {
             channel?.invokeMethod(method, args)

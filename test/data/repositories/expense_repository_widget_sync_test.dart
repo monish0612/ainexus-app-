@@ -74,7 +74,7 @@ void main() {
 
   setUp(() async {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-        .setMockMethodCallHandler(channel, (_) async {});
+        .setMockMethodCallHandler(channel, (_) async => null);
     SharedPreferences.setMockInitialValues(<String, Object>{});
     final prefs = await SharedPreferences.getInstance();
     database = db.AppDatabase.forTesting(NativeDatabase.memory());
@@ -84,10 +84,15 @@ void main() {
   tearDown(() async {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, null);
-    await database.close();
+    try {
+      await database.close();
+    } on Object {
+      // Already closed by the rethrow test.
+    }
   });
 
-  test('add, amount edit, category edit, date edit, and delete update the widget',
+  test(
+      'add, amount edit, category edit, date edit, and delete update the widget',
       () async {
     final now = DateTime.now();
     final today = _iso(now);
@@ -127,5 +132,27 @@ void main() {
     expect(prefs.getInt('expense_widget_today_count'), 0);
     expect(prefs.getString('expense_widget_month_spent'), '0.00');
     expect(prefs.getString('expense_widget_pie'), '');
+  });
+
+  test('widget snapshot ignores expenses older than the month bound', () async {
+    final now = DateTime.now();
+    final today = _iso(now);
+    final ancient = _iso(DateTime(now.year - 1, now.month, 3));
+
+    await repo.addExpense(_exp(id: 'old', amount: 9999, date: ancient));
+    await repo.addExpense(_exp(id: 'e1', amount: 40, date: today));
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getString('expense_widget_today_total'), '40.00');
+    expect(prefs.getString('expense_widget_month_spent'), '40.00');
+    expect(prefs.getInt('expense_widget_month_count'), 1);
+    expect(prefs.getString('expense_widget_pie'), isNot(contains('9999')));
+  });
+
+  test('range aggregates rethrow after a SQL failure', () async {
+    await database.customStatement('DROP TABLE expenses');
+    await expectLater(repo.rangeSummary(), throwsA(isA<Object>()));
+    await expectLater(repo.categoryBreakdown(), throwsA(isA<Object>()));
+    await expectLater(
+        repo.timeBreakdown(monthly: true), throwsA(isA<Object>()));
   });
 }

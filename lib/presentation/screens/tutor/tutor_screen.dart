@@ -27,6 +27,10 @@ import '../../../core/services/search_share_text.dart';
 import '../../../core/services/summarize_store.dart';
 import '../../../core/services/telegram_logger.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../../core/theme/app_motion.dart';
+import '../../../core/theme/app_radii.dart';
+import '../../../core/theme/app_spacing.dart';
+import '../../../core/utils/reduced_motion.dart';
 import '../../../core/utils/rephrase_input.dart';
 import '../../../core/utils/tidy_url.dart';
 import '../../../data/local/database/app_database.dart';
@@ -39,6 +43,7 @@ import '../../widgets/app_toast.dart';
 import '../../providers/profile_photo_provider.dart';
 import '../../widgets/block_selectable.dart';
 import '../../widgets/compact_header.dart';
+import '../../widgets/nexus_loader.dart';
 import '../../widgets/search_result_actions.dart';
 import '../../widgets/provider_picker.dart';
 import '../../widgets/sources_disclosure.dart';
@@ -1093,7 +1098,7 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
                 ],
               ),
             ),
-            Icon(LucideIcons.chevronRight, size: 16, color: colors.text5),
+            Icon(LucideIcons.chevronRight, size: 16, color: colors.text4),
           ],
         ),
       ),
@@ -1203,8 +1208,8 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
     // Encode the cross-device thumbnail as a data: URL right now —
     // this is the one and only place the bytes get base64-encoded
     // before persistence.
-    final thumbDataUrl =
-        'data:image/jpeg;base64,${base64Encode(picked.thumbnailBytes)}';
+    final thumbDataUrl = 'data:${picked.thumbnailMediaType};base64,'
+        '${base64Encode(picked.thumbnailBytes)}';
 
     // Stable session key tied to time + image hash so two rapid taps
     // produce two distinct jobs. The image-followup sheet later picks
@@ -1796,7 +1801,7 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
                       style: GoogleFonts.plusJakartaSans(
                         fontSize: 10,
                         fontWeight: FontWeight.w700,
-                        color: colors.text5,
+                        color: colors.text4,
                         letterSpacing: 1,
                       ),
                     ),
@@ -1818,7 +1823,7 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
                             : 'Type or paste a phrase, sentence or message to rephrase…',
                         hintStyle: GoogleFonts.plusJakartaSans(
                           fontSize: 16,
-                          color: colors.text5,
+                          color: colors.text4,
                         ),
                         border: InputBorder.none,
                         isDense: true,
@@ -1839,7 +1844,7 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
                       '${_rephraseCtrl.text.length}/$_kMaxRephrase',
                       style: GoogleFonts.plusJakartaSans(
                         fontSize: 11,
-                        color: colors.text5,
+                        color: colors.text4,
                       ),
                     ),
                   ],
@@ -1995,7 +2000,7 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
                 style: GoogleFonts.plusJakartaSans(
                   fontSize: 10,
                   fontWeight: FontWeight.w700,
-                  color: colors.text5,
+                  color: colors.text4,
                   letterSpacing: 1.1,
                 ),
               ),
@@ -2143,7 +2148,7 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
                       style: GoogleFonts.plusJakartaSans(
                         fontSize: 10,
                         fontWeight: FontWeight.w700,
-                        color: colors.text5,
+                        color: colors.text4,
                         letterSpacing: 1,
                       ),
                     ),
@@ -2164,7 +2169,7 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
                             'Type what you want to say or ask… e.g. \'dropping off need to pick my son\'',
                         hintStyle: GoogleFonts.plusJakartaSans(
                           fontSize: 14,
-                          color: colors.text5,
+                          color: colors.text4,
                         ),
                         border: InputBorder.none,
                         isDense: true,
@@ -2185,7 +2190,7 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
                       '${_coachCtrl.text.length}/$_kMaxCoach',
                       style: GoogleFonts.plusJakartaSans(
                         fontSize: 11,
-                        color: colors.text5,
+                        color: colors.text4,
                       ),
                     ),
                   ],
@@ -2327,14 +2332,14 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
                     NonSelectableChrome(
                       child: Row(
                       children: [
-                        Icon(LucideIcons.quote, size: 12, color: colors.text5),
+                        Icon(LucideIcons.quote, size: 12, color: colors.text4),
                         const SizedBox(width: 6),
                         Text(
                           'YOU SAID',
                           style: GoogleFonts.plusJakartaSans(
                             fontSize: 10,
                             fontWeight: FontWeight.w700,
-                            color: colors.text5,
+                            color: colors.text4,
                             letterSpacing: 1,
                           ),
                         ),
@@ -2483,7 +2488,7 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
                           style: GoogleFonts.plusJakartaSans(
                             fontSize: 10,
                             fontWeight: FontWeight.w700,
-                            color: colors.text5,
+                            color: colors.text4,
                             letterSpacing: 1,
                           ),
                         ),
@@ -2795,7 +2800,7 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
                   hintText: 'Enter a word…',
                   hintStyle: GoogleFonts.plusJakartaSans(
                     fontSize: 14,
-                    color: colors.text5,
+                    color: colors.text4,
                   ),
                   filled: true,
                   fillColor: colors.bg1,
@@ -2993,7 +2998,7 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
                       style: GoogleFonts.plusJakartaSans(
                         fontSize: 10,
                         fontWeight: FontWeight.w700,
-                        color: colors.text5,
+                        color: colors.text4,
                         letterSpacing: 1.2,
                       ),
                     ),
@@ -3025,7 +3030,7 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
                             style: GoogleFonts.plusJakartaSans(
                               fontSize: 10,
                               fontWeight: FontWeight.w700,
-                              color: colors.text5,
+                              color: colors.text4,
                               letterSpacing: 1.2,
                             ),
                           ),
@@ -3165,7 +3170,7 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
                             style: GoogleFonts.plusJakartaSans(
                               fontSize: 10,
                               fontWeight: FontWeight.w700,
-                              color: colors.text5,
+                              color: colors.text4,
                               letterSpacing: 1.2,
                             ),
                           ),
@@ -3259,8 +3264,8 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
 
   // ── Summarizer Tab ──────────────────────────────────────────────────────
 
-  static const _summarizeGradientStart = Color(0xFF6366F1);
-  static const _summarizeGradientEnd = Color(0xFF8B5CF6);
+  static const _summarizeGradientStart = AppColors.composerGradientStart;
+  static const _summarizeGradientEnd = AppColors.composerGradientEnd;
 
   Widget _buildSummarizerTab(AppColors colors) {
     final hasFollowUp = !_summaryLoading &&
@@ -3282,13 +3287,13 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
               id: 'gemini',
               label: 'Gemini',
               icon: LucideIcons.globe,
-              color: Color(0xFF4285F4),
+              color: AppColors.geminiBlue,
             ),
             ProviderOption(
               id: 'xgrok',
               label: 'xGrok',
               icon: LucideIcons.bot,
-              color: Color(0xFFE8453C),
+              color: AppColors.xgrokRed,
             ),
           ]
         : const <ProviderOption>[
@@ -3296,7 +3301,7 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
               id: 'gemini',
               label: 'Gemini',
               icon: LucideIcons.globe,
-              color: Color(0xFF4285F4),
+              color: AppColors.geminiBlue,
             ),
           ];
     // Stale-state guard: if the persisted provider is xGrok but xGrok was
@@ -3627,7 +3632,7 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
                       labelStyle: GoogleFonts.plusJakartaSans(
                         fontSize: 10,
                         fontWeight: FontWeight.w700,
-                        color: colors.text5,
+                        color: colors.text4,
                         letterSpacing: 1.2,
                       ),
                       trailing: GestureDetector(
@@ -4273,7 +4278,7 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
                       labelStyle: GoogleFonts.plusJakartaSans(
                         fontSize: 10,
                         fontWeight: FontWeight.w700,
-                        color: colors.text5,
+                        color: colors.text4,
                         letterSpacing: 1.2,
                       ),
                       trailing: GestureDetector(
@@ -4430,7 +4435,28 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
     );
   }
 
+  /// The InsightAI wait state. One [NexusLoader] with the variant picked off
+  /// the modality actually in flight — vision for an attached image, `think`
+  /// for a Deep run, `research` for Lite — followed by card-shaped skeletons
+  /// in the shape of the answer that is about to land.
+  ///
+  /// The status copy is NOT authored here: [_summaryStage] is whatever the
+  /// owning store (`OnlineSearchStore` / `SummarizeStore` /
+  /// `ImageSearchStore`) published, so the wait text stays byte-identical to
+  /// what it has always been.
   Widget _summarizerLoadingWidget(AppColors colors) {
+    final isImage = _pendingImage != null || _imageSearchKey != null;
+    final isDeep = _searchUseDeepModel && _summarizeKey == null;
+
+    final NexusLoaderVariant variant;
+    if (isImage) {
+      variant = NexusLoaderVariant.vision;
+    } else if (isDeep && _onlineSearchKey != null) {
+      variant = NexusLoaderVariant.think;
+    } else {
+      variant = NexusLoaderVariant.research;
+    }
+
     return Padding(
       padding: const EdgeInsets.only(top: 24),
       child: Column(
@@ -4439,36 +4465,23 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
             padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(
               color: _summarizeGradientStart.withValues(alpha: 0.06),
-              borderRadius: BorderRadius.circular(16),
+              borderRadius: AppRadii.brCard,
               border: Border.all(
                 color: _summarizeGradientStart.withValues(alpha: 0.2),
               ),
             ),
             child: Column(
               children: [
-                SizedBox(
-                  width: 40,
-                  height: 40,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 3,
-                    valueColor: AlwaysStoppedAnimation<Color>(
-                      _summarizeGradientStart.withValues(alpha: 0.8),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 400),
-                  child: Text(
-                    _summaryStage,
-                    key: ValueKey(_summaryStage),
-                    textAlign: TextAlign.center,
-                    style: GoogleFonts.plusJakartaSans(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                      color: colors.text,
-                    ),
-                  ),
+                NexusLoader(
+                  variant: variant,
+                  tone: isDeep ? NexusLoaderTone.deep : NexusLoaderTone.lite,
+                  // Null falls back to the variant's own stage list, which is
+                  // mirrored from the same stores.
+                  label: _summaryStage.isEmpty ? null : _summaryStage,
+                  image: isImage && _pendingImage != null
+                      ? MemoryImage(_pendingImage!.thumbnailBytes)
+                      : null,
+                  size: 120,
                 ),
                 const SizedBox(height: 8),
                 Text(
@@ -4487,9 +4500,15 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
             ),
           ),
           const SizedBox(height: 14),
-          _shimmerCard(colors, height: 80),
-          const SizedBox(height: 10),
-          _shimmerCard(colors, height: 180),
+          // Skeletons shaped like the answer card + source list that is
+          // about to replace them. `ExcludeSemantics` keeps the single live
+          // region above as the only thing a screen reader announces.
+          const ExcludeSemantics(
+            child: NexusLoader(
+              variant: NexusLoaderVariant.list,
+              itemCount: 2,
+            ),
+          ),
         ],
       ),
     );
@@ -4721,7 +4740,7 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
                       labelStyle: GoogleFonts.plusJakartaSans(
                         fontSize: 10,
                         fontWeight: FontWeight.w700,
-                        color: colors.text5,
+                        color: colors.text4,
                         letterSpacing: 1.2,
                       ),
                       trailing: GestureDetector(
@@ -4778,7 +4797,7 @@ class _TutorScreenState extends ConsumerState<TutorScreen>
                             style: GoogleFonts.plusJakartaSans(
                               fontSize: 10,
                               fontWeight: FontWeight.w700,
-                              color: colors.text5,
+                              color: colors.text4,
                               letterSpacing: 1.2,
                             ),
                           ),
@@ -4978,6 +4997,7 @@ class _SavedWordsSheetState extends State<_SavedWordsSheet> {
               width: 40,
               height: 4,
               decoration: BoxDecoration(
+                // Non-text: text5 is the drag-handle / divider rung.
                 color: colors.text5,
                 borderRadius: BorderRadius.circular(2),
               ),
@@ -5035,7 +5055,7 @@ class _SavedWordsSheetState extends State<_SavedWordsSheet> {
                   prefixIcon:
                       Icon(LucideIcons.search, size: 16, color: colors.text4),
                   hintText: 'Search word or definition…',
-                  hintStyle: GoogleFonts.plusJakartaSans(color: colors.text5),
+                  hintStyle: GoogleFonts.plusJakartaSans(color: colors.text4),
                   filled: true,
                   fillColor: colors.bg2,
                   border: OutlineInputBorder(
@@ -5279,7 +5299,7 @@ class _SavedWordsSheetState extends State<_SavedWordsSheet> {
                                                   GoogleFonts.plusJakartaSans(
                                                 fontSize: 10,
                                                 fontWeight: FontWeight.w700,
-                                                color: colors.text5,
+                                                color: colors.text4,
                                                 letterSpacing: 0.8,
                                               ),
                                             ),
@@ -5356,7 +5376,7 @@ class _SavedWordsSheetState extends State<_SavedWordsSheet> {
                                                   GoogleFonts.plusJakartaSans(
                                                 fontSize: 10,
                                                 fontWeight: FontWeight.w700,
-                                                color: colors.text5,
+                                                color: colors.text4,
                                                 letterSpacing: 0.8,
                                               ),
                                             ),
@@ -5600,12 +5620,32 @@ class _SearchInputBox extends StatefulWidget {
 }
 
 class _SearchInputBoxState extends State<_SearchInputBox> {
-  static const _gradStart = Color(0xFF6366F1);
-  static const _gradEnd = Color(0xFF8B5CF6);
-  static const _xgrokColor = Color(0xFFE8453C);
+  static const _gradStart = AppColors.composerGradientStart;
+  static const _gradEnd = AppColors.composerGradientEnd;
+  static const _xgrokColor = AppColors.xgrokRed;
 
   bool _focused = false;
   double _btnScale = 1.0;
+
+  /// Lifts any child to the 48dp minimum interactive target without changing
+  /// how the child paints — the chip keeps its compact look, the hit box and
+  /// the row height grow. Min-constraint based rather than a fixed size, so
+  /// a chip that has outgrown 48dp at a large text scale is left alone.
+  Widget _tapTarget(Widget child) => ConstrainedBox(
+        constraints: const BoxConstraints(
+          minWidth: AppSpacing.tapTarget,
+          minHeight: AppSpacing.tapTarget,
+        ),
+        child: Center(widthFactor: 1, heightFactor: 1, child: child),
+      );
+
+  /// Height-only variant, for controls that are already far wider than 48dp
+  /// (the History pill, the depth toggle). Padding them out sideways would
+  /// only push the header into an overflow.
+  Widget _tapTargetRow(Widget child) => ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: AppSpacing.tapTarget),
+        child: Center(widthFactor: 1, heightFactor: 1, child: child),
+      );
 
   @override
   void initState() {
@@ -5641,9 +5681,13 @@ class _SearchInputBoxState extends State<_SearchInputBox> {
   Widget build(BuildContext context) {
     final colors = widget.colors;
     final isXGrok = widget.onlineSearchProvider == 'xGrok';
+    // Reduced motion collapses the *kind* of change (glow growth, size
+    // springs, slide) to an immediate state change. The colours, the copy and
+    // the layout are identical either way.
+    final still = reducedMotion(context);
 
     return AnimatedContainer(
-      duration: const Duration(milliseconds: 280),
+      duration: still ? Duration.zero : const Duration(milliseconds: 280),
       curve: Curves.easeOutCubic,
       decoration: BoxDecoration(
         gradient: LinearGradient(
@@ -5676,12 +5720,12 @@ class _SearchInputBoxState extends State<_SearchInputBox> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           // ── Header row ─────────────────────────────────────────
-          _buildHeader(colors, isXGrok),
+          _buildHeader(colors, isXGrok, still),
           const SizedBox(height: 12),
 
           // ── Text area container ────────────────────────────────
           AnimatedContainer(
-            duration: const Duration(milliseconds: 220),
+            duration: still ? Duration.zero : const Duration(milliseconds: 220),
             decoration: BoxDecoration(
               color: colors.bg1,
               borderRadius: BorderRadius.circular(16),
@@ -5700,7 +5744,8 @@ class _SearchInputBoxState extends State<_SearchInputBox> {
                 // yet submitted. Animated in/out so the layout shift
                 // is smooth and never jolts the surrounding tab.
                 AnimatedSize(
-                  duration: const Duration(milliseconds: 220),
+                  duration:
+                      still ? Duration.zero : const Duration(milliseconds: 220),
                   curve: Curves.easeOutCubic,
                   alignment: Alignment.topLeft,
                   child: widget.pendingImageThumbnail == null
@@ -5728,10 +5773,12 @@ class _SearchInputBoxState extends State<_SearchInputBox> {
                           : 'Ask anything \u2014 powered by web search\u2026',
                       hintStyle: GoogleFonts.plusJakartaSans(
                         fontSize: 15,
-                        color: colors.text5,
+                        color: colors.text4,
                         height: 1.5,
                       ),
-                      hintMaxLines: 1,
+                      // Two lines: the 44-character search hint ellipsised on
+                      // one line from roughly 130% text scale upward.
+                      hintMaxLines: 2,
                       border: InputBorder.none,
                       enabledBorder: InputBorder.none,
                       focusedBorder: InputBorder.none,
@@ -5741,46 +5788,70 @@ class _SearchInputBoxState extends State<_SearchInputBox> {
                 ),
 
                 // ── Action toolbar ───────────────────────────────
+                // The chips scroll horizontally instead of being packed into a
+                // fixed Row: at 200% text scale Voice + Image + Paste + Clear
+                // are wider than any phone, and a `Spacer` in a plain Row
+                // turns that into a RenderFlex overflow. The mode hint stays
+                // pinned to the trailing edge.
                 Padding(
                   padding: const EdgeInsets.fromLTRB(8, 0, 10, 8),
                   child: Row(
                     children: [
-                      _buildVoiceChip(colors),
-                      const SizedBox(width: 6),
-                      if (widget.onAttachImage != null) ...[
-                        _buildAttachImageChip(colors),
-                        const SizedBox(width: 6),
-                      ],
-                      _buildActionChip(
-                        icon: LucideIcons.clipboard,
-                        label: 'Paste',
-                        color: _gradStart,
-                        onTap: widget.onPaste,
+                      Expanded(
+                        child: SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          child: Row(
+                            children: [
+                              _buildVoiceChip(colors, still),
+                              const SizedBox(width: 6),
+                              if (widget.onAttachImage != null) ...[
+                                _buildAttachImageChip(colors, still),
+                                const SizedBox(width: 6),
+                              ],
+                              _buildActionChip(
+                                icon: LucideIcons.clipboard,
+                                label: 'Paste',
+                                color: _gradStart,
+                                onTap: widget.onPaste,
+                                semanticsLabel: 'Paste from clipboard',
+                              ),
+                              if (widget.hasText && !widget.isLoading) ...[
+                                const SizedBox(width: 6),
+                                _buildActionChip(
+                                  icon: LucideIcons.x,
+                                  label: 'Clear',
+                                  color: colors.text4,
+                                  onTap: widget.onClear,
+                                  semanticsLabel: 'Clear the search',
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
                       ),
-                      if (widget.hasText && !widget.isLoading) ...[
-                        const SizedBox(width: 6),
-                        _buildActionChip(
-                          icon: LucideIcons.x,
-                          label: 'Clear',
-                          color: colors.text4,
-                          onTap: widget.onClear,
-                        ),
-                      ],
-                      const Spacer(),
-                      AnimatedSwitcher(
-                        duration: const Duration(milliseconds: 200),
-                        transitionBuilder: (child, anim) => FadeTransition(
-                          opacity: anim,
-                          child: ScaleTransition(scale: anim, child: child),
-                        ),
-                        child: Icon(
-                          widget.isUrl ? LucideIcons.link : LucideIcons.globe,
-                          key: ValueKey(
-                              widget.isUrl ? 'url-hint' : 'search-hint'),
-                          size: 14,
-                          color: _focused
-                              ? _gradStart.withValues(alpha: 0.6)
-                              : colors.text5,
+                      const SizedBox(width: 6),
+                      ExcludeSemantics(
+                        child: AnimatedSwitcher(
+                          duration: still
+                              ? Duration.zero
+                              : const Duration(milliseconds: 200),
+                          transitionBuilder: still
+                              ? (child, anim) =>
+                                  FadeTransition(opacity: anim, child: child)
+                              : (child, anim) => FadeTransition(
+                                    opacity: anim,
+                                    child: ScaleTransition(
+                                        scale: anim, child: child),
+                                  ),
+                          child: Icon(
+                            widget.isUrl ? LucideIcons.link : LucideIcons.globe,
+                            key: ValueKey(
+                                widget.isUrl ? 'url-hint' : 'search-hint'),
+                            size: 14,
+                            color: _focused
+                                ? _gradStart.withValues(alpha: 0.6)
+                                : colors.text4,
+                          ),
                         ),
                       ),
                     ],
@@ -5796,18 +5867,24 @@ class _SearchInputBoxState extends State<_SearchInputBox> {
           // its own deep-research surface below. We only animate in/out
           // when the mode actually changes to keep the input box stable.
           AnimatedSize(
-            duration: const Duration(milliseconds: 220),
+            duration: still ? Duration.zero : const Duration(milliseconds: 220),
             curve: Curves.easeOutCubic,
             alignment: Alignment.topCenter,
             child: widget.isUrl
                 ? const SizedBox(width: double.infinity, height: 0)
                 : Padding(
                     padding: const EdgeInsets.only(bottom: 12),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        _buildSearchModeToggle(colors),
-                      ],
+                    // Scrollable so the two-state control can never overflow at
+                    // a large text scale; it still reads as centred while it
+                    // fits, which is every normal case.
+                    child: SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          _buildSearchModeToggle(colors, still),
+                        ],
+                      ),
                     ),
                   ),
           ),
@@ -5824,11 +5901,16 @@ class _SearchInputBoxState extends State<_SearchInputBox> {
                 ? () => setState(() => _btnScale = 1.0)
                 : null,
             child: AnimatedScale(
-              scale: _btnScale,
-              duration: const Duration(milliseconds: 100),
+              // Reduced motion: no press dip at all, rather than a 0ms one.
+              scale: still ? 1.0 : _btnScale,
+              duration: still ? Duration.zero : AppMotion.microPress,
               curve: Curves.easeOutCubic,
-              child: SizedBox(
-                height: 48,
+              // A min constraint, not a fixed height: at a large text scale
+              // the label has to be allowed to grow instead of clipping.
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(
+                  minHeight: AppSpacing.tapTarget,
+                ),
                 child: _buildButton(colors),
               ),
             ),
@@ -5849,9 +5931,12 @@ class _SearchInputBoxState extends State<_SearchInputBox> {
 
   // ── Lite / Deep depth toggle ─────────────────────────────────────────────
 
-  Widget _buildSearchModeToggle(AppColors colors) {
-    const liteColor = Color(0xFF4285F4);
-    const deepColor = Color(0xFFC084FC);
+  Widget _buildSearchModeToggle(AppColors colors, bool still) {
+    // Role tokens, not two hand-picked hexes: Lite is the cyan live colour and
+    // Deep is the violet research colour, each already AA-verified against
+    // both themes.
+    final liteColor = colors.modeLite;
+    final deepColor = colors.modeDeep;
     final disabled = widget.isLoading;
 
     return Semantics(
@@ -5870,34 +5955,45 @@ class _SearchInputBoxState extends State<_SearchInputBox> {
                   HapticFeedback.selectionClick();
                   widget.onSearchModeToggle();
                 },
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 250),
-            curve: Curves.easeOutCubic,
-            padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 3),
-            decoration: BoxDecoration(
-              color: colors.bg2,
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: colors.border),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _searchToggleChip(
-                  label: 'Lite',
-                  icon: LucideIcons.zap,
-                  active: !widget.searchUseDeepModel,
-                  color: liteColor,
-                  colors: colors,
+          // The two halves are decoration: without this the node announces
+          // "Search depth: Lite (faster) Lite Deep". The GestureDetector sits
+          // outside it, so the tap action still merges up.
+          child: ExcludeSemantics(
+            child: _tapTarget(
+              AnimatedContainer(
+                duration:
+                    still ? Duration.zero : const Duration(milliseconds: 250),
+                curve: Curves.easeOutCubic,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 3, vertical: 3),
+                decoration: BoxDecoration(
+                  color: colors.bg2,
+                  borderRadius: AppRadii.brLg,
+                  border: Border.all(color: colors.border),
                 ),
-                const SizedBox(width: 2),
-                _searchToggleChip(
-                  label: 'Deep',
-                  icon: LucideIcons.brain,
-                  active: widget.searchUseDeepModel,
-                  color: deepColor,
-                  colors: colors,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _searchToggleChip(
+                      label: 'Lite',
+                      icon: LucideIcons.zap,
+                      active: !widget.searchUseDeepModel,
+                      color: liteColor,
+                      colors: colors,
+                      still: still,
+                    ),
+                    const SizedBox(width: 2),
+                    _searchToggleChip(
+                      label: 'Deep',
+                      icon: LucideIcons.brain,
+                      active: widget.searchUseDeepModel,
+                      color: deepColor,
+                      colors: colors,
+                      still: still,
+                    ),
+                  ],
                 ),
-              ],
+              ),
             ),
           ),
         ),
@@ -5911,14 +6007,15 @@ class _SearchInputBoxState extends State<_SearchInputBox> {
     required bool active,
     required Color color,
     required AppColors colors,
+    required bool still,
   }) {
     return AnimatedContainer(
-      duration: const Duration(milliseconds: 250),
+      duration: still ? Duration.zero : const Duration(milliseconds: 250),
       curve: Curves.easeOutCubic,
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
       decoration: BoxDecoration(
         color: active ? color.withValues(alpha: 0.15) : Colors.transparent,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: AppRadii.brCard,
         border: Border.all(
           color: active ? color.withValues(alpha: 0.35) : Colors.transparent,
         ),
@@ -5929,7 +6026,7 @@ class _SearchInputBoxState extends State<_SearchInputBox> {
           Icon(
             icon,
             size: 12,
-            color: active ? color : colors.text5,
+            color: active ? color : colors.text4,
           ),
           const SizedBox(width: 4),
           Text(
@@ -5947,7 +6044,7 @@ class _SearchInputBoxState extends State<_SearchInputBox> {
 
   // ── Header ─────────────────────────────────────────────────────────────────
 
-  Widget _buildHeader(AppColors colors, bool isXGrok) {
+  Widget _buildHeader(AppColors colors, bool isXGrok, bool still) {
     // Two header surfaces share this widget: the URL/summarize flow and the
     // search flow. The interactive provider picker is only meaningful for
     // search; in URL mode we keep the legacy read-only chip so visual
@@ -5959,40 +6056,50 @@ class _SearchInputBoxState extends State<_SearchInputBox> {
         widget.onProviderChanged != null;
 
     return AnimatedSwitcher(
-      duration: const Duration(milliseconds: 250),
+      duration: still ? Duration.zero : const Duration(milliseconds: 250),
       switchInCurve: Curves.easeOutCubic,
       switchOutCurve: Curves.easeInCubic,
-      transitionBuilder: (child, anim) => FadeTransition(
-        opacity: anim,
-        child: SlideTransition(
-          position: Tween(
-            begin: const Offset(0, 0.15),
-            end: Offset.zero,
-          ).animate(anim),
-          child: child,
-        ),
-      ),
+      // Reduced motion keeps the cross-fade and drops the slide.
+      transitionBuilder: still
+          ? (child, anim) => FadeTransition(opacity: anim, child: child)
+          : (child, anim) => FadeTransition(
+                opacity: anim,
+                child: SlideTransition(
+                  position: Tween(
+                    begin: const Offset(0, 0.15),
+                    end: Offset.zero,
+                  ).animate(anim),
+                  child: child,
+                ),
+              ),
       child: Row(
         key: ValueKey(widget.isUrl ? 'url' : 'search'),
         children: [
           Icon(
             widget.isUrl ? LucideIcons.link : LucideIcons.search,
             size: 11,
-            color: colors.text5,
+            color: colors.text4,
           ),
           const SizedBox(width: 6),
-          Text(
-            widget.isUrl ? 'PASTE URL' : 'ASK ANYTHING',
-            style: GoogleFonts.plusJakartaSans(
-              fontSize: 10,
-              fontWeight: FontWeight.w700,
-              color: colors.text5,
-              letterSpacing: 1.2,
+          // Expanded rather than Text + Spacer: the eyebrow has to be the part
+          // that gives way, or the header overflows once the History pill and
+          // the provider chip are both 48dp tall and the user is at a large
+          // text scale.
+          Expanded(
+            child: Text(
+              widget.isUrl ? 'PASTE URL' : 'ASK ANYTHING',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: GoogleFonts.plusJakartaSans(
+                fontSize: 10,
+                fontWeight: FontWeight.w700,
+                color: colors.text4,
+                letterSpacing: 1.2,
+              ),
             ),
           ),
-          const Spacer(),
           if (widget.onOpenHistory != null) ...[
-            _buildHistoryPill(colors),
+            _buildHistoryPill(colors, still),
             const SizedBox(width: 8),
           ],
           if (useInteractivePicker)
@@ -6004,7 +6111,7 @@ class _SearchInputBoxState extends State<_SearchInputBox> {
               heroTag: 'tutor-search',
             )
           else
-            _buildProviderChip(colors, isXGrok),
+            _buildProviderChip(colors, isXGrok, still),
         ],
       ),
     );
@@ -6012,54 +6119,68 @@ class _SearchInputBoxState extends State<_SearchInputBox> {
 
   /// History pill — small purple-accented chip that opens the saved-searches
   /// bottom sheet. Renders a count badge only when there are saved entries.
-  Widget _buildHistoryPill(AppColors colors) {
-    const accent = Color(0xFFC084FC);
+  Widget _buildHistoryPill(AppColors colors, bool still) {
+    // The saved-searches surface belongs to the Deep/research colour family.
+    final accent = colors.modeDeep;
     final count = widget.savedCount;
-    return GestureDetector(
+    return Semantics(
+      button: true,
+      label: count > 0
+          ? 'Saved searches, $count saved'
+          : 'Saved searches',
       onTap: widget.onOpenHistory,
-      behavior: HitTestBehavior.opaque,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 180),
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-        decoration: BoxDecoration(
-          color: accent.withValues(alpha: 0.10),
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: accent.withValues(alpha: 0.25)),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(LucideIcons.history, size: 12, color: accent),
-            const SizedBox(width: 5),
-            Text(
-              'History',
-              style: GoogleFonts.plusJakartaSans(
-                fontSize: 11,
-                fontWeight: FontWeight.w700,
-                color: accent,
+      child: ExcludeSemantics(
+        child: GestureDetector(
+          onTap: widget.onOpenHistory,
+          behavior: HitTestBehavior.opaque,
+          child: _tapTargetRow(
+            AnimatedContainer(
+              duration:
+                  still ? Duration.zero : const Duration(milliseconds: 180),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+              decoration: BoxDecoration(
+                color: accent.withValues(alpha: 0.10),
+                borderRadius: AppRadii.brLg,
+                border: Border.all(color: accent.withValues(alpha: 0.25)),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(LucideIcons.history, size: 12, color: accent),
+                  const SizedBox(width: 5),
+                  Text(
+                    'History',
+                    style: GoogleFonts.plusJakartaSans(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      color: accent,
+                    ),
+                  ),
+                  if (count > 0) ...[
+                    const SizedBox(width: 6),
+                    Container(
+                      constraints: const BoxConstraints(minWidth: 16),
+                      padding:
+                          const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                      decoration: BoxDecoration(
+                        color: accent,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Text(
+                        count > 99 ? '99+' : '$count',
+                        textAlign: TextAlign.center,
+                        style: GoogleFonts.plusJakartaSans(
+                          fontSize: 9,
+                          fontWeight: FontWeight.w800,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
               ),
             ),
-            if (count > 0) ...[
-              const SizedBox(width: 6),
-              Container(
-                constraints: const BoxConstraints(minWidth: 16),
-                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-                decoration: BoxDecoration(
-                  color: accent,
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Text(
-                  count > 99 ? '99+' : '$count',
-                  textAlign: TextAlign.center,
-                  style: GoogleFonts.plusJakartaSans(
-                    fontSize: 9,
-                    fontWeight: FontWeight.w800,
-                    color: Colors.white,
-                  ),
-                ),
-              ),
-            ],
-          ],
+          ),
         ),
       ),
     );
@@ -6067,42 +6188,53 @@ class _SearchInputBoxState extends State<_SearchInputBox> {
 
   // ── Action chips ───────────────────────────────────────────────────────────
 
-  Widget _buildVoiceChip(AppColors colors) {
+  Widget _buildVoiceChip(AppColors colors, bool still) {
     final listening = widget.isListening;
-    final accent = listening ? const Color(0xFFF87171) : _gradStart;
+    // Recording is a state, not a failure — `listening`, never `danger`.
+    final accent = listening ? colors.listening : _gradStart;
 
-    return Listener(
-      behavior: HitTestBehavior.opaque,
-      onPointerDown: (_) => widget.onVoiceDown(),
-      onPointerUp: (_) => widget.onVoiceUp(),
-      onPointerCancel: (_) => widget.onVoiceUp(),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 180),
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-        decoration: BoxDecoration(
-          color: listening
-              ? const Color(0xFFF87171).withValues(alpha: 0.14)
-              : _gradStart.withValues(alpha: 0.08),
-          borderRadius: BorderRadius.circular(20),
-          border: listening
-              ? Border.all(
-                  color: const Color(0xFFF87171).withValues(alpha: 0.30))
-              : null,
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(LucideIcons.mic, size: 13, color: accent),
-            const SizedBox(width: 4),
-            Text(
-              listening ? 'Listening\u2026' : 'Voice',
-              style: GoogleFonts.plusJakartaSans(
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
-                color: accent,
+    return Semantics(
+      button: true,
+      label: listening ? 'Listening' : 'Voice input',
+      hint: 'Press and hold to dictate your question',
+      child: ExcludeSemantics(
+        child: Listener(
+          behavior: HitTestBehavior.opaque,
+          onPointerDown: (_) => widget.onVoiceDown(),
+          onPointerUp: (_) => widget.onVoiceUp(),
+          onPointerCancel: (_) => widget.onVoiceUp(),
+          child: _tapTarget(
+            AnimatedContainer(
+              duration:
+                  still ? Duration.zero : const Duration(milliseconds: 180),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: listening
+                    ? colors.listening.withValues(alpha: 0.14)
+                    : _gradStart.withValues(alpha: 0.08),
+                borderRadius: AppRadii.brLg,
+                border: listening
+                    ? Border.all(
+                        color: colors.listening.withValues(alpha: 0.30))
+                    : null,
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(LucideIcons.mic, size: 13, color: accent),
+                  const SizedBox(width: 4),
+                  Text(
+                    listening ? 'Listening\u2026' : 'Voice',
+                    style: GoogleFonts.plusJakartaSans(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: accent,
+                    ),
+                  ),
+                ],
               ),
             ),
-          ],
+          ),
         ),
       ),
     );
@@ -6112,53 +6244,66 @@ class _SearchInputBoxState extends State<_SearchInputBox> {
   /// parent didn't wire [widget.onAttachImage]. Switches to a small
   /// spinner while the pick + compress pipeline is running so the user
   /// can't queue a second pick mid-flight.
-  Widget _buildAttachImageChip(AppColors colors) {
+  Widget _buildAttachImageChip(AppColors colors, bool still) {
     const accent = _gradEnd;
     final attached = widget.pendingImageThumbnail != null;
     final busy = widget.isAttachingImage;
-    return GestureDetector(
+    return Semantics(
+      button: true,
+      enabled: !busy,
+      label: busy
+          ? 'Preparing image'
+          : (attached ? 'Replace attached image' : 'Attach an image'),
       onTap: busy ? null : widget.onAttachImage,
-      behavior: HitTestBehavior.opaque,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 180),
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-        decoration: BoxDecoration(
-          color: attached
-              ? accent.withValues(alpha: 0.18)
-              : accent.withValues(alpha: 0.08),
-          borderRadius: BorderRadius.circular(20),
-          border: attached
-              ? Border.all(color: accent.withValues(alpha: 0.40))
-              : null,
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (busy)
-              const SizedBox(
-                width: 12,
-                height: 12,
-                child: CircularProgressIndicator(
-                  strokeWidth: 1.6,
-                  valueColor: AlwaysStoppedAnimation<Color>(accent),
-                ),
-              )
-            else
-              Icon(
-                attached ? LucideIcons.imagePlus : LucideIcons.image,
-                size: 13,
-                color: accent,
+      child: ExcludeSemantics(
+        child: GestureDetector(
+          onTap: busy ? null : widget.onAttachImage,
+          behavior: HitTestBehavior.opaque,
+          child: _tapTarget(
+            AnimatedContainer(
+              duration:
+                  still ? Duration.zero : const Duration(milliseconds: 180),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: attached
+                    ? accent.withValues(alpha: 0.18)
+                    : accent.withValues(alpha: 0.08),
+                borderRadius: AppRadii.brLg,
+                border: attached
+                    ? Border.all(color: accent.withValues(alpha: 0.40))
+                    : null,
               ),
-            const SizedBox(width: 4),
-            Text(
-              busy ? 'Loading\u2026' : (attached ? 'Image' : 'Image'),
-              style: GoogleFonts.plusJakartaSans(
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
-                color: accent,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (busy)
+                    const SizedBox(
+                      width: 12,
+                      height: 12,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 1.6,
+                        valueColor: AlwaysStoppedAnimation<Color>(accent),
+                      ),
+                    )
+                  else
+                    Icon(
+                      attached ? LucideIcons.imagePlus : LucideIcons.image,
+                      size: 13,
+                      color: accent,
+                    ),
+                  const SizedBox(width: 4),
+                  Text(
+                    busy ? 'Loading\u2026' : 'Image',
+                    style: GoogleFonts.plusJakartaSans(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: accent,
+                    ),
+                  ),
+                ],
               ),
             ),
-          ],
+          ),
         ),
       ),
     );
@@ -6177,19 +6322,28 @@ class _SearchInputBoxState extends State<_SearchInputBox> {
     final size = widget.pendingImageSizeKb != null
         ? '${widget.pendingImageSizeKb} KB'
         : null;
-    return Padding(
+    // One merged node: "Image attached, 1200×800, 240 KB, JPEG" rather than
+    // three orphan text leaves and an unlabelled thumbnail.
+    final meta = <String>[
+      if (dims != null) dims,
+      if (size != null) size,
+      'JPEG',
+    ].join(', ');
+    return Semantics(
+      label: 'Image attached, $meta',
+      child: Padding(
       padding: const EdgeInsets.fromLTRB(12, 10, 10, 0),
       child: Container(
         padding: const EdgeInsets.all(6),
         decoration: BoxDecoration(
           color: colors.bg2,
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: AppRadii.brSm,
           border: Border.all(color: colors.border2),
         ),
         child: Row(
           children: [
             ClipRRect(
-              borderRadius: BorderRadius.circular(8),
+              borderRadius: AppRadii.brXs,
               child: Image.memory(
                 thumb,
                 width: 44,
@@ -6201,50 +6355,63 @@ class _SearchInputBoxState extends State<_SearchInputBox> {
             ),
             const SizedBox(width: 10),
             Expanded(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Image attached',
-                    style: GoogleFonts.plusJakartaSans(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                      color: colors.text,
+              child: ExcludeSemantics(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Image attached',
+                      style: GoogleFonts.plusJakartaSans(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        color: colors.text,
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    [
-                      if (dims != null) dims,
-                      if (size != null) size,
-                      'JPEG',
-                    ].join('  ·  '),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: GoogleFonts.plusJakartaSans(
-                      fontSize: 10,
-                      color: colors.text4,
+                    const SizedBox(height: 2),
+                    Text(
+                      [
+                        if (dims != null) dims,
+                        if (size != null) size,
+                        'JPEG',
+                      ].join('  ·  '),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.plusJakartaSans(
+                        fontSize: 10,
+                        color: colors.text4,
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
             if (widget.onClearPendingImage != null)
-              GestureDetector(
+              Semantics(
+                button: true,
+                label: 'Remove attached image',
                 onTap: widget.onClearPendingImage,
-                behavior: HitTestBehavior.opaque,
-                child: Container(
-                  padding: const EdgeInsets.all(6),
-                  decoration: BoxDecoration(
-                    color: colors.bg3,
-                    shape: BoxShape.circle,
+                child: ExcludeSemantics(
+                  child: GestureDetector(
+                    onTap: widget.onClearPendingImage,
+                    behavior: HitTestBehavior.opaque,
+                    child: _tapTarget(
+                      Container(
+                        padding: const EdgeInsets.all(6),
+                        decoration: BoxDecoration(
+                          color: colors.bg3,
+                          shape: BoxShape.circle,
+                        ),
+                        child:
+                            Icon(LucideIcons.x, size: 12, color: colors.text4),
+                      ),
+                    ),
                   ),
-                  child: Icon(LucideIcons.x, size: 12, color: colors.text4),
                 ),
               ),
           ],
         ),
+      ),
       ),
     );
   }
@@ -6254,30 +6421,40 @@ class _SearchInputBoxState extends State<_SearchInputBox> {
     required String label,
     required Color color,
     required VoidCallback onTap,
+    required String semanticsLabel,
   }) {
-    return GestureDetector(
+    return Semantics(
+      button: true,
+      label: semanticsLabel,
       onTap: onTap,
-      behavior: HitTestBehavior.opaque,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-        decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.08),
-          borderRadius: BorderRadius.circular(20),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 13, color: color),
-            const SizedBox(width: 4),
-            Text(
-              label,
-              style: GoogleFonts.plusJakartaSans(
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
-                color: color,
+      child: ExcludeSemantics(
+        child: GestureDetector(
+          onTap: onTap,
+          behavior: HitTestBehavior.opaque,
+          child: _tapTarget(
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.08),
+                borderRadius: AppRadii.brLg,
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(icon, size: 13, color: color),
+                  const SizedBox(width: 4),
+                  Text(
+                    label,
+                    style: GoogleFonts.plusJakartaSans(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: color,
+                    ),
+                  ),
+                ],
               ),
             ),
-          ],
+          ),
         ),
       ),
     );
@@ -6287,33 +6464,42 @@ class _SearchInputBoxState extends State<_SearchInputBox> {
 
   Widget _buildButton(AppColors colors) {
     if (widget.isLoading) {
-      return DecoratedBox(
-        decoration: BoxDecoration(
-          color: const Color(0xFFEF4444),
-          borderRadius: BorderRadius.circular(14),
-        ),
-        child: FilledButton.icon(
-          onPressed: widget.onCancel,
-          style: FilledButton.styleFrom(
-            backgroundColor: Colors.transparent,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(14),
-            ),
-          ),
-          icon: Container(
-            width: 14,
-            height: 14,
+      return Semantics(
+        button: true,
+        label: 'Stop the search in progress',
+        onTap: widget.onCancel,
+        child: ExcludeSemantics(
+          child: DecoratedBox(
             decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(2),
+              color: colors.danger,
+              borderRadius: AppRadii.brMd,
             ),
-          ),
-          label: Text(
-            'Stop',
-            style: GoogleFonts.plusJakartaSans(
-              fontSize: 14,
-              fontWeight: FontWeight.w800,
-              color: Colors.white,
+            child: FilledButton.icon(
+              onPressed: widget.onCancel,
+              style: FilledButton.styleFrom(
+                backgroundColor: Colors.transparent,
+                shape: const RoundedRectangleBorder(
+                  borderRadius: AppRadii.brMd,
+                ),
+              ),
+              // The white square is the universal stop glyph, but it carries
+              // no text — the label above is what a screen reader reads.
+              icon: Container(
+                width: 14,
+                height: 14,
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              label: Text(
+                'Stop',
+                style: GoogleFonts.plusJakartaSans(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w800,
+                  color: Colors.white,
+                ),
+              ),
             ),
           ),
         ),
@@ -6337,38 +6523,46 @@ class _SearchInputBoxState extends State<_SearchInputBox> {
       icon = LucideIcons.search;
     }
 
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        gradient: _canSubmit
-            ? const LinearGradient(colors: [_gradStart, _gradEnd])
-            : null,
-        color: _canSubmit ? null : _gradStart.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(14),
-      ),
-      child: FilledButton.icon(
-        onPressed: _canSubmit ? widget.onSubmitted : null,
-        style: FilledButton.styleFrom(
-          backgroundColor: Colors.transparent,
-          disabledBackgroundColor: Colors.transparent,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(14),
+    return Semantics(
+      button: true,
+      enabled: _canSubmit,
+      label: label,
+      onTap: _canSubmit ? widget.onSubmitted : null,
+      child: ExcludeSemantics(
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: _canSubmit
+                ? const LinearGradient(colors: [_gradStart, _gradEnd])
+                : null,
+            color: _canSubmit ? null : _gradStart.withValues(alpha: 0.12),
+            borderRadius: AppRadii.brMd,
           ),
-        ),
-        icon: Icon(
-          icon,
-          size: 17,
-          color: _canSubmit
-              ? (colors.isDark ? colors.text : Colors.white)
-              : colors.text5,
-        ),
-        label: Text(
-          label,
-          style: GoogleFonts.plusJakartaSans(
-            fontSize: 14,
-            fontWeight: FontWeight.w800,
-            color: _canSubmit
-                ? (colors.isDark ? colors.text : Colors.white)
-                : colors.text5,
+          child: FilledButton.icon(
+            onPressed: _canSubmit ? widget.onSubmitted : null,
+            style: FilledButton.styleFrom(
+              backgroundColor: Colors.transparent,
+              disabledBackgroundColor: Colors.transparent,
+              shape: const RoundedRectangleBorder(
+                borderRadius: AppRadii.brMd,
+              ),
+            ),
+            icon: Icon(
+              icon,
+              size: 17,
+              color: _canSubmit
+                  ? (colors.isDark ? colors.text : Colors.white)
+                  : colors.text4,
+            ),
+            label: Text(
+              label,
+              style: GoogleFonts.plusJakartaSans(
+                fontSize: 14,
+                fontWeight: FontWeight.w800,
+                color: _canSubmit
+                    ? (colors.isDark ? colors.text : Colors.white)
+                    : colors.text4,
+              ),
+            ),
           ),
         ),
       ),
@@ -6383,40 +6577,52 @@ class _SearchInputBoxState extends State<_SearchInputBox> {
 
   // ── Provider chip ──────────────────────────────────────────────────────────
 
-  Widget _buildProviderChip(AppColors colors, bool isXGrok) {
-    final chipColor = isXGrok ? _xgrokColor : const Color(0xFF4285F4);
+  Widget _buildProviderChip(AppColors colors, bool isXGrok, bool still) {
+    final chipColor = isXGrok ? _xgrokColor : AppColors.geminiBlue;
     final chipLabel = isXGrok ? 'xGrok' : 'Gemini';
     final chipIcon = isXGrok ? LucideIcons.bot : LucideIcons.globe;
 
-    return AnimatedSwitcher(
-      duration: const Duration(milliseconds: 250),
-      transitionBuilder: (child, anim) => FadeTransition(
-        opacity: anim,
-        child: ScaleTransition(scale: anim, child: child),
-      ),
-      child: Container(
-        key: ValueKey(chipLabel),
-        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-        decoration: BoxDecoration(
-          color: chipColor.withValues(alpha: 0.10),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: chipColor.withValues(alpha: 0.20)),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(chipIcon, size: 9, color: chipColor),
-            const SizedBox(width: 4),
-            Text(
-              chipLabel,
-              style: GoogleFonts.plusJakartaSans(
-                fontSize: 9,
-                fontWeight: FontWeight.w700,
-                color: chipColor,
-                letterSpacing: 0.3,
+    // Read-only, so it needs no tap semantics — but it does need to occupy the
+    // same 48dp row height as the interactive History pill next to it, or the
+    // header collapses around whichever child is shortest.
+    return Semantics(
+      label: 'Provider: $chipLabel',
+      child: ExcludeSemantics(
+        child: _tapTargetRow(
+          AnimatedSwitcher(
+            duration: still ? Duration.zero : const Duration(milliseconds: 250),
+            transitionBuilder: still
+                ? (child, anim) => FadeTransition(opacity: anim, child: child)
+                : (child, anim) => FadeTransition(
+                      opacity: anim,
+                      child: ScaleTransition(scale: anim, child: child),
+                    ),
+            child: Container(
+              key: ValueKey(chipLabel),
+              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+              decoration: BoxDecoration(
+                color: chipColor.withValues(alpha: 0.10),
+                borderRadius: AppRadii.brXs,
+                border: Border.all(color: chipColor.withValues(alpha: 0.20)),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(chipIcon, size: 9, color: chipColor),
+                  const SizedBox(width: 4),
+                  Text(
+                    chipLabel,
+                    style: GoogleFonts.plusJakartaSans(
+                      fontSize: 9,
+                      fontWeight: FontWeight.w700,
+                      color: chipColor,
+                      letterSpacing: 0.3,
+                    ),
+                  ),
+                ],
               ),
             ),
-          ],
+          ),
         ),
       ),
     );

@@ -6,6 +6,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import '../notifications/android_status_bar_icon.dart';
 import '../platform/platform_capabilities.dart';
+import 'news_summarize_fg_task.dart';
 import 'telegram_logger.dart';
 
 /// Manages a real Android foreground service during cloud transfers.
@@ -89,6 +90,7 @@ class TransferNotification {
     try {
       final result = await FlutterForegroundTask.startService(
         serviceId: _serviceId,
+        serviceTypes: const [ForegroundServiceTypes.dataSync],
         notificationTitle: title,
         notificationText: body,
         notificationIcon: const NotificationIcon(
@@ -240,5 +242,9 @@ class _TransferTaskHandler extends TaskHandler {
   void onRepeatEvent(DateTime timestamp) {}
 
   @override
-  Future<void> onDestroy(DateTime timestamp, bool isTimeout) async {}
+  Future<void> onDestroy(DateTime timestamp, bool isTimeout) async {
+    if (isTimeout) {
+      FlutterForegroundTask.sendDataToMain(kFgsTimeoutEvent);
+    }
+  }
 }

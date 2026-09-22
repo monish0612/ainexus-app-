@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:dio/dio.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -1876,106 +1877,116 @@ class _FilesTab extends StatelessWidget {
             }
             return false;
           },
-          child: ListView(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
-            children: [
-              // Drive's quota card is Drive's. The NAS has 275 GB of pool free
-              // and no per-user quota, so showing a ring against a 15 GB limit
-              // there would be a made-up number — the real figure belongs to
-              // the Stats dashboard, which measures it properly.
-              if (!_isNas) ...[
-                _StorageCapacityCard(
-                  colors: colors,
-                  usedFraction: usedFraction,
-                  usedGb: usedGb,
-                  totalGb: totalGb,
-                  pctUsed: pctUsed,
-                ),
-                const SizedBox(height: 14),
-              ],
-              _UploadZone(
-                colors: colors,
-                onTap: onUploadTap,
-                destination: destination,
-                nasRoot: nasRoot,
-              ),
-              const SizedBox(height: 14),
-              _SearchBar(
-                colors: colors,
-                controller: searchController,
-                onChanged: onSearchChanged,
-                isSearching: isSearching,
-              ),
-              const SizedBox(height: 14),
-              _FilterChipsRow(
-                colors: colors,
-                selected: filter,
-                onChanged: onFilterChanged,
-              ),
-              const SizedBox(height: 12),
-              if (files.isEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(top: 48),
-                  child: Center(
-                    child: Text(
-                      searchController.text.isNotEmpty
-                          ? 'No files found for "${searchController.text}"'
-                          : filter != FileFilter.all
-                              ? 'No files match this filter'
-                              // Naming the destination matters most here: an
-                              // empty list is exactly what someone sees after
-                              // uploading to the other one and looking in the
-                              // wrong place.
-                              : _isNas
-                                  ? 'Nothing in ${nasRoot.isEmpty ? 'the NAS folder' : nasRoot} yet'
-                                  : 'Nothing in Google Drive yet',
-                      textAlign: TextAlign.center,
-                      style: GoogleFonts.plusJakartaSans(
-                          color: colors.text4, fontSize: 14),
+          child: CustomScrollView(
+            slivers: [
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+                sliver: SliverList.list(
+                  children: [
+                    if (!_isNas) ...[
+                      _StorageCapacityCard(
+                        colors: colors,
+                        usedFraction: usedFraction,
+                        usedGb: usedGb,
+                        totalGb: totalGb,
+                        pctUsed: pctUsed,
+                      ),
+                      const SizedBox(height: 14),
+                    ],
+                    _UploadZone(
+                      colors: colors,
+                      onTap: onUploadTap,
+                      destination: destination,
+                      nasRoot: nasRoot,
                     ),
-                  ),
-                )
-              else
-                ...files.map((f) => Padding(
+                    const SizedBox(height: 14),
+                    _SearchBar(
+                      colors: colors,
+                      controller: searchController,
+                      onChanged: onSearchChanged,
+                      isSearching: isSearching,
+                    ),
+                    const SizedBox(height: 14),
+                    _FilterChipsRow(
+                      colors: colors,
+                      selected: filter,
+                      onChanged: onFilterChanged,
+                    ),
+                    const SizedBox(height: 12),
+                    if (files.isEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 48),
+                        child: Center(
+                          child: Text(
+                            searchController.text.isNotEmpty
+                                ? 'No files found for "${searchController.text}"'
+                                : filter != FileFilter.all
+                                    ? 'No files match this filter'
+                                    : _isNas
+                                        ? 'Nothing in ${nasRoot.isEmpty ? 'the NAS folder' : nasRoot} yet'
+                                        : 'Nothing in Google Drive yet',
+                            textAlign: TextAlign.center,
+                            style: GoogleFonts.plusJakartaSans(
+                                color: colors.text4, fontSize: 14),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              if (files.isNotEmpty)
+                SliverPadding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  sliver: SliverList.builder(
+                    itemCount: files.length,
+                    itemBuilder: (context, i) => Padding(
                       padding: const EdgeInsets.only(bottom: 8),
                       child: _FileRow(
-                        file: f,
+                        file: files[i],
                         colors: colors,
-                        // Starring is a Drive concept. There is nowhere on a
-                        // WebDAV share to keep it, so the control is absent
-                        // rather than present and inert.
-                        onStar: _isNas ? null : () => onToggleStar(f.id),
-                        onDownload: () => onDownload(f),
-                        onDelete: () => onDelete(f.id),
-                        onLongPress: () => onLongPress(f),
-                      ),
-                    )),
-              if (loadingMore)
-                const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 16),
-                  child: Center(
-                    child: SizedBox(
-                      width: 24,
-                      height: 24,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        valueColor:
-                            AlwaysStoppedAnimation<Color>(AppColors.accent),
+                        onStar: _isNas ? null : () => onToggleStar(files[i].id),
+                        onDownload: () => onDownload(files[i]),
+                        onDelete: () => onDelete(files[i].id),
+                        onLongPress: () => onLongPress(files[i]),
                       ),
                     ),
                   ),
                 ),
-              if (hasMore && !loadingMore)
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 8),
-                  child: Center(
-                    child: Text(
-                      'Scroll down for more files',
-                      style: GoogleFonts.plusJakartaSans(
-                          color: colors.text4, fontSize: 12),
-                    ),
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 100),
+                sliver: SliverToBoxAdapter(
+                  child: Column(
+                    children: [
+                      if (loadingMore)
+                        const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 16),
+                          child: Center(
+                            child: SizedBox(
+                              width: 24,
+                              height: 24,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                valueColor: AlwaysStoppedAnimation<Color>(
+                                    AppColors.accent),
+                              ),
+                            ),
+                          ),
+                        ),
+                      if (hasMore && !loadingMore)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                          child: Center(
+                            child: Text(
+                              'Scroll down for more files',
+                              style: GoogleFonts.plusJakartaSans(
+                                  color: colors.text4, fontSize: 12),
+                            ),
+                          ),
+                        ),
+                    ],
                   ),
                 ),
+              ),
             ],
           ),
         ),
@@ -2305,32 +2316,33 @@ class _FileThumbnail extends StatelessWidget {
         child: SizedBox(
           width: size,
           height: size,
-          child: Image.network(
-            file.thumbnailLink!,
+          child: CachedNetworkImage(
+            imageUrl: file.thumbnailLink!,
             width: size,
             height: size,
             fit: BoxFit.cover,
-            errorBuilder: (_, __, ___) =>
+            memCacheWidth:
+                (size * MediaQuery.devicePixelRatioOf(context)).round(),
+            memCacheHeight:
+                (size * MediaQuery.devicePixelRatioOf(context)).round(),
+            errorWidget: (_, __, ___) =>
                 _FileTypeIcon(kind: file.kind, size: size, colors: colors),
-            loadingBuilder: (_, child, progress) {
-              if (progress == null) return child;
-              return Container(
-                width: size,
-                height: size,
-                color: colors.bg3,
-                child: Center(
-                  child: SizedBox(
-                    width: size * 0.4,
-                    height: size * 0.4,
-                    child: const CircularProgressIndicator(
-                      strokeWidth: 2,
-                      valueColor:
-                          AlwaysStoppedAnimation<Color>(AppColors.accent),
-                    ),
+            placeholder: (_, __) => Container(
+              width: size,
+              height: size,
+              color: colors.bg3,
+              child: Center(
+                child: SizedBox(
+                  width: size * 0.4,
+                  height: size * 0.4,
+                  child: const CircularProgressIndicator(
+                    strokeWidth: 2,
+                    valueColor:
+                        AlwaysStoppedAnimation<Color>(AppColors.accent),
                   ),
                 ),
-              );
-            },
+              ),
+            ),
           ),
         ),
       );
@@ -2499,7 +2511,7 @@ class _HistoryTab extends StatelessWidget {
             Text('Uploads, downloads, and sync will appear here.',
                 textAlign: TextAlign.center,
                 style: GoogleFonts.plusJakartaSans(
-                    color: colors.text5, fontSize: 13)),
+                    color: colors.text4, fontSize: 13)),
           ]),
         ),
       );

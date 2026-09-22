@@ -865,7 +865,7 @@ class _SavedSearchDetailSheetState
                   decoration: InputDecoration(
                     hintText: 'Ask a follow-up\u2026',
                     hintStyle: GoogleFonts.plusJakartaSans(
-                        fontSize: 14, color: colors.text5),
+                        fontSize: 14, color: colors.text4),
                     isDense: true,
                     filled: true,
                     fillColor: colors.bg1,

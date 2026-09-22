@@ -5,6 +5,8 @@ import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.Rect
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import android.view.Gravity
 import android.view.WindowInsets
@@ -45,6 +47,10 @@ class OverlayController(private val context: Context) {
     private var added = false
     private var expanded = false
     private var focusable = false
+    private var engineResumed = false
+
+    private val idleHandler = Handler(Looper.getMainLooper())
+    private val idleTeardown = Runnable { teardownIdleEngine() }
 
     /** Screen metrics frozen at drag start, so moves never hit the system per event. */
     private var dragScreen: BubbleLayout.Screen? = null
@@ -72,6 +78,7 @@ class OverlayController(private val context: Context) {
     // ── Engine ───────────────────────────────────────────────────────────────
 
     fun warm(): FlutterEngine? {
+        if (!BubblePrefs.isEnabled(context)) return null
         engine?.let { return it }
         return try {
             FlutterEngineCache.getInstance().get(Channels.OVERLAY_ENGINE_ID)?.let {
@@ -102,6 +109,7 @@ class OverlayController(private val context: Context) {
 
     /** Show (or move) the collapsed bubble anchored to [fieldBounds]. */
     fun showBubble(fieldBounds: Rect) {
+        cancelIdleTeardown()
         val eng = warm() ?: return
         anchor = Rect(fieldBounds)
         // Typing debounce / field-bounds updates must not yank the window out
@@ -124,9 +132,8 @@ class OverlayController(private val context: Context) {
                 setBackgroundColor(Color.TRANSPARENT)
                 addView(fv)
             }
-            // Without an explicit resume the engine renders at zero size.
-            eng.lifecycleChannel.appIsResumed()
         }
+        resumeEngineIfNeeded()
         root?.interceptTouches = true
 
         val lp = params ?: newParams().also { params = it }
@@ -251,10 +258,55 @@ class OverlayController(private val context: Context) {
         // update — and so re-add — the window we just removed.
         params?.let { applyFocusable(it, false) }
         expanded = false
+        pauseEngineIfNeeded()
+        scheduleIdleTeardown()
     }
 
     fun destroy() {
+        cancelIdleTeardown()
         hide()
+        cancelIdleTeardown()
+        teardownEngine()
+    }
+
+    private fun resumeEngineIfNeeded() {
+        val eng = engine ?: return
+        if (engineResumed) return
+        try {
+            eng.lifecycleChannel.appIsResumed()
+        } catch (t: Throwable) {
+            Log.w(TAG, "engine resume failed", t)
+        }
+        engineResumed = true
+    }
+
+    private fun pauseEngineIfNeeded() {
+        val eng = engine ?: return
+        if (!engineResumed) return
+        try {
+            eng.lifecycleChannel.appIsPaused()
+        } catch (t: Throwable) {
+            Log.w(TAG, "engine pause failed", t)
+        }
+        engineResumed = false
+    }
+
+    private fun scheduleIdleTeardown() {
+        idleHandler.removeCallbacks(idleTeardown)
+        if (engine == null) return
+        idleHandler.postDelayed(idleTeardown, IDLE_DESTROY_MS)
+    }
+
+    private fun cancelIdleTeardown() {
+        idleHandler.removeCallbacks(idleTeardown)
+    }
+
+    private fun teardownIdleEngine() {
+        if (added) return
+        teardownEngine()
+    }
+
+    private fun teardownEngine() {
         try {
             flutterView?.detachFromFlutterEngine()
         } catch (t: Throwable) {
@@ -264,7 +316,20 @@ class OverlayController(private val context: Context) {
         root = null
         params = null
         anchor = null
-        // The engine stays cached so the next bubble is instant.
+        engineResumed = false
+        val eng = engine
+        engine = null
+        if (eng == null) return
+        try {
+            FlutterEngineCache.getInstance().remove(Channels.OVERLAY_ENGINE_ID)
+        } catch (t: Throwable) {
+            Log.w(TAG, "engine cache remove failed", t)
+        }
+        try {
+            eng.destroy()
+        } catch (t: Throwable) {
+            Log.w(TAG, "engine destroy failed", t)
+        }
     }
 
     // ── Focus (the "Own" tone input) ─────────────────────────────────────────
@@ -544,6 +609,9 @@ class OverlayController(private val context: Context) {
 
         /** Fallback status-bar clearance when insets can't be queried. */
         private const val TOP_SAFE_DP = 36
+
+        /** Tear down the paused overlay engine after this idle stretch. */
+        private const val IDLE_DESTROY_MS = 120_000L
 
         private const val BASE_FLAGS =
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or

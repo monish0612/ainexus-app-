@@ -212,8 +212,8 @@ class _ExpenseItemState extends State<ExpenseItem>
 
     final categoryColor =
         AppColors.categoryColors[e.category] ?? AppColors.categoryOthers;
-    final categoryIcon =
-        AppColors.categoryIcons[e.category] ?? AppColors.categoryIcons['Others']!;
+    final categoryIcon = AppColors.categoryIcons[e.category] ??
+        AppColors.categoryIcons['Others']!;
 
     const neutralBank = Color(0xFF555555);
     final bankColor = AppColors.bankColors[e.bank] ?? neutralBank;
@@ -225,59 +225,61 @@ class _ExpenseItemState extends State<ExpenseItem>
         clipBehavior: Clip.hardEdge,
         children: [
           if (!widget.selectionMode)
-          Positioned(
-            right: 0,
-            top: 0,
-            bottom: 0,
-            width: _revealWidth,
-            child: Row(
-              children: [
-                Expanded(
-                  child: _SwipeActionButton(
-                    onTap: () => _afterCloseThen(widget.onEdit),
-                    background: const Color(0xFF6366F1).withValues(alpha: 0.28),
-                    borderTop: const Color(0xFF6366F1).withValues(alpha: 0.35),
-                    borderBottom:
-                        const Color(0xFF6366F1).withValues(alpha: 0.35),
-                    borderRight: Colors.transparent,
-                    borderRadius: BorderRadius.zero,
-                    iconBoxBg: const Color(0xFF6366F1).withValues(alpha: 0.3),
-                    iconBoxBorder:
-                        const Color(0xFF818CF8).withValues(alpha: 0.5),
-                    icon: LucideIcons.pencil,
-                    iconColor: const Color(0xFF818CF8),
-                    label: 'EDIT',
-                    labelColor: const Color(0xFF818CF8),
-                  ),
-                ),
-                Expanded(
-                  child: _SwipeActionButton(
-                    onTap: () => _afterCloseThen(widget.onDelete),
-                    background:
-                        const Color(0xFFEF4444).withValues(alpha: 0.22),
-                    borderTop:
-                        const Color(0xFFEF4444).withValues(alpha: 0.35),
-                    borderBottom:
-                        const Color(0xFFEF4444).withValues(alpha: 0.35),
-                    borderRight:
-                        const Color(0xFFEF4444).withValues(alpha: 0.35),
-                    borderRadius: const BorderRadius.only(
-                      topRight: Radius.circular(16),
-                      bottomRight: Radius.circular(16),
+            Positioned(
+              right: 0,
+              top: 0,
+              bottom: 0,
+              width: _revealWidth,
+              child: Row(
+                children: [
+                  Expanded(
+                    child: _SwipeActionButton(
+                      onTap: () => _afterCloseThen(widget.onEdit),
+                      background:
+                          const Color(0xFF6366F1).withValues(alpha: 0.28),
+                      borderTop:
+                          const Color(0xFF6366F1).withValues(alpha: 0.35),
+                      borderBottom:
+                          const Color(0xFF6366F1).withValues(alpha: 0.35),
+                      borderRight: Colors.transparent,
+                      borderRadius: BorderRadius.zero,
+                      iconBoxBg: const Color(0xFF6366F1).withValues(alpha: 0.3),
+                      iconBoxBorder:
+                          const Color(0xFF818CF8).withValues(alpha: 0.5),
+                      icon: LucideIcons.pencil,
+                      iconColor: const Color(0xFF818CF8),
+                      label: 'EDIT',
+                      labelColor: const Color(0xFF818CF8),
                     ),
-                    iconBoxBg:
-                        const Color(0xFFEF4444).withValues(alpha: 0.22),
-                    iconBoxBorder:
-                        const Color(0xFFEF4444).withValues(alpha: 0.5),
-                    icon: LucideIcons.trash2,
-                    iconColor: const Color(0xFFEF4444),
-                    label: 'DELETE',
-                    labelColor: const Color(0xFFEF4444),
                   ),
-                ),
-              ],
+                  Expanded(
+                    child: _SwipeActionButton(
+                      onTap: () => _afterCloseThen(widget.onDelete),
+                      background:
+                          const Color(0xFFEF4444).withValues(alpha: 0.22),
+                      borderTop:
+                          const Color(0xFFEF4444).withValues(alpha: 0.35),
+                      borderBottom:
+                          const Color(0xFFEF4444).withValues(alpha: 0.35),
+                      borderRight:
+                          const Color(0xFFEF4444).withValues(alpha: 0.35),
+                      borderRadius: const BorderRadius.only(
+                        topRight: Radius.circular(16),
+                        bottomRight: Radius.circular(16),
+                      ),
+                      iconBoxBg:
+                          const Color(0xFFEF4444).withValues(alpha: 0.22),
+                      iconBoxBorder:
+                          const Color(0xFFEF4444).withValues(alpha: 0.5),
+                      icon: LucideIcons.trash2,
+                      iconColor: const Color(0xFFEF4444),
+                      label: 'DELETE',
+                      labelColor: const Color(0xFFEF4444),
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
           Transform.translate(
             offset: Offset(
               widget.selectionMode ? _backDx : _offset,
@@ -326,9 +328,7 @@ class _ExpenseItemState extends State<ExpenseItem>
                       : c.bg1,
                   borderRadius: BorderRadius.circular(16),
                   border: Border.all(
-                    color: widget.selected
-                        ? const Color(0xFFC084FC)
-                        : c.border,
+                    color: widget.selected ? const Color(0xFFC084FC) : c.border,
                     width: widget.selected ? 1.6 : 1,
                   ),
                   boxShadow: widget.selected
@@ -470,26 +470,26 @@ class _ExpenseItemState extends State<ExpenseItem>
                           ),
                         ),
                         if (!widget.selectionMode) ...[
-                        const SizedBox(height: 4),
-                        Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            _SwipeHintDot(
-                              revealed: _revealed,
-                              index: 0,
-                            ),
-                            const SizedBox(width: 2),
-                            _SwipeHintDot(
-                              revealed: _revealed,
-                              index: 1,
-                            ),
-                            const SizedBox(width: 2),
-                            _SwipeHintDot(
-                              revealed: _revealed,
-                              index: 2,
-                            ),
-                          ],
-                        ),
+                          const SizedBox(height: 4),
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              _SwipeHintDot(
+                                revealed: _revealed,
+                                index: 0,
+                              ),
+                              const SizedBox(width: 2),
+                              _SwipeHintDot(
+                                revealed: _revealed,
+                                index: 1,
+                              ),
+                              const SizedBox(width: 2),
+                              _SwipeHintDot(
+                                revealed: _revealed,
+                                index: 2,
+                              ),
+                            ],
+                          ),
                         ],
                       ],
                     ),
@@ -535,45 +535,49 @@ class _SwipeActionButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        child: Container(
-          decoration: BoxDecoration(
-            color: background,
-            borderRadius: borderRadius,
-            border: Border(
-              top: BorderSide(color: borderTop),
-              bottom: BorderSide(color: borderBottom),
-              right: BorderSide(color: borderRight),
+    return Semantics(
+      button: true,
+      label: label,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          child: Container(
+            decoration: BoxDecoration(
+              color: background,
+              borderRadius: borderRadius,
+              border: Border(
+                top: BorderSide(color: borderTop),
+                bottom: BorderSide(color: borderBottom),
+                right: BorderSide(color: borderRight),
+              ),
             ),
-          ),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Container(
-                width: 34,
-                height: 34,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: iconBoxBg,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: iconBoxBorder, width: 1.5),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Container(
+                  width: 34,
+                  height: 34,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: iconBoxBg,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: iconBoxBorder, width: 1.5),
+                  ),
+                  child: Icon(icon, size: 15, color: iconColor),
                 ),
-                child: Icon(icon, size: 15, color: iconColor),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                label,
-                style: GoogleFonts.plusJakartaSans(
-                  fontSize: 9,
-                  fontWeight: FontWeight.w800,
-                  color: labelColor,
-                  letterSpacing: 0.8,
+                const SizedBox(height: 6),
+                Text(
+                  label,
+                  style: GoogleFonts.plusJakartaSans(
+                    fontSize: 9,
+                    fontWeight: FontWeight.w800,
+                    color: labelColor,
+                    letterSpacing: 0.8,
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),

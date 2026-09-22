@@ -65,7 +65,11 @@ abstract final class AppConstants {
 
   // Port 8090 on the VPS — 8080 was already allocated by another container.
   static const _localSttGatewayUrl = 'http://localhost:8090';
-  static const _prodSttGatewayUrl = 'http://72.60.219.97:8090';
+  /// Host-only form of the production STT gateway. Used by
+  /// `network_security_config.xml` so release builds permit cleartext
+  /// solely for this address (not app-wide).
+  static const prodSttGatewayHost = '72.60.219.97';
+  static const _prodSttGatewayUrl = 'http://$prodSttGatewayHost:8090';
 
   static const _envSttGatewayUrl =
       String.fromEnvironment('STT_GATEWAY_URL', defaultValue: '');

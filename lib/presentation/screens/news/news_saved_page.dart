@@ -139,19 +139,25 @@ class _NewsSavedPageState extends ConsumerState<NewsSavedPage> {
                 color: AppColors.accent,
                 backgroundColor: colors.bg1,
                 displacement: 48,
-                child: ListView(
+                child: ListView.builder(
                   physics: const AlwaysScrollableScrollPhysics(),
                   padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-                  children: [
-                    _SavedSearchField(
-                      colors: colors,
-                      controller: _searchCtrl,
-                      value: _search,
-                      onChanged: _onSearch,
-                    ),
-                    const SizedBox(height: 12),
-                    if (savedArticles.isEmpty)
-                      Padding(
+                  itemCount: 2 +
+                      (savedArticles.isEmpty || filtered.isEmpty
+                          ? 1
+                          : filtered.length),
+                  itemBuilder: (context, i) {
+                    if (i == 0) {
+                      return _SavedSearchField(
+                        colors: colors,
+                        controller: _searchCtrl,
+                        value: _search,
+                        onChanged: _onSearch,
+                      );
+                    }
+                    if (i == 1) return const SizedBox(height: 12);
+                    if (savedArticles.isEmpty) {
+                      return Padding(
                         padding: const EdgeInsets.only(top: 40),
                         child: Column(
                           children: [
@@ -172,14 +178,15 @@ class _NewsSavedPageState extends ConsumerState<NewsSavedPage> {
                               textAlign: TextAlign.center,
                               style: GoogleFonts.plusJakartaSans(
                                 fontSize: 12,
-                                color: colors.text5,
+                                color: colors.text4,
                               ),
                             ),
                           ],
                         ),
-                      )
-                    else if (filtered.isEmpty)
-                      Padding(
+                      );
+                    }
+                    if (filtered.isEmpty) {
+                      return Padding(
                         padding: const EdgeInsets.only(top: 32),
                         child: Column(
                           children: [
@@ -195,27 +202,26 @@ class _NewsSavedPageState extends ConsumerState<NewsSavedPage> {
                             ),
                           ],
                         ),
-                      )
-                    else
-                      ...filtered.map(
-                        (a) => _SavedRow(
-                          article: a,
-                          colors: colors,
-                          query: _search.trim(),
-                          onOpen: () => openNewsArticle(
-                            context: context,
-                            ref: ref,
-                            raw: a,
-                          ),
-                          onRemove: () {
-                            ArticleFollowUpStore.instance.clear(a.id);
-                            ref
-                                .read(newsControllerProvider.notifier)
-                                .deleteArticle(a.id);
-                          },
-                        ),
+                      );
+                    }
+                    final a = filtered[i - 2];
+                    return _SavedRow(
+                      article: a,
+                      colors: colors,
+                      query: _search.trim(),
+                      onOpen: () => openNewsArticle(
+                        context: context,
+                        ref: ref,
+                        raw: a,
                       ),
-                  ],
+                      onRemove: () {
+                        ArticleFollowUpStore.instance.clear(a.id);
+                        ref
+                            .read(newsControllerProvider.notifier)
+                            .deleteArticle(a.id);
+                      },
+                    );
+                  },
                 ),
               ),
             ),
@@ -345,6 +351,12 @@ class _SavedRow extends StatelessWidget {
                       : CachedNetworkImage(
                           imageUrl: article.imageUrl,
                           fit: BoxFit.cover,
+                          memCacheWidth: (72 *
+                                  MediaQuery.devicePixelRatioOf(context))
+                              .round(),
+                          memCacheHeight: (72 *
+                                  MediaQuery.devicePixelRatioOf(context))
+                              .round(),
                           placeholder: (_, __) =>
                               ColoredBox(color: colors.bg2),
                           errorWidget: (_, __, ___) =>

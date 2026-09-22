@@ -20,7 +20,7 @@ const kWatchFrequency = Duration(minutes: 15);
 /// Runs inside the WorkManager isolate. Opens its own DB connection.
 Future<void> runWatchBackgroundCheck() async {
   if (!PlatformCapabilities.canUseWorkmanager) return;
-  TLog.init();
+  TLog.init(allowRemote: false);
   final prefs = await SharedPreferences.getInstance();
   final watchPrefs = WatchPrefs(prefs);
   if (!watchPrefs.enabled) return;
@@ -65,7 +65,10 @@ Future<void> scheduleWatchChecks({bool replace = false}) async {
     frequency: kWatchFrequency,
     existingWorkPolicy:
         replace ? ExistingWorkPolicy.replace : ExistingWorkPolicy.keep,
-    constraints: Constraints(networkType: NetworkType.connected),
+    constraints: Constraints(
+      networkType: NetworkType.connected,
+      requiresBatteryNotLow: true,
+    ),
   );
 }
 

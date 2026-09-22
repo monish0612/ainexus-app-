@@ -37,6 +37,34 @@ import 'telegram_logger.dart';
 // All errors are funneled through TLog with structured tags so Telegram
 // observability is uniform with the rest of the app.
 
+/// Foreground index poll. Tombstones already support `?since=`; the index
+/// GET /api/v1/saved-searches has no `since` and no ETag (Phase 3C.3 skip).
+@visibleForTesting
+const kSavedSearchForegroundSync = Duration(seconds: 120);
+
+@visibleForTesting
+const kSavedSearchForegroundSyncMax = Duration(seconds: 600);
+
+@visibleForTesting
+const kSavedSearchNoChangeBackoffAfter = 5;
+
+/// After [noChangeStreak] unchanged index+tombstone pulls, double [current]
+/// up to [kSavedSearchForegroundSyncMax]. Matches the NAS stats backoff shape.
+@visibleForTesting
+Duration savedSearchForegroundInterval({
+  required int noChangeStreak,
+  required Duration current,
+}) {
+  if (noChangeStreak < kSavedSearchNoChangeBackoffAfter) {
+    return kSavedSearchForegroundSync;
+  }
+  final doubledMs = current.inMilliseconds * 2;
+  if (doubledMs >= kSavedSearchForegroundSyncMax.inMilliseconds) {
+    return kSavedSearchForegroundSyncMax;
+  }
+  return Duration(milliseconds: doubledMs);
+}
+
 /// One pending server write that failed and is queued for resume retry.
 class _RetryItem {
   _RetryItem({
@@ -108,18 +136,21 @@ class SavedSearchStore with WidgetsBindingObserver {
 
   Timer? _gcTimer;
 
-  /// Periodic foreground sync — fires every [_kForegroundSyncInterval] while
+  /// Periodic foreground sync — fires every [kSavedSearchForegroundSync] while
   /// the app is in the foreground (resumed). Catches the "user has the app
   /// open while another device deletes a row" scenario without requiring
   /// the user to background+foreground the app to trigger a resume sync.
   Timer? _foregroundSyncTimer;
-  static const _kForegroundSyncInterval = Duration(seconds: 30);
+  Duration _foregroundInterval = kSavedSearchForegroundSync;
+  int _noChangeStreak = 0;
+  String? _lastIndexFingerprint;
+  bool _timersWanted = false;
 
   /// Test-only knob — when true, [init] skips installing the periodic
   /// foreground sync timer. Production always leaves this false; tests
-  /// flip it on so the 30 s [Timer.periodic] doesn't keep firing in
-  /// real time during widget tests and pollute the test clock with
-  /// stale syncNow() invocations.
+  /// flip it on so the 120 s timer doesn't keep firing in real time
+  /// during widget tests and pollute the test clock with stale
+  /// syncNow() invocations.
   @visibleForTesting
   static bool debugDisablePeriodicSync = false;
 
@@ -156,6 +187,10 @@ class SavedSearchStore with WidgetsBindingObserver {
     _gcTimer = null;
     _foregroundSyncTimer?.cancel();
     _foregroundSyncTimer = null;
+    _timersWanted = false;
+    _noChangeStreak = 0;
+    _foregroundInterval = kSavedSearchForegroundSync;
+    _lastIndexFingerprint = null;
     _inFlightSync = null;
     _lastSyncAt = DateTime.fromMillisecondsSinceEpoch(0);
     if (_observerBound) {
@@ -168,7 +203,9 @@ class SavedSearchStore with WidgetsBindingObserver {
   /// it from [_pullIndexFromServer]. Exposed so the cross-device delete
   /// sync E2E test can drive it deterministically.
   @visibleForTesting
-  Future<void> debugPullTombstones() => _pullTombstonesFromServer();
+  Future<void> debugPullTombstones() async {
+    await _pullTombstonesFromServer();
+  }
 
   /// Test-only invocation of the GC sweeper.
   @visibleForTesting
@@ -194,22 +231,7 @@ class SavedSearchStore with WidgetsBindingObserver {
     // Background work — only spin these up when an API client is present.
     // Tests pass a null api to keep the store synchronous and timer-free.
     if (api != null) {
-      _gcTimer ??= Timer.periodic(const Duration(minutes: 30), (_) {
-        unawaited(_runGc());
-      });
-      // Periodic foreground sync — pulls the index + tombstones every
-      // 30 s while the app is in the foreground. This is what makes
-      // cross-device delete sync feel REAL-TIME without needing the
-      // user to background+foreground the app: if Device B deletes a
-      // row, Device A picks it up within 30 s while still on screen.
-      // Tests can disable this via [debugDisablePeriodicSync] so the
-      // real-time periodic firing doesn't escape the testWidgets clock.
-      if (!debugDisablePeriodicSync) {
-        _foregroundSyncTimer ??=
-            Timer.periodic(_kForegroundSyncInterval, (_) {
-          unawaited(syncNow(reason: 'periodic-foreground'));
-        });
-      }
+      _startTimers();
       if (!_initialFetchDone) {
         _initialFetchDone = true;
         // Eager sweep on cold launch. The lifecycle observer's `resumed`
@@ -226,6 +248,37 @@ class SavedSearchStore with WidgetsBindingObserver {
     }
   }
 
+  void _stopTimers() {
+    _timersWanted = false;
+    _gcTimer?.cancel();
+    _gcTimer = null;
+    _foregroundSyncTimer?.cancel();
+    _foregroundSyncTimer = null;
+  }
+
+  void _startTimers() {
+    if (_api == null) return;
+    _stopTimers();
+    _timersWanted = true;
+    _gcTimer = Timer.periodic(const Duration(minutes: 30), (_) {
+      unawaited(_runGc());
+    });
+    // Periodic foreground sync — pulls the index + tombstones while the
+    // app is resumed. Tests disable this via [debugDisablePeriodicSync].
+    if (!debugDisablePeriodicSync) {
+      _armForegroundSync();
+    }
+  }
+
+  void _armForegroundSync() {
+    _foregroundSyncTimer?.cancel();
+    if (!_timersWanted || debugDisablePeriodicSync || _api == null) return;
+    _foregroundSyncTimer = Timer(_foregroundInterval, () async {
+      await syncNow(reason: 'periodic-foreground');
+      if (_timersWanted) _armForegroundSync();
+    });
+  }
+
   /// Explicit cold-start hook (invoked from the Riverpod provider, NOT from
   /// [init], so unit tests that call [init] directly are unaffected): hydrate
   /// the persisted pending-clear flag and, if an offline nuke from a prior
@@ -238,7 +291,19 @@ class SavedSearchStore with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state != AppLifecycleState.resumed) return;
+    switch (state) {
+      case AppLifecycleState.inactive:
+      case AppLifecycleState.hidden:
+      case AppLifecycleState.paused:
+      case AppLifecycleState.detached:
+        _stopTimers();
+        return;
+      case AppLifecycleState.resumed:
+        _noChangeStreak = 0;
+        _foregroundInterval = kSavedSearchForegroundSync;
+        _startTimers();
+        break;
+    }
     // Drain the retry queue + run GC + pull fresh server index. All three
     // are best-effort; failures are logged but never thrown.
     unawaited(_runGc());
@@ -268,7 +333,7 @@ class SavedSearchStore with WidgetsBindingObserver {
   /// Call this:
   ///   • On cold start (already done in [init])
   ///   • On app resume (already done in [didChangeAppLifecycleState])
-  ///   • Every 30 s while the app is foreground (periodic timer in [init])
+  ///   • Every 120 s while the app is foreground (periodic timer in [init]),
   ///   • When the user opens the History sheet (instant cross-device
   ///     freshness when they navigate to the view)
   ///   • When the user opens a saved-search detail (so a stale row that
@@ -327,12 +392,25 @@ class SavedSearchStore with WidgetsBindingObserver {
       if (_pendingFullClear) await _retryPendingFullClear();
 
       // Both calls are individually try/catch'd inside the method bodies
-      // so one failing won't poison the other. Future.wait completes
-      // when BOTH are done.
-      await Future.wait<void>([
-        _pullIndexFromServer(),
-        _pullTombstonesFromServer(),
-      ]);
+      // so one failing won't poison the other. Start both before awaiting
+      // so wall-time stays max(t_index, t_tombstones).
+      final indexFuture = _pullIndexFromServer();
+      final tombFuture = _pullTombstonesFromServer();
+      final indexFp = await indexFuture;
+      final tombs = await tombFuture;
+      if (indexFp != null && tombs != null) {
+        if (indexFp == _lastIndexFingerprint && tombs == 0) {
+          _noChangeStreak++;
+          _foregroundInterval = savedSearchForegroundInterval(
+            noChangeStreak: _noChangeStreak,
+            current: _foregroundInterval,
+          );
+        } else {
+          _noChangeStreak = 0;
+          _foregroundInterval = kSavedSearchForegroundSync;
+        }
+        _lastIndexFingerprint = indexFp;
+      }
       TLog.d(_tag, 'syncNow($reason) ✓ in ${stopwatch.elapsedMilliseconds}ms');
     } catch (e) {
       TLog.w(_tag, 'syncNow($reason) failed', error: e);
@@ -966,18 +1044,27 @@ class SavedSearchStore with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _pullIndexFromServer() async {
+  Future<String?> _pullIndexFromServer() async {
     final api = _api;
     final db = _db;
-    if (api == null || db == null) return;
+    if (api == null || db == null) return null;
     try {
+      // TODO(phase-3C.3): GET /api/v1/saved-searches has no `since` and no
+      // ETag. Conditional / delta requests would skip the body when the
+      // index is unchanged; skipped until the backend grows that support.
       final response = await api.get<Object?>(ApiEndpoints.savedSearches);
       final data = response.data;
-      if (data is! List) return;
+      if (data is! List) return null;
 
+      final fingerprint = StringBuffer();
       for (final item in data) {
         if (item is! Map) continue;
         final raw = item.map((k, v) => MapEntry(k.toString(), v));
+        fingerprint
+          ..write(raw['id'])
+          ..write(':')
+          ..write(raw['updatedAt'] ?? raw['updated_at'] ?? '')
+          ..write('|');
         final entry = SavedSearchEntry.fromJson(raw);
         if (entry.id.isEmpty) continue;
         // Skip rows the user has soft-deleted locally — local intent wins
@@ -1003,12 +1090,15 @@ class SavedSearchStore with WidgetsBindingObserver {
             );
       }
       TLog.i(_tag, 'index pull ✓ (${data.length} rows)');
+      return fingerprint.toString();
     } on DioException catch (e) {
       if (e.response?.statusCode != 404) {
         TLog.w(_tag, 'index pull failed', error: e);
       }
+      return null;
     } catch (e) {
       TLog.w(_tag, 'index pull parse error', error: e);
+      return null;
     }
   }
 
@@ -1026,10 +1116,10 @@ class SavedSearchStore with WidgetsBindingObserver {
   ///     on older backends while still surfacing the diagnostic.
   ///   • All failures are swallowed (logged) and never propagated to
   ///     the UI — the rest of the app can carry on offline.
-  Future<void> _pullTombstonesFromServer() async {
+  Future<int?> _pullTombstonesFromServer() async {
     final api = _api;
     final db = _db;
-    if (api == null || db == null) return;
+    if (api == null || db == null) return null;
     try {
       final since = await _getTombstoneWatermark();
       final url = since == null
@@ -1037,8 +1127,8 @@ class SavedSearchStore with WidgetsBindingObserver {
           : '${ApiEndpoints.savedSearchTombstones}?since=${Uri.encodeQueryComponent(since)}';
       final response = await api.get<Object?>(url);
       final data = response.data;
-      if (data is! List) return;
-      if (data.isEmpty) return;
+      if (data is! List) return null;
+      if (data.isEmpty) return 0;
 
       String maxDeletedAt = since ?? '';
       int applied = 0;
@@ -1068,14 +1158,17 @@ class SavedSearchStore with WidgetsBindingObserver {
         TLog.i(_tag,
             'tombstones ✓ ($applied applied, watermark=$maxDeletedAt)');
       }
+      return applied;
     } on DioException catch (e) {
       if (e.response?.statusCode == 404) {
         TLog.w(_tag, 'tombstones 404 — endpoint not deployed yet');
-        return;
+        return null;
       }
       TLog.w(_tag, 'tombstones pull failed', error: e);
+      return null;
     } catch (e) {
       TLog.w(_tag, 'tombstones parse error', error: e);
+      return null;
     }
   }
 

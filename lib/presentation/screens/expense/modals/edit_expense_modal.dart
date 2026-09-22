@@ -8,6 +8,7 @@ import 'package:lucide_icons/lucide_icons.dart';
 
 import '../../../../core/services/credit_card_forecast_engine.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/utils/amount_input_formatter.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../../../core/utils/expense_logged_at.dart';
 import '../../../../data/services/expense_category_memory.dart';
@@ -288,11 +289,6 @@ class _EditExpenseSheetState extends State<_EditExpenseSheet>
     Navigator.of(context).pop();
   }
 
-  bool get _valid {
-    final n = double.tryParse(_amountCtrl.text.replaceAll(',', ''));
-    return n != null && n > 0 && _descCtrl.text.trim().isNotEmpty;
-  }
-
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).extension<AppColors>()!;
@@ -403,6 +399,7 @@ class _EditExpenseSheetState extends State<_EditExpenseSheet>
                               keyboardType: const TextInputType.numberWithOptions(
                                 decimal: true,
                               ),
+                              inputFormatters: const [AmountInputFormatter()],
                               style: textTheme.headlineSmall?.copyWith(
                                 color: colors.text,
                                 fontWeight: FontWeight.w700,
@@ -881,7 +878,7 @@ class _EditExpenseSheetState extends State<_EditExpenseSheet>
                           style: GoogleFonts.plusJakartaSans(
                             fontSize: 9,
                             fontWeight: FontWeight.w600,
-                            color: colors.text5,
+                            color: colors.text4,
                             letterSpacing: 0.5,
                           ),
                         ),
@@ -902,7 +899,7 @@ class _EditExpenseSheetState extends State<_EditExpenseSheet>
                         hintText: 'Add a reminder or note',
                         hintStyle: GoogleFonts.plusJakartaSans(
                           fontSize: 12,
-                          color: colors.text5,
+                          color: colors.text4,
                         ),
                         prefixIcon: Padding(
                           padding: const EdgeInsets.only(left: 12, right: 8),

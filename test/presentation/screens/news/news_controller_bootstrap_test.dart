@@ -18,10 +18,10 @@ import 'package:ai_nexus/data/repositories/news_repository.dart';
 import 'package:ai_nexus/presentation/screens/news/news_controller.dart';
 
 class _FakeNewsApi extends ApiClient {
-  _FakeNewsApi(this.articles, {this.requireToken = false});
+  _FakeNewsApi(this.articles);
 
   List<Map<String, dynamic>> articles;
-  bool requireToken;
+  bool requireToken = false;
   int unauthorizedUntilGet = 0;
   int gets = 0;
   int posts = 0;
@@ -131,7 +131,8 @@ void main() {
 
     final articles = controller.state.valueOrNull ?? const [];
     expect(controller.state.hasError, isFalse);
-    expect(articles.map((a) => a.id), containsAll(['fin-1', 'ai-1', 'mov-1', 'saved-1']));
+    expect(articles.map((a) => a.id),
+        containsAll(['fin-1', 'ai-1', 'mov-1', 'saved-1']));
     expect(api.gets, greaterThan(0));
     expect(api.posts, 0, reason: 'first load is GET /news, not POST /refresh');
   });

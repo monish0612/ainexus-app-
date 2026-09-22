@@ -338,6 +338,20 @@ void main() {
     expect(shouldKeepPollingNarration(ready), isFalse);
     expect(shouldKeepPollingNarration(breaker), isFalse);
 
+    expect(narrationPollInterval(0), const Duration(seconds: 2));
+    expect(narrationPollInterval(1), const Duration(seconds: 2));
+    expect(narrationPollInterval(2), const Duration(seconds: 5));
+    expect(narrationPollInterval(3), const Duration(seconds: 5));
+    expect(narrationPollInterval(4), const Duration(seconds: 10));
+    expect(
+      narrationShouldOfferUnreachableFallback(const Duration(seconds: 44)),
+      isFalse,
+    );
+    expect(
+      narrationShouldOfferUnreachableFallback(const Duration(seconds: 45)),
+      isTrue,
+    );
+
     expect(
       whichListenSurface(job: unknown, localReady: true, booted: false),
       ListenSurface.server,

@@ -22,9 +22,13 @@ import '../../../core/services/followup_history.dart';
 import '../../../core/services/saved_search_store.dart';
 import '../../../core/services/telegram_logger.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../../core/theme/app_radii.dart';
+import '../../../core/theme/app_spacing.dart';
+import '../../../core/utils/reduced_motion.dart';
 import '../../../data/services/tutor_ai_service.dart';
 import '../../../domain/entities/tutor_entities.dart';
 import '../../widgets/block_selectable.dart';
+import '../../widgets/nexus_loader.dart';
 import '../../widgets/provider_picker.dart';
 import '../../widgets/voice_input_button.dart';
 import '../../screens/settings/settings_controller.dart';
@@ -868,7 +872,7 @@ class _SearchFollowUpFabState extends State<SearchFollowUpFab>
           shape: BoxShape.circle,
           boxShadow: [
             BoxShadow(
-              color: const Color(0xFF4285F4).withValues(alpha: 0.35),
+              color: AppColors.geminiBlue.withValues(alpha: 0.35),
               blurRadius: 16 + _pulseAnim.value,
               spreadRadius: _pulseAnim.value / 2,
               offset: const Offset(0, 4),
@@ -894,7 +898,7 @@ class _SearchFollowUpFabState extends State<SearchFollowUpFab>
               gradient: LinearGradient(
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
-                colors: [Color(0xFF4285F4), Color(0xFF6366F1)],
+                colors: [AppColors.geminiBlue, AppColors.composerGradientStart],
               ),
             ),
             child: const Icon(
@@ -1329,7 +1333,7 @@ class _SearchFollowUpChatState extends ConsumerState<_SearchFollowUpChat>
       backgroundColor: const Color(0xFF1E1B4B),
       content: Row(
         children: [
-          const Icon(LucideIcons.brain, size: 16, color: Color(0xFFC084FC)),
+          const Icon(LucideIcons.brain, size: 16, color: AppColors.deepViolet),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
@@ -1580,9 +1584,14 @@ class _SearchFollowUpChatState extends ConsumerState<_SearchFollowUpChat>
     final bottomPad = MediaQuery.viewInsetsOf(context).bottom;
     final safePad = MediaQuery.viewPaddingOf(context).bottom;
 
+    final still = reducedMotion(context);
+
     return AnimatedBuilder(
       animation: _entryAnim,
       builder: (context, child) {
+        // Reduced motion: the sheet is simply there. No rise, no fade — the
+        // 350ms budget of the surrounding layout is unchanged.
+        if (still) return child!;
         final slide = Tween<double>(begin: 40, end: 0)
             .animate(CurvedAnimation(
                 parent: _entryAnim, curve: Curves.easeOutCubic))
@@ -1593,7 +1602,7 @@ class _SearchFollowUpChatState extends ConsumerState<_SearchFollowUpChat>
         );
       },
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 350),
+        duration: still ? Duration.zero : const Duration(milliseconds: 350),
         curve: Curves.easeOutCubic,
         height: _maximized
             ? MediaQuery.sizeOf(context).height
@@ -1601,7 +1610,7 @@ class _SearchFollowUpChatState extends ConsumerState<_SearchFollowUpChat>
         decoration: BoxDecoration(
           color: colors.bg,
           borderRadius: BorderRadius.vertical(
-            top: Radius.circular(_maximized ? 0 : 24),
+            top: Radius.circular(_maximized ? 0 : AppRadii.sheet),
           ),
           border: _maximized
               ? null
@@ -1610,7 +1619,7 @@ class _SearchFollowUpChatState extends ConsumerState<_SearchFollowUpChat>
         child: Column(
           children: [
             AnimatedContainer(
-              duration: const Duration(milliseconds: 350),
+              duration: still ? Duration.zero : const Duration(milliseconds: 350),
               curve: Curves.easeOutCubic,
               height: _maximized
                   ? MediaQuery.viewPaddingOf(context).top + 4
@@ -1647,9 +1656,7 @@ class _SearchFollowUpChatState extends ConsumerState<_SearchFollowUpChat>
             height: 32,
             decoration: const BoxDecoration(
               shape: BoxShape.circle,
-              gradient: LinearGradient(
-                colors: [Color(0xFF4285F4), Color(0xFF6366F1)],
-              ),
+              gradient: AppColors.geminiGradient,
             ),
             child: const Icon(LucideIcons.sparkles,
                 size: 14, color: Colors.white),
@@ -1683,18 +1690,9 @@ class _SearchFollowUpChatState extends ConsumerState<_SearchFollowUpChat>
             padding: EdgeInsets.only(right: 4),
             child: SearchAnswerTextSizeControl(),
           ),
-          if (_sending)
-            const Padding(
-              padding: EdgeInsets.only(right: 4),
-              child: SizedBox(
-                width: 16,
-                height: 16,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: Color(0xFF4285F4),
-                ),
-              ),
-            ),
+          // The in-flight state is carried by the NexusLoader in the pending
+          // bubble plus the red stop button — a third bare spinner up here was
+          // only ever noise.
           _MaximizeButton(
             maximized: _maximized,
             colors: colors,
@@ -1720,13 +1718,13 @@ class _SearchFollowUpChatState extends ConsumerState<_SearchFollowUpChat>
             height: 48,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: const Color(0xFF4285F4).withValues(alpha: 0.08),
+              color: AppColors.geminiBlue.withValues(alpha: 0.08),
               border: Border.all(
-                color: const Color(0xFF4285F4).withValues(alpha: 0.2),
+                color: AppColors.geminiBlue.withValues(alpha: 0.2),
               ),
             ),
             child: const Icon(LucideIcons.messageCircle,
-                size: 20, color: Color(0xFF4285F4)),
+                size: 20, color: AppColors.geminiBlue),
           ),
           const SizedBox(height: 12),
           Text(
@@ -1792,26 +1790,20 @@ class _SearchFollowUpChatState extends ConsumerState<_SearchFollowUpChat>
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const _TypingDots(),
-                      const SizedBox(width: 10),
-                      Flexible(
-                        child: AnimatedSwitcher(
-                          duration: const Duration(milliseconds: 300),
-                          child: Text(
-                            _loadingPhase,
-                            key: ValueKey(_loadingPhase),
-                            style: GoogleFonts.plusJakartaSans(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w600,
-                              color: const Color(0xFF4285F4),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
+                  // One wait primitive instead of typing dots + a phase
+                  // AnimatedSwitcher + an indeterminate bar. `_loadingPhase` is
+                  // still the same `_litePhases` / `_deepPhases` /
+                  // `_extendedPhases` copy this sheet has always shown, and it
+                  // is still this sheet's 5-second timer that advances it.
+                  NexusLoader(
+                    variant: _useDeepModel
+                        ? NexusLoaderVariant.think
+                        : NexusLoaderVariant.research,
+                    tone: _useDeepModel
+                        ? NexusLoaderTone.deep
+                        : NexusLoaderTone.lite,
+                    label: _loadingPhase.isEmpty ? null : _loadingPhase,
+                    size: 72,
                   ),
                   const SizedBox(height: 10),
                   Row(
@@ -1826,8 +1818,8 @@ class _SearchFollowUpChatState extends ConsumerState<_SearchFollowUpChat>
                             ? LucideIcons.bot
                             : LucideIcons.sparkles,
                         _useXGrok
-                            ? const Color(0xFFE8453C)
-                            : const Color(0xFF4285F4),
+                            ? AppColors.xgrokRed
+                            : AppColors.geminiBlue,
                       ),
                       if (_elapsedText.isNotEmpty) ...[
                         const Spacer(),
@@ -1841,17 +1833,6 @@ class _SearchFollowUpChatState extends ConsumerState<_SearchFollowUpChat>
                         ),
                       ],
                     ],
-                  ),
-                  const SizedBox(height: 8),
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(4),
-                    child: LinearProgressIndicator(
-                      minHeight: 3,
-                      backgroundColor:
-                          const Color(0xFF4285F4).withValues(alpha: 0.1),
-                      valueColor: const AlwaysStoppedAnimation<Color>(
-                          Color(0xFF4285F4)),
-                    ),
                   ),
                   if (_useDeepModel) ...[
                     const SizedBox(height: 8),
@@ -1892,7 +1873,7 @@ class _SearchFollowUpChatState extends ConsumerState<_SearchFollowUpChat>
               child: Container(
                 padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF4285F4).withValues(alpha: 0.12),
+                  color: AppColors.geminiBlue.withValues(alpha: 0.12),
                   borderRadius: const BorderRadius.only(
                     topLeft: Radius.circular(16),
                     topRight: Radius.circular(4),
@@ -1900,7 +1881,7 @@ class _SearchFollowUpChatState extends ConsumerState<_SearchFollowUpChat>
                     bottomRight: Radius.circular(16),
                   ),
                   border: Border.all(
-                    color: const Color(0xFF4285F4).withValues(alpha: 0.2),
+                    color: AppColors.geminiBlue.withValues(alpha: 0.2),
                   ),
                 ),
                 child: ArticleSelectionScope(
@@ -1937,7 +1918,7 @@ class _SearchFollowUpChatState extends ConsumerState<_SearchFollowUpChat>
                   padding: const EdgeInsets.all(14),
                   decoration: BoxDecoration(
                     color: isError
-                        ? const Color(0xFFFF6B6B).withValues(alpha: 0.08)
+                        ? colors.danger.withValues(alpha: 0.08)
                         : colors.bg2,
                     borderRadius: const BorderRadius.only(
                       topLeft: Radius.circular(4),
@@ -1947,7 +1928,7 @@ class _SearchFollowUpChatState extends ConsumerState<_SearchFollowUpChat>
                     ),
                     border: Border.all(
                       color: isError
-                          ? const Color(0xFFFF6B6B).withValues(alpha: 0.2)
+                          ? colors.danger.withValues(alpha: 0.2)
                           : colors.border2,
                     ),
                   ),
@@ -1958,7 +1939,7 @@ class _SearchFollowUpChatState extends ConsumerState<_SearchFollowUpChat>
                           style: GoogleFonts.plusJakartaSans(
                             fontSize: 14,
                             height: 1.7,
-                            color: const Color(0xFFFF6B6B),
+                            color: colors.danger,
                           ),
                         ),
                         )
@@ -1994,7 +1975,7 @@ class _SearchFollowUpChatState extends ConsumerState<_SearchFollowUpChat>
                             colors,
                             '${msg.sources.length} sources',
                             LucideIcons.link,
-                            const Color(0xFF34D399),
+                            colors.success,
                           ),
                       ],
                     ),
@@ -2009,7 +1990,7 @@ class _SearchFollowUpChatState extends ConsumerState<_SearchFollowUpChat>
   }
 
   MarkdownStyleSheet _chatMarkdownStyle(AppColors colors) {
-    const accent = Color(0xFF4285F4);
+    const accent = AppColors.geminiBlue;
     return MarkdownStyleSheet(
       p: GoogleFonts.plusJakartaSans(
         fontSize: 14,
@@ -2117,9 +2098,7 @@ class _SearchFollowUpChatState extends ConsumerState<_SearchFollowUpChat>
       height: 28,
       decoration: const BoxDecoration(
         shape: BoxShape.circle,
-        gradient: LinearGradient(
-          colors: [Color(0xFF4285F4), Color(0xFF6366F1)],
-        ),
+        gradient: AppColors.geminiGradient,
       ),
       child: const Icon(LucideIcons.sparkles, size: 12, color: Colors.white),
     );
@@ -2155,8 +2134,7 @@ class _SearchFollowUpChatState extends ConsumerState<_SearchFollowUpChat>
   Widget _modelChip(AppColors colors, String model) {
     final isLite = model.toLowerCase().contains('lite') ||
         model.toLowerCase().contains('flash');
-    final color =
-        isLite ? const Color(0xFF4285F4) : const Color(0xFFC084FC);
+    final color = isLite ? colors.modeLite : colors.modeDeep;
     final icon = isLite ? LucideIcons.zap : LucideIcons.brain;
     final label = isLite ? 'Lite' : 'Deep';
 
@@ -2191,6 +2169,7 @@ class _SearchFollowUpChatState extends ConsumerState<_SearchFollowUpChat>
   }
 
   Widget _buildInput(AppColors colors, double bottomPad) {
+    final still = reducedMotion(context);
     return Container(
       padding: EdgeInsets.fromLTRB(16, 8, 12, bottomPad + 10),
       decoration: BoxDecoration(
@@ -2212,13 +2191,13 @@ class _SearchFollowUpChatState extends ConsumerState<_SearchFollowUpChat>
                       id: 'gemini',
                       label: 'Gemini',
                       icon: LucideIcons.sparkles,
-                      color: Color(0xFF4285F4),
+                      color: AppColors.geminiBlue,
                     ),
                     ProviderOption(
                       id: 'xgrok',
                       label: 'xGrok',
                       icon: LucideIcons.bot,
-                      color: Color(0xFFE8453C),
+                      color: AppColors.xgrokRed,
                     ),
                   ],
                   selectedId: _useXGrok ? 'xgrok' : 'gemini',
@@ -2235,92 +2214,110 @@ class _SearchFollowUpChatState extends ConsumerState<_SearchFollowUpChat>
             ],
           ),
           const SizedBox(height: 8),
-          ClipRect(
-            child: BackdropFilter(
-              filter: ui.ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Container(
-                      decoration: BoxDecoration(
-                        color: colors.bg2,
-                        borderRadius: BorderRadius.circular(24),
-                        border: Border.all(color: colors.border),
-                      ),
-                      child: TextField(
-                        controller: _ctrl,
-                        focusNode: _focusNode,
-                        maxLines: 4,
-                        minLines: 1,
-                        textInputAction: TextInputAction.send,
-                        onSubmitted: (_) => _send(),
-                        style: GoogleFonts.plusJakartaSans(
-                          fontSize: 14,
-                          color: colors.text,
+          // The blur is bounded to the field's own rounded rect. It used to
+          // wrap the whole Row, which meant a full-width `saveLayer` on every
+          // frame the user typed. Same glass, a fraction of the cost.
+          RepaintBoundary(
+            child: Row(
+              children: [
+                Expanded(
+                  child: ClipRRect(
+                    borderRadius: AppRadii.brSheet,
+                    child: BackdropFilter(
+                      filter: ui.ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: colors.bg2,
+                          borderRadius: AppRadii.brSheet,
+                          border: Border.all(color: colors.border),
                         ),
-                        decoration: InputDecoration(
-                          hintText: 'Ask a follow-up question…',
-                          hintStyle: GoogleFonts.plusJakartaSans(
+                        child: TextField(
+                          controller: _ctrl,
+                          focusNode: _focusNode,
+                          maxLines: 4,
+                          minLines: 1,
+                          textInputAction: TextInputAction.send,
+                          onSubmitted: (_) => _send(),
+                          style: GoogleFonts.plusJakartaSans(
                             fontSize: 14,
-                            color: colors.text4,
+                            color: colors.text,
                           ),
-                          border: InputBorder.none,
-                          contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 16, vertical: 10),
-                          isDense: true,
+                          decoration: InputDecoration(
+                            hintText: 'Ask a follow-up question…',
+                            hintStyle: GoogleFonts.plusJakartaSans(
+                              fontSize: 14,
+                              color: colors.text4,
+                            ),
+                            hintMaxLines: 2,
+                            border: InputBorder.none,
+                            contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 16, vertical: 14),
+                            isDense: true,
+                          ),
                         ),
                       ),
                     ),
                   ),
-                  const SizedBox(width: 6),
-                  VoiceInputButton(
-                    controller: _ctrl,
-                    colors: colors,
-                    disabled: _sending,
-                    tag: 'SearchVoice',
-                    onListeningChanged: (v) {
-                      if (mounted) setState(() => _voiceListening = v);
-                    },
-                  ),
-                  const SizedBox(width: 6),
-                  GestureDetector(
-                    onTap: _voiceListening
-                        ? null
-                        : (_sending ? _cancel : _send),
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 200),
-                      width: 40,
-                      height: 40,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: _voiceListening
-                            ? colors.bg3
-                            : (_sending
-                                ? const Color(0xFFEF4444)
-                                : const Color(0xFF4285F4)),
-                      ),
-                      child: _sending
-                          ? Center(
-                              child: Container(
-                                width: 12,
-                                height: 12,
-                                decoration: BoxDecoration(
-                                  color: Colors.white,
-                                  borderRadius: BorderRadius.circular(2),
+                ),
+                const SizedBox(width: 6),
+                VoiceInputButton(
+                  controller: _ctrl,
+                  colors: colors,
+                  disabled: _sending,
+                  tag: 'SearchVoice',
+                  onListeningChanged: (v) {
+                    if (mounted) setState(() => _voiceListening = v);
+                  },
+                ),
+                const SizedBox(width: 6),
+                Semantics(
+                  button: true,
+                  enabled: !_voiceListening,
+                  label: _sending
+                      ? 'Stop the answer in progress'
+                      : 'Send follow-up question',
+                  onTap: _voiceListening ? null : (_sending ? _cancel : _send),
+                  child: ExcludeSemantics(
+                    child: GestureDetector(
+                      onTap: _voiceListening
+                          ? null
+                          : (_sending ? _cancel : _send),
+                      child: AnimatedContainer(
+                        duration:
+                            still ? Duration.zero : const Duration(milliseconds: 200),
+                        width: AppSpacing.tapTarget,
+                        height: AppSpacing.tapTarget,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: _voiceListening
+                              ? colors.bg3
+                              : (_sending
+                                  ? colors.danger
+                                  : AppColors.geminiBlue),
+                        ),
+                        child: _sending
+                            ? Center(
+                                child: Container(
+                                  width: 12,
+                                  height: 12,
+                                  decoration: BoxDecoration(
+                                    color: Colors.white,
+                                    borderRadius: BorderRadius.circular(2),
+                                  ),
                                 ),
+                              )
+                            : Icon(
+                                LucideIcons.send,
+                                size: 18,
+                                color: _voiceListening
+                                    ? colors.text5
+                                    : Colors.white,
                               ),
-                            )
-                          : Icon(
-                              LucideIcons.send,
-                              size: 16,
-                              color: _voiceListening
-                                  ? colors.text5
-                                  : Colors.white,
-                            ),
+                      ),
                     ),
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
           ),
         ],
@@ -2329,44 +2326,63 @@ class _SearchFollowUpChatState extends ConsumerState<_SearchFollowUpChat>
   }
 
   Widget _buildModelToggle(AppColors colors) {
-    const liteColor = Color(0xFF4285F4);
-    const deepColor = Color(0xFFC084FC);
+    final liteColor = colors.modeLite;
+    final deepColor = colors.modeDeep;
+    final still = reducedMotion(context);
 
-    return GestureDetector(
-      onTap: _sending
-          ? null
-          : () {
-              HapticFeedback.selectionClick();
-              setState(() => _useDeepModel = !_useDeepModel);
-            },
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 250),
-        curve: Curves.easeOutCubic,
-        padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 3),
-        decoration: BoxDecoration(
-          color: colors.bg2,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: colors.border),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _toggleChip(
-              label: 'Lite',
-              icon: LucideIcons.zap,
-              active: !_useDeepModel,
-              color: liteColor,
-              colors: colors,
+    return Semantics(
+      button: true,
+      enabled: !_sending,
+      toggled: _useDeepModel,
+      label: _useDeepModel
+          ? 'Answer depth: Deep (slower, thorough)'
+          : 'Answer depth: Lite (faster)',
+      child: GestureDetector(
+        onTap: _sending
+            ? null
+            : () {
+                HapticFeedback.selectionClick();
+                setState(() => _useDeepModel = !_useDeepModel);
+              },
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: AppSpacing.tapTarget),
+          child: Center(
+            widthFactor: 1,
+            heightFactor: 1,
+            child: AnimatedContainer(
+              duration:
+                  still ? Duration.zero : const Duration(milliseconds: 250),
+              curve: Curves.easeOutCubic,
+              padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 3),
+              decoration: BoxDecoration(
+                color: colors.bg2,
+                borderRadius: AppRadii.brLg,
+                border: Border.all(color: colors.border),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _toggleChip(
+                    label: 'Lite',
+                    icon: LucideIcons.zap,
+                    active: !_useDeepModel,
+                    color: liteColor,
+                    colors: colors,
+                    still: still,
+                  ),
+                  const SizedBox(width: 2),
+                  _toggleChip(
+                    label: 'Deep',
+                    icon: LucideIcons.brain,
+                    active: _useDeepModel,
+                    color: deepColor,
+                    colors: colors,
+                    still: still,
+                  ),
+                ],
+              ),
             ),
-            const SizedBox(width: 2),
-            _toggleChip(
-              label: 'Deep',
-              icon: LucideIcons.brain,
-              active: _useDeepModel,
-              color: deepColor,
-              colors: colors,
-            ),
-          ],
+          ),
         ),
       ),
     );
@@ -2378,14 +2394,15 @@ class _SearchFollowUpChatState extends ConsumerState<_SearchFollowUpChat>
     required bool active,
     required Color color,
     required AppColors colors,
+    required bool still,
   }) {
     return AnimatedContainer(
-      duration: const Duration(milliseconds: 250),
+      duration: still ? Duration.zero : const Duration(milliseconds: 250),
       curve: Curves.easeOutCubic,
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
       decoration: BoxDecoration(
         color: active ? color.withValues(alpha: 0.15) : Colors.transparent,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: AppRadii.brCard,
         border: Border.all(
           color: active ? color.withValues(alpha: 0.35) : Colors.transparent,
         ),
@@ -2409,67 +2426,6 @@ class _SearchFollowUpChatState extends ConsumerState<_SearchFollowUpChat>
           ),
         ],
       ),
-    );
-  }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-//  TYPING DOTS ANIMATION
-// ═══════════════════════════════════════════════════════════════════════════════
-
-class _TypingDots extends StatefulWidget {
-  const _TypingDots();
-
-  @override
-  State<_TypingDots> createState() => _TypingDotsState();
-}
-
-class _TypingDotsState extends State<_TypingDots>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _ctrl;
-
-  @override
-  void initState() {
-    super.initState();
-    _ctrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1200),
-    )..repeat();
-  }
-
-  @override
-  void dispose() {
-    _ctrl.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: _ctrl,
-      builder: (context, _) {
-        return Row(
-          mainAxisSize: MainAxisSize.min,
-          children: List.generate(3, (i) {
-            final delay = i * 0.2;
-            final t = ((_ctrl.value - delay) % 1.0).clamp(0.0, 1.0);
-            final y = -3.0 * (t < 0.5 ? t * 2 : (1 - t) * 2);
-            return Transform.translate(
-              offset: Offset(0, y),
-              child: Container(
-                width: 6,
-                height: 6,
-                margin: EdgeInsets.only(right: i < 2 ? 3 : 0),
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: const Color(0xFF4285F4)
-                      .withValues(alpha: 0.4 + 0.6 * (1 - (y.abs() / 3))),
-                ),
-              ),
-            );
-          }),
-        );
-      },
     );
   }
 }
@@ -2529,12 +2485,12 @@ class _MaximizeButtonState extends State<_MaximizeButton>
           height: 32,
           decoration: BoxDecoration(
             color: widget.maximized
-                ? const Color(0xFF4285F4).withValues(alpha: 0.14)
+                ? AppColors.geminiBlue.withValues(alpha: 0.14)
                 : widget.colors.bg3,
             borderRadius: BorderRadius.circular(10),
             border: Border.all(
               color: widget.maximized
-                  ? const Color(0xFF4285F4).withValues(alpha: 0.3)
+                  ? AppColors.geminiBlue.withValues(alpha: 0.3)
                   : widget.colors.border,
             ),
           ),
@@ -2546,7 +2502,7 @@ class _MaximizeButtonState extends State<_MaximizeButton>
               key: ValueKey(widget.maximized),
               size: 14,
               color: widget.maximized
-                  ? const Color(0xFF4285F4)
+                  ? AppColors.geminiBlue
                   : widget.colors.text3,
             ),
           ),

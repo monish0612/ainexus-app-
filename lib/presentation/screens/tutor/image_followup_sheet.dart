@@ -20,9 +20,13 @@ import '../../../core/services/background_task_coordinator.dart';
 import '../../../core/services/followup_history.dart';
 import '../../../core/services/telegram_logger.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../../core/theme/app_radii.dart';
+import '../../../core/theme/app_spacing.dart';
+import '../../../core/utils/reduced_motion.dart';
 import '../../../data/services/tutor_ai_service.dart';
 import '../../../domain/entities/tutor_entities.dart';
 import '../../widgets/block_selectable.dart';
+import '../../widgets/nexus_loader.dart';
 import '../../widgets/provider_picker.dart';
 import '../../widgets/voice_input_button.dart';
 import '../settings/settings_controller.dart';
@@ -680,7 +684,7 @@ class _ImageFollowUpFabState extends State<ImageFollowUpFab>
           shape: BoxShape.circle,
           boxShadow: [
             BoxShadow(
-              color: const Color(0xFF8B5CF6).withValues(alpha: 0.35),
+              color: AppColors.composerGradientEnd.withValues(alpha: 0.35),
               blurRadius: 16 + _pulseAnim.value,
               spreadRadius: _pulseAnim.value / 2,
               offset: const Offset(0, 4),
@@ -706,7 +710,7 @@ class _ImageFollowUpFabState extends State<ImageFollowUpFab>
               gradient: LinearGradient(
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
-                colors: [Color(0xFF8B5CF6), Color(0xFF6366F1)],
+                colors: [AppColors.composerGradientEnd, AppColors.composerGradientStart],
               ),
             ),
             child: const Icon(LucideIcons.image,
@@ -941,7 +945,7 @@ class _ImageFollowUpChatState extends ConsumerState<_ImageFollowUpChat>
       backgroundColor: const Color(0xFF1E1B4B),
       content: Row(
         children: [
-          const Icon(LucideIcons.brain, size: 16, color: Color(0xFFC084FC)),
+          const Icon(LucideIcons.brain, size: 16, color: AppColors.deepViolet),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
@@ -1025,9 +1029,13 @@ class _ImageFollowUpChatState extends ConsumerState<_ImageFollowUpChat>
     final bottomPad = MediaQuery.viewInsetsOf(context).bottom;
     final safePad = MediaQuery.viewPaddingOf(context).bottom;
 
+    final still = reducedMotion(context);
+
     return AnimatedBuilder(
       animation: _entryAnim,
       builder: (context, child) {
+        // Reduced motion: no rise, no fade — the sheet is simply there.
+        if (still) return child!;
         final slide = Tween<double>(begin: 40, end: 0)
             .animate(CurvedAnimation(
                 parent: _entryAnim, curve: Curves.easeOutCubic))
@@ -1038,7 +1046,7 @@ class _ImageFollowUpChatState extends ConsumerState<_ImageFollowUpChat>
         );
       },
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 350),
+        duration: still ? Duration.zero : const Duration(milliseconds: 350),
         curve: Curves.easeOutCubic,
         height: _maximized
             ? MediaQuery.sizeOf(context).height
@@ -1046,7 +1054,7 @@ class _ImageFollowUpChatState extends ConsumerState<_ImageFollowUpChat>
         decoration: BoxDecoration(
           color: colors.bg,
           borderRadius: BorderRadius.vertical(
-            top: Radius.circular(_maximized ? 0 : 24),
+            top: Radius.circular(_maximized ? 0 : AppRadii.sheet),
           ),
           border: _maximized
               ? null
@@ -1055,7 +1063,7 @@ class _ImageFollowUpChatState extends ConsumerState<_ImageFollowUpChat>
         child: Column(
           children: [
             AnimatedContainer(
-              duration: const Duration(milliseconds: 350),
+              duration: still ? Duration.zero : const Duration(milliseconds: 350),
               curve: Curves.easeOutCubic,
               height: _maximized
                   ? MediaQuery.viewPaddingOf(context).top + 4
@@ -1094,7 +1102,7 @@ class _ImageFollowUpChatState extends ConsumerState<_ImageFollowUpChat>
             decoration: const BoxDecoration(
               shape: BoxShape.circle,
               gradient: LinearGradient(
-                colors: [Color(0xFF8B5CF6), Color(0xFF6366F1)],
+                colors: [AppColors.composerGradientEnd, AppColors.composerGradientStart],
               ),
             ),
             child: const Icon(LucideIcons.image,
@@ -1125,18 +1133,8 @@ class _ImageFollowUpChatState extends ConsumerState<_ImageFollowUpChat>
               ],
             ),
           ),
-          if (_sending)
-            const Padding(
-              padding: EdgeInsets.only(right: 4),
-              child: SizedBox(
-                width: 16,
-                height: 16,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: Color(0xFF8B5CF6),
-                ),
-              ),
-            ),
+          // In-flight state lives on the pending bubble's NexusLoader and the
+          // red stop button — no third bare spinner up here.
           IconButton(
             icon: Icon(
               _maximized ? LucideIcons.minimize2 : LucideIcons.maximize2,
@@ -1212,6 +1210,10 @@ class _ImageFollowUpChatState extends ConsumerState<_ImageFollowUpChat>
   }
 
   Widget _buildLoadingBubble(AppColors colors) {
+    // The wait shows the picture the model is actually looking at, behind a
+    // liquid progress ring, rather than three dots that could mean anything.
+    final imgBytes =
+        ImageFollowUpStore.instance.sessionImageBytes(widget.sessionKey);
     return Padding(
       padding: const EdgeInsets.only(bottom: 16),
       child: Row(
@@ -1236,37 +1238,17 @@ class _ImageFollowUpChatState extends ConsumerState<_ImageFollowUpChat>
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const _TypingDots(),
-                      const SizedBox(width: 10),
-                      Flexible(
-                        child: AnimatedSwitcher(
-                          duration: const Duration(milliseconds: 300),
-                          child: Text(
-                            _loadingPhase,
-                            key: ValueKey(_loadingPhase),
-                            style: GoogleFonts.plusJakartaSans(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w600,
-                              color: const Color(0xFF8B5CF6),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(4),
-                    child: LinearProgressIndicator(
-                      minHeight: 3,
-                      backgroundColor:
-                          const Color(0xFF8B5CF6).withValues(alpha: 0.1),
-                      valueColor: const AlwaysStoppedAnimation<Color>(
-                          Color(0xFF8B5CF6)),
-                    ),
+                  // `_loadingPhase` is still this sheet's own
+                  // `_litePhases` / `_deepPhases` / `_extendedPhases` copy on
+                  // its own 5-second timer.
+                  NexusLoader(
+                    variant: NexusLoaderVariant.vision,
+                    tone: _useDeepModel
+                        ? NexusLoaderTone.deep
+                        : NexusLoaderTone.lite,
+                    label: _loadingPhase.isEmpty ? null : _loadingPhase,
+                    image: imgBytes == null ? null : MemoryImage(imgBytes),
+                    size: 96,
                   ),
                 ],
               ),
@@ -1294,7 +1276,7 @@ class _ImageFollowUpChatState extends ConsumerState<_ImageFollowUpChat>
               child: Container(
                 padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF8B5CF6).withValues(alpha: 0.12),
+                  color: AppColors.composerGradientEnd.withValues(alpha: 0.12),
                   borderRadius: const BorderRadius.only(
                     topLeft: Radius.circular(16),
                     topRight: Radius.circular(4),
@@ -1302,7 +1284,7 @@ class _ImageFollowUpChatState extends ConsumerState<_ImageFollowUpChat>
                     bottomRight: Radius.circular(16),
                   ),
                   border: Border.all(
-                    color: const Color(0xFF8B5CF6).withValues(alpha: 0.2),
+                    color: AppColors.composerGradientEnd.withValues(alpha: 0.2),
                   ),
                 ),
                 child: ArticleSelectionScope(
@@ -1335,7 +1317,7 @@ class _ImageFollowUpChatState extends ConsumerState<_ImageFollowUpChat>
               padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
                 color: isError
-                    ? const Color(0xFFFF6B6B).withValues(alpha: 0.08)
+                    ? colors.danger.withValues(alpha: 0.08)
                     : colors.bg2,
                 borderRadius: const BorderRadius.only(
                   topLeft: Radius.circular(4),
@@ -1345,7 +1327,7 @@ class _ImageFollowUpChatState extends ConsumerState<_ImageFollowUpChat>
                 ),
                 border: Border.all(
                   color: isError
-                      ? const Color(0xFFFF6B6B).withValues(alpha: 0.2)
+                      ? colors.danger.withValues(alpha: 0.2)
                       : colors.border2,
                 ),
               ),
@@ -1356,7 +1338,7 @@ class _ImageFollowUpChatState extends ConsumerState<_ImageFollowUpChat>
                       style: GoogleFonts.plusJakartaSans(
                         fontSize: 14,
                         height: 1.7,
-                        color: const Color(0xFFFF6B6B),
+                        color: colors.danger,
                       ),
                     ),
                     )
@@ -1397,13 +1379,14 @@ class _ImageFollowUpChatState extends ConsumerState<_ImageFollowUpChat>
         decoration: const BoxDecoration(
           shape: BoxShape.circle,
           gradient: LinearGradient(
-            colors: [Color(0xFF8B5CF6), Color(0xFF6366F1)],
+            colors: [AppColors.composerGradientEnd, AppColors.composerGradientStart],
           ),
         ),
         child: const Icon(LucideIcons.image, size: 12, color: Colors.white),
       );
 
   Widget _buildInput(AppColors colors, double bottomPad) {
+    final still = reducedMotion(context);
     return Container(
       padding: EdgeInsets.fromLTRB(16, 8, 12, bottomPad + 10),
       decoration: BoxDecoration(
@@ -1425,13 +1408,13 @@ class _ImageFollowUpChatState extends ConsumerState<_ImageFollowUpChat>
                       id: 'gemini',
                       label: 'Gemini',
                       icon: LucideIcons.sparkles,
-                      color: Color(0xFF4285F4),
+                      color: AppColors.geminiBlue,
                     ),
                     ProviderOption(
                       id: 'xgrok',
                       label: 'xGrok',
                       icon: LucideIcons.bot,
-                      color: Color(0xFFE8453C),
+                      color: AppColors.xgrokRed,
                     ),
                   ],
                   selectedId: _useXGrok ? 'xgrok' : 'gemini',
@@ -1448,92 +1431,111 @@ class _ImageFollowUpChatState extends ConsumerState<_ImageFollowUpChat>
             ],
           ),
           const SizedBox(height: 8),
-          ClipRect(
-            child: BackdropFilter(
-              filter: ui.ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Container(
-                      decoration: BoxDecoration(
-                        color: colors.bg2,
-                        borderRadius: BorderRadius.circular(24),
-                        border: Border.all(color: colors.border),
-                      ),
-                      child: TextField(
-                        controller: _ctrl,
-                        focusNode: _focusNode,
-                        maxLines: 4,
-                        minLines: 1,
-                        textInputAction: TextInputAction.send,
-                        onSubmitted: (_) => _send(),
-                        style: GoogleFonts.plusJakartaSans(
-                          fontSize: 14,
-                          color: colors.text,
+          // Blur bounded to the field's own rounded rect instead of the whole
+          // row — same glass, one small saveLayer instead of a full-width one
+          // on every keystroke frame.
+          RepaintBoundary(
+            child: Row(
+              children: [
+                Expanded(
+                  child: ClipRRect(
+                    borderRadius: AppRadii.brSheet,
+                    child: BackdropFilter(
+                      filter: ui.ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: colors.bg2,
+                          borderRadius: AppRadii.brSheet,
+                          border: Border.all(color: colors.border),
                         ),
-                        decoration: InputDecoration(
-                          hintText: 'Ask about the image\u2026',
-                          hintStyle: GoogleFonts.plusJakartaSans(
+                        child: TextField(
+                          controller: _ctrl,
+                          focusNode: _focusNode,
+                          maxLines: 4,
+                          minLines: 1,
+                          textInputAction: TextInputAction.send,
+                          onSubmitted: (_) => _send(),
+                          style: GoogleFonts.plusJakartaSans(
                             fontSize: 14,
-                            color: colors.text4,
+                            color: colors.text,
                           ),
-                          border: InputBorder.none,
-                          contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 16, vertical: 10),
-                          isDense: true,
+                          decoration: InputDecoration(
+                            hintText: 'Ask about the image\u2026',
+                            hintStyle: GoogleFonts.plusJakartaSans(
+                              fontSize: 14,
+                              color: colors.text4,
+                            ),
+                            hintMaxLines: 2,
+                            border: InputBorder.none,
+                            contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 16, vertical: 14),
+                            isDense: true,
+                          ),
                         ),
                       ),
                     ),
                   ),
-                  const SizedBox(width: 6),
-                  VoiceInputButton(
-                    controller: _ctrl,
-                    colors: colors,
-                    disabled: _sending,
-                    tag: 'ImageVoice',
-                    onListeningChanged: (v) {
-                      if (mounted) setState(() => _voiceListening = v);
-                    },
-                  ),
-                  const SizedBox(width: 6),
-                  GestureDetector(
-                    onTap: _voiceListening
-                        ? null
-                        : (_sending ? _cancel : _send),
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 200),
-                      width: 40,
-                      height: 40,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: _voiceListening
-                            ? colors.bg3
-                            : (_sending
-                                ? const Color(0xFFEF4444)
-                                : const Color(0xFF8B5CF6)),
-                      ),
-                      child: _sending
-                          ? Center(
-                              child: Container(
-                                width: 12,
-                                height: 12,
-                                decoration: BoxDecoration(
-                                  color: Colors.white,
-                                  borderRadius: BorderRadius.circular(2),
+                ),
+                const SizedBox(width: 6),
+                VoiceInputButton(
+                  controller: _ctrl,
+                  colors: colors,
+                  disabled: _sending,
+                  tag: 'ImageVoice',
+                  onListeningChanged: (v) {
+                    if (mounted) setState(() => _voiceListening = v);
+                  },
+                ),
+                const SizedBox(width: 6),
+                Semantics(
+                  button: true,
+                  enabled: !_voiceListening,
+                  label: _sending
+                      ? 'Stop the answer in progress'
+                      : 'Send follow-up question',
+                  onTap: _voiceListening ? null : (_sending ? _cancel : _send),
+                  child: ExcludeSemantics(
+                    child: GestureDetector(
+                      onTap: _voiceListening
+                          ? null
+                          : (_sending ? _cancel : _send),
+                      child: AnimatedContainer(
+                        duration: still
+                            ? Duration.zero
+                            : const Duration(milliseconds: 200),
+                        width: AppSpacing.tapTarget,
+                        height: AppSpacing.tapTarget,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: _voiceListening
+                              ? colors.bg3
+                              : (_sending
+                                  ? colors.danger
+                                  : AppColors.composerGradientEnd),
+                        ),
+                        child: _sending
+                            ? Center(
+                                child: Container(
+                                  width: 12,
+                                  height: 12,
+                                  decoration: BoxDecoration(
+                                    color: Colors.white,
+                                    borderRadius: BorderRadius.circular(2),
+                                  ),
                                 ),
+                              )
+                            : Icon(
+                                LucideIcons.send,
+                                size: 18,
+                                color: _voiceListening
+                                    ? colors.text5
+                                    : Colors.white,
                               ),
-                            )
-                          : Icon(
-                              LucideIcons.send,
-                              size: 16,
-                              color: _voiceListening
-                                  ? colors.text5
-                                  : Colors.white,
-                            ),
+                      ),
                     ),
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
           ),
         ],
@@ -1542,44 +1544,63 @@ class _ImageFollowUpChatState extends ConsumerState<_ImageFollowUpChat>
   }
 
   Widget _buildModelToggle(AppColors colors) {
-    const liteColor = Color(0xFF4285F4);
-    const deepColor = Color(0xFFC084FC);
+    final liteColor = colors.modeLite;
+    final deepColor = colors.modeDeep;
+    final still = reducedMotion(context);
 
-    return GestureDetector(
-      onTap: _sending
-          ? null
-          : () {
-              HapticFeedback.selectionClick();
-              setState(() => _useDeepModel = !_useDeepModel);
-            },
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 250),
-        curve: Curves.easeOutCubic,
-        padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 3),
-        decoration: BoxDecoration(
-          color: colors.bg2,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: colors.border),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _toggleChip(
-              label: 'Lite',
-              icon: LucideIcons.zap,
-              active: !_useDeepModel,
-              color: liteColor,
-              colors: colors,
+    return Semantics(
+      button: true,
+      enabled: !_sending,
+      toggled: _useDeepModel,
+      label: _useDeepModel
+          ? 'Answer depth: Deep (slower, thorough)'
+          : 'Answer depth: Lite (faster)',
+      child: GestureDetector(
+        onTap: _sending
+            ? null
+            : () {
+                HapticFeedback.selectionClick();
+                setState(() => _useDeepModel = !_useDeepModel);
+              },
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: AppSpacing.tapTarget),
+          child: Center(
+            widthFactor: 1,
+            heightFactor: 1,
+            child: AnimatedContainer(
+              duration:
+                  still ? Duration.zero : const Duration(milliseconds: 250),
+              curve: Curves.easeOutCubic,
+              padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 3),
+              decoration: BoxDecoration(
+                color: colors.bg2,
+                borderRadius: AppRadii.brLg,
+                border: Border.all(color: colors.border),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _toggleChip(
+                    label: 'Lite',
+                    icon: LucideIcons.zap,
+                    active: !_useDeepModel,
+                    color: liteColor,
+                    colors: colors,
+                    still: still,
+                  ),
+                  const SizedBox(width: 2),
+                  _toggleChip(
+                    label: 'Deep',
+                    icon: LucideIcons.brain,
+                    active: _useDeepModel,
+                    color: deepColor,
+                    colors: colors,
+                    still: still,
+                  ),
+                ],
+              ),
             ),
-            const SizedBox(width: 2),
-            _toggleChip(
-              label: 'Deep',
-              icon: LucideIcons.brain,
-              active: _useDeepModel,
-              color: deepColor,
-              colors: colors,
-            ),
-          ],
+          ),
         ),
       ),
     );
@@ -1591,14 +1612,15 @@ class _ImageFollowUpChatState extends ConsumerState<_ImageFollowUpChat>
     required bool active,
     required Color color,
     required AppColors colors,
+    required bool still,
   }) {
     return AnimatedContainer(
-      duration: const Duration(milliseconds: 250),
+      duration: still ? Duration.zero : const Duration(milliseconds: 250),
       curve: Curves.easeOutCubic,
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
       decoration: BoxDecoration(
         color: active ? color.withValues(alpha: 0.15) : Colors.transparent,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: AppRadii.brCard,
         border: Border.all(
           color: active ? color.withValues(alpha: 0.35) : Colors.transparent,
         ),
@@ -1623,66 +1645,6 @@ class _ImageFollowUpChatState extends ConsumerState<_ImageFollowUpChat>
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-//  TYPING DOTS
-// ═══════════════════════════════════════════════════════════════════════════════
-
-class _TypingDots extends StatefulWidget {
-  const _TypingDots();
-
-  @override
-  State<_TypingDots> createState() => _TypingDotsState();
-}
-
-class _TypingDotsState extends State<_TypingDots>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _ctrl;
-
-  @override
-  void initState() {
-    super.initState();
-    _ctrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1200),
-    )..repeat();
-  }
-
-  @override
-  void dispose() {
-    _ctrl.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: _ctrl,
-      builder: (context, _) {
-        return Row(
-          mainAxisSize: MainAxisSize.min,
-          children: List.generate(3, (i) {
-            final delay = i * 0.2;
-            final t = ((_ctrl.value - delay) % 1.0).clamp(0.0, 1.0);
-            final y = -3.0 * (t < 0.5 ? t * 2 : (1 - t) * 2);
-            return Transform.translate(
-              offset: Offset(0, y),
-              child: Container(
-                width: 6,
-                height: 6,
-                margin: EdgeInsets.only(right: i < 2 ? 3 : 0),
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: const Color(0xFF8B5CF6)
-                      .withValues(alpha: 0.4 + 0.6 * (1 - (y.abs() / 3))),
-                ),
-              ),
-            );
-          }),
-        );
-      },
-    );
-  }
-}
-
 // ═══════════════════════════════════════════════════════════════════════════════
 //  Public helper: decode a "data:image/jpeg;base64,..." URL to raw bytes.
 //  Used by saved_search_detail_sheet.dart when rendering the thumbnail

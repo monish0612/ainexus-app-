@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../../../../../core/theme/app_colors.dart';
+import '../../../../../core/utils/reduced_motion.dart';
 
 /// An arc gauge that always travels to a new reading instead of jumping to it.
 ///
@@ -103,6 +104,15 @@ class _FluidGaugeState extends State<FluidGauge>
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (reducedMotion(context)) {
+      _from = _to;
+      _controller.value = 1.0;
+    }
+  }
+
+  @override
   void didUpdateWidget(covariant FluidGauge old) {
     super.didUpdateWidget(old);
     final next = _target;
@@ -111,6 +121,11 @@ class _FluidGaugeState extends State<FluidGauge>
     // this, a sample landing mid-animation would jump back and re-run.
     _from = _fraction;
     _to = next;
+    if (reducedMotion(context)) {
+      _from = next;
+      _controller.value = 1.0;
+      return;
+    }
     _controller
       ..reset()
       ..forward();
@@ -136,92 +151,100 @@ class _FluidGaugeState extends State<FluidGauge>
         : ((value / widget.max) * 100).clamp(0.0, 100.0);
     final active = widget.color ?? FluidGauge.rampFor(pct);
 
-    return AnimatedBuilder(
-      animation: _controller,
-      builder: (context, _) {
-        final fraction = _fraction;
-        // The centre figures are sized as a fraction of the ring. System font
-        // scaling would push them out of the circle, which reads as a broken
-        // gauge rather than as larger type — so this widget owns its type size.
-        return MediaQuery(
-          data: MediaQuery.of(context).copyWith(textScaler: TextScaler.noScaling),
-          child: SizedBox(
-            width: widget.size,
-            height: widget.size,
-            child: Stack(
-              alignment: Alignment.center,
-              children: [
-                CustomPaint(
-                  size: Size.square(widget.size),
-                  painter: _FluidGaugePainter(
-                    fraction: fraction,
-                    strokeWidth: widget.strokeWidth,
-                    trackColor: colors.text4.withValues(alpha: 0.14),
-                    activeColor: active,
+    return Semantics(
+      label: value == null
+          ? '${widget.label}, unavailable'
+          : '${widget.label} ${value.toStringAsFixed(widget.decimals)}${widget.unit}',
+      child: AnimatedBuilder(
+        animation: _controller,
+        builder: (context, _) {
+          final fraction = _fraction;
+          // The centre figures are sized as a fraction of the ring. System font
+          // scaling would push them out of the circle, which reads as a broken
+          // gauge rather than as larger type — so this widget owns its type size.
+          return MediaQuery(
+            data: MediaQuery.of(context)
+                .copyWith(textScaler: TextScaler.noScaling),
+            child: SizedBox(
+              width: widget.size,
+              height: widget.size,
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  CustomPaint(
+                    size: Size.square(widget.size),
+                    painter: _FluidGaugePainter(
+                      fraction: fraction,
+                      strokeWidth: widget.strokeWidth,
+                      trackColor: colors.text4.withValues(alpha: 0.14),
+                      activeColor: active,
+                    ),
                   ),
-                ),
-                Padding(
-                  padding: EdgeInsets.symmetric(
-                    horizontal: widget.size * 0.16,
-                  ),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      if (widget.showValue)
-                        FittedBox(
-                          child: Text(
-                            value == null
-                                ? '—'
-                                : '${(fraction * widget.max).toStringAsFixed(widget.decimals)}${widget.unit}',
-                            maxLines: 1,
-                            style: GoogleFonts.plusJakartaSans(
-                              fontSize: widget.size * 0.2,
-                              fontWeight: FontWeight.w800,
-                              color: value == null ? colors.text3 : active,
-                              height: 1.05,
-                              letterSpacing: -0.5,
-                              fontFeatures: const [
-                                FontFeature.tabularFigures(),
-                              ],
+                  Padding(
+                    padding: EdgeInsets.symmetric(
+                      horizontal: widget.size * 0.16,
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (widget.showValue)
+                          FittedBox(
+                            child: Text(
+                              value == null
+                                  ? '—'
+                                  : '${(fraction * widget.max).toStringAsFixed(widget.decimals)}${widget.unit}',
+                              maxLines: 1,
+                              style: GoogleFonts.plusJakartaSans(
+                                fontSize: widget.size * 0.2,
+                                fontWeight: FontWeight.w800,
+                                color: value == null ? colors.text3 : active,
+                                height: 1.05,
+                                letterSpacing: -0.5,
+                                fontFeatures: const [
+                                  FontFeature.tabularFigures(),
+                                ],
+                              ),
                             ),
                           ),
-                        ),
-                      const SizedBox(height: 2),
-                      Text(
-                        widget.label,
-                        textAlign: TextAlign.center,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: GoogleFonts.plusJakartaSans(
-                          fontSize: widget.size * 0.082,
-                          fontWeight: FontWeight.w700,
-                          color: colors.text3,
-                          letterSpacing: 0.6,
-                        ),
-                      ),
-                      if (widget.subtitle case final s?) ...[
-                        const SizedBox(height: 1),
+                        const SizedBox(height: 2),
                         Text(
-                          s,
+                          widget.label,
                           textAlign: TextAlign.center,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: GoogleFonts.plusJakartaSans(
-                            fontSize: widget.size * 0.075,
-                            fontWeight: FontWeight.w600,
-                            color: colors.text4,
-                            fontFeatures: const [FontFeature.tabularFigures()],
+                            fontSize: widget.size * 0.082,
+                            fontWeight: FontWeight.w700,
+                            color: colors.text3,
+                            letterSpacing: 0.6,
                           ),
                         ),
+                        if (widget.subtitle case final s?) ...[
+                          const SizedBox(height: 1),
+                          Text(
+                            s,
+                            textAlign: TextAlign.center,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: GoogleFonts.plusJakartaSans(
+                              fontSize: widget.size * 0.075,
+                              fontWeight: FontWeight.w600,
+                              color: colors.text4,
+                              fontFeatures: const [
+                                FontFeature.tabularFigures()
+                              ],
+                            ),
+                          ),
+                        ],
                       ],
-                    ],
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
-        );
-      },
+          );
+        },
+      ),
     );
   }
 }
@@ -359,12 +382,26 @@ class _FluidBarState extends State<FluidBar>
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (reducedMotion(context)) {
+      _from = _to;
+      _controller.value = 1.0;
+    }
+  }
+
+  @override
   void didUpdateWidget(covariant FluidBar old) {
     super.didUpdateWidget(old);
     final next = widget.fraction.clamp(0.0, 1.0);
     if ((next - _to).abs() < 0.0005) return;
     _from = _fraction;
     _to = next;
+    if (reducedMotion(context)) {
+      _from = next;
+      _controller.value = 1.0;
+      return;
+    }
     _controller
       ..reset()
       ..forward();
@@ -467,11 +504,25 @@ class _TweenedFigureState extends State<TweenedFigure>
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (reducedMotion(context)) {
+      _from = _to;
+      _controller.value = 1.0;
+    }
+  }
+
+  @override
   void didUpdateWidget(covariant TweenedFigure old) {
     super.didUpdateWidget(old);
     if ((widget.value - _to).abs() < 0.05) return;
     _from = _current;
     _to = widget.value;
+    if (reducedMotion(context)) {
+      _from = widget.value;
+      _controller.value = 1.0;
+      return;
+    }
     _controller
       ..reset()
       ..forward();

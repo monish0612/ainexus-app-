@@ -1094,7 +1094,8 @@ void main() {
   });
 
   group('RephraseBubble', () {
-    testWidgets('fits its 76dp window and keeps liquid glass', (tester) async {
+    testWidgets('fits its 76dp window and carries its own contrast',
+        (tester) async {
       const window = Size(76, 76);
       tester.view.physicalSize = window;
       tester.view.devicePixelRatio = 1;
@@ -1118,7 +1119,9 @@ void main() {
       final rect = tester.getRect(find.byType(RephraseBubble));
       expect(rect.width, lessThanOrEqualTo(window.width + 0.5));
       expect(rect.height, lessThanOrEqualTo(window.height + 0.5));
-      expect(find.byType(GlassContainer), findsOneWidget);
+      // The collapsed bubble is opaque now. A translucent glass shell
+      // disappeared against light backdrops in the apps it floats over.
+      expect(find.byType(GlassContainer), findsNothing);
       expect(find.byType(CustomPaint), findsWidgets);
       expect(find.byType(RephrasePanel), findsNothing);
       expect(find.byType(PanelSurface), findsNothing);

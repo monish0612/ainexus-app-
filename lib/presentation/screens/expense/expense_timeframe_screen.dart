@@ -147,6 +147,7 @@ class _ExpenseTimeframeScreenState
   bool _loadingMore = false;
   bool _hasMore = true;
   bool _hasError = false;
+  bool _summaryFailed = false;
   int _offset = 0;
 
   int _count = 0;
@@ -198,6 +199,7 @@ class _ExpenseTimeframeScreenState
       _offset = 0;
       _hasMore = true;
       _hasError = false;
+      _summaryFailed = false;
       _initialLoading = true;
     });
     await Future.wait([_loadSummary(), _loadMore()]);
@@ -268,44 +270,50 @@ class _ExpenseTimeframeScreenState
     // to one of those categories (its dedicated card view), in which case we
     // want to show them.
     final excludeNonSpend = !isNonSpendCategory(_categoryFilter);
-    final summary = await repo.rangeSummary(
-      startIso: tf.startIso,
-      endIso: tf.endIso,
-      category: _categoryFilter,
-      search: _search,
-      searchTerms: tf.seedSearchTerms,
-      excludeNonSpend: excludeNonSpend,
-    );
-    // Category chips reflect the unfiltered-by-category scope so the user can
-    // always switch categories; search still narrows them.
-    final cats = await repo.categoryBreakdown(
-      startIso: tf.startIso,
-      endIso: tf.endIso,
-      search: _search,
-      searchTerms: tf.seedSearchTerms,
-      excludeNonSpend: excludeNonSpend,
-    );
-    // Time-series buckets only when a daily/monthly chart was requested.
-    final wantsTime =
-        tf.chart == ExpenseChart.daily || tf.chart == ExpenseChart.monthly;
-    final buckets = wantsTime
-        ? await repo.timeBreakdown(
-            monthly: tf.chart == ExpenseChart.monthly,
-            startIso: tf.startIso,
-            endIso: tf.endIso,
-            category: _categoryFilter,
-            search: _search,
-            searchTerms: tf.seedSearchTerms,
-            excludeNonSpend: excludeNonSpend,
-          )
-        : const <ExpenseBucket>[];
-    if (!mounted) return;
-    setState(() {
-      _count = summary.count;
-      _total = summary.total;
-      _categories = cats;
-      _timeBuckets = buckets;
-    });
+    try {
+      final summary = await repo.rangeSummary(
+        startIso: tf.startIso,
+        endIso: tf.endIso,
+        category: _categoryFilter,
+        search: _search,
+        searchTerms: tf.seedSearchTerms,
+        excludeNonSpend: excludeNonSpend,
+      );
+      // Category chips reflect the unfiltered-by-category scope so the user can
+      // always switch categories; search still narrows them.
+      final cats = await repo.categoryBreakdown(
+        startIso: tf.startIso,
+        endIso: tf.endIso,
+        search: _search,
+        searchTerms: tf.seedSearchTerms,
+        excludeNonSpend: excludeNonSpend,
+      );
+      // Time-series buckets only when a daily/monthly chart was requested.
+      final wantsTime =
+          tf.chart == ExpenseChart.daily || tf.chart == ExpenseChart.monthly;
+      final buckets = wantsTime
+          ? await repo.timeBreakdown(
+              monthly: tf.chart == ExpenseChart.monthly,
+              startIso: tf.startIso,
+              endIso: tf.endIso,
+              category: _categoryFilter,
+              search: _search,
+              searchTerms: tf.seedSearchTerms,
+              excludeNonSpend: excludeNonSpend,
+            )
+          : const <ExpenseBucket>[];
+      if (!mounted) return;
+      setState(() {
+        _count = summary.count;
+        _total = summary.total;
+        _categories = cats;
+        _timeBuckets = buckets;
+        _summaryFailed = false;
+      });
+    } catch (e) {
+      TLog.w('ExpenseTimeframe', 'summary failed', error: e);
+      if (mounted) setState(() => _summaryFailed = true);
+    }
   }
 
   Future<void> _loadMore() async {
@@ -333,8 +341,9 @@ class _ExpenseTimeframeScreenState
         _hasError = false;
       });
     } catch (e) {
-      TLog.e('ExpenseTimeframe',
-          'Page load failed (${tf.label}, offset=$_offset)', error: e);
+      TLog.e(
+          'ExpenseTimeframe', 'Page load failed (${tf.label}, offset=$_offset)',
+          error: e);
       if (mounted) {
         setState(() {
           _hasError = true;
@@ -415,14 +424,14 @@ class _ExpenseTimeframeScreenState
     }
     try {
       final synced = await ref.read(expenseRepositoryProvider).mergeExpenses(
-        sourceIds: plan.sourceIds,
-        merged: merged,
-      );
+            sourceIds: plan.sourceIds,
+            merged: merged,
+          );
       unawaited(
         ref.read(learningsProvider.notifier).learnFromDescription(
-          merged.description,
-          merged.category,
-        ),
+              merged.description,
+              merged.category,
+            ),
       );
       if (!mounted) return;
       _clearSelection();
@@ -522,7 +531,8 @@ class _ExpenseTimeframeScreenState
       TLog.i('ExpenseTimeframe',
           '🗑️ Deleted in ${sw.elapsedMilliseconds}ms: ${e.id}');
       unawaited(_loadSummary());
-      if (!synced && mounted) _toast('Deleted locally — sync pending', warn: true);
+      if (!synced && mounted)
+        _toast('Deleted locally — sync pending', warn: true);
     } catch (err) {
       sw.stop();
       TLog.e('ExpenseTimeframe', 'Delete failed: ${e.id}', error: err);
@@ -606,7 +616,9 @@ class _ExpenseTimeframeScreenState
                           onChip: _onInsightChip,
                         ),
                       )
-                    else if ((widget.timeframe.aiAnswer ?? '').trim().isNotEmpty)
+                    else if ((widget.timeframe.aiAnswer ?? '')
+                        .trim()
+                        .isNotEmpty)
                       SliverToBoxAdapter(
                         child: _AiAnswerBanner(
                           colors: colors,
@@ -626,6 +638,8 @@ class _ExpenseTimeframeScreenState
                         total: _total,
                         count: _count,
                         startIso: widget.timeframe.startIso,
+                        failed: _summaryFailed,
+                        onRetry: () => unawaited(_loadSummary()),
                       ),
                     ),
                     SliverToBoxAdapter(
@@ -723,8 +737,8 @@ class _ExpenseTimeframeScreenState
             final index = _hasChart ? rawIndex - 1 : rawIndex;
             if (index == _items.length) return _buildFooter(colors);
             final e = _items[index];
-            final showHeader = index == 0 ||
-                !_sameDay(_items[index - 1].date, e.date);
+            final showHeader =
+                index == 0 || !_sameDay(_items[index - 1].date, e.date);
             final child = Padding(
               padding: const EdgeInsets.only(bottom: 8),
               child: ExpenseItem(
@@ -801,7 +815,7 @@ class _ExpenseTimeframeScreenState
           style: GoogleFonts.plusJakartaSans(
             fontSize: 11,
             fontWeight: FontWeight.w500,
-            color: colors.text5,
+            color: colors.text4,
           ),
         ),
       ),
@@ -942,9 +956,12 @@ class _Header extends StatelessWidget {
 // ─── Visualization card (AI "visualize" queries) ─────────────────────────────
 
 String _compactCurrency(double v) {
-  if (v >= 10000000) return '₹${(v / 10000000).toStringAsFixed(v % 10000000 == 0 ? 0 : 1)}Cr';
-  if (v >= 100000) return '₹${(v / 100000).toStringAsFixed(v % 100000 == 0 ? 0 : 1)}L';
-  if (v >= 1000) return '₹${(v / 1000).toStringAsFixed(v % 1000 == 0 ? 0 : 1)}k';
+  if (v >= 10000000)
+    return '₹${(v / 10000000).toStringAsFixed(v % 10000000 == 0 ? 0 : 1)}Cr';
+  if (v >= 100000)
+    return '₹${(v / 100000).toStringAsFixed(v % 100000 == 0 ? 0 : 1)}L';
+  if (v >= 1000)
+    return '₹${(v / 1000).toStringAsFixed(v % 1000 == 0 ? 0 : 1)}k';
   return '₹${v.toStringAsFixed(0)}';
 }
 
@@ -1014,7 +1031,10 @@ class _ExpenseChartCard extends StatelessWidget {
           if (isCategory)
             _CategoryBars(colors: colors, categories: categories, total: total)
           else
-            _TimeBars(colors: colors, buckets: buckets, monthly: chart == ExpenseChart.monthly),
+            _TimeBars(
+                colors: colors,
+                buckets: buckets,
+                monthly: chart == ExpenseChart.monthly),
         ],
       ),
     );
@@ -1036,8 +1056,7 @@ class _CategoryBars extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final top = categories.take(8).toList();
-    final maxTotal =
-        top.fold<double>(0, (m, c) => c.total > m ? c.total : m);
+    final maxTotal = top.fold<double>(0, (m, c) => c.total > m ? c.total : m);
     return Column(
       children: [
         for (final c in top)
@@ -1163,9 +1182,8 @@ class _TimeBars extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     // Cap visible bars so dense ranges stay readable; show the most recent.
-    final visible = buckets.length > 31
-        ? buckets.sublist(buckets.length - 31)
-        : buckets;
+    final visible =
+        buckets.length > 31 ? buckets.sublist(buckets.length - 31) : buckets;
     final maxY = visible.fold<double>(0, (m, b) => b.total > m ? b.total : m);
     final safeMaxY = maxY <= 0 ? 1.0 : maxY * 1.18;
     return SizedBox(
@@ -1272,7 +1290,9 @@ class _TimeBars extends StatelessWidget {
                 x: i,
                 barRods: [
                   BarChartRodData(
-                    toY: visible[i].total > 0 ? visible[i].total : safeMaxY * 0.01,
+                    toY: visible[i].total > 0
+                        ? visible[i].total
+                        : safeMaxY * 0.01,
                     width: visible.length > 16 ? 6 : 14,
                     borderRadius:
                         const BorderRadius.vertical(top: Radius.circular(6)),
@@ -1299,8 +1319,18 @@ class _TimeBars extends StatelessWidget {
       final parts = bucket.split('-');
       if (parts.length < 2) return bucket;
       const months = [
-        'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-        'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+        'Jan',
+        'Feb',
+        'Mar',
+        'Apr',
+        'May',
+        'Jun',
+        'Jul',
+        'Aug',
+        'Sep',
+        'Oct',
+        'Nov',
+        'Dec'
       ];
       final mi = int.tryParse(parts[1]) ?? 0;
       final m = (mi >= 1 && mi <= 12) ? months[mi - 1] : parts[1];
@@ -1311,8 +1341,18 @@ class _TimeBars extends StatelessWidget {
     if (parts.length < 3) return bucket;
     if (!full) return parts[2];
     const months = [
-      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec'
     ];
     final mi = int.tryParse(parts[1]) ?? 0;
     final m = (mi >= 1 && mi <= 12) ? months[mi - 1] : parts[1];
@@ -1425,17 +1465,21 @@ class _SummaryHero extends StatelessWidget {
     required this.total,
     required this.count,
     required this.startIso,
+    this.failed = false,
+    this.onRetry,
   });
 
   final AppColors colors;
   final double total;
   final int count;
   final String? startIso;
+  final bool failed;
+  final VoidCallback? onRetry;
 
   @override
   Widget build(BuildContext context) {
     final isDark = colors.isDark;
-    final avg = _dailyAvg();
+    final avg = failed ? null : _dailyAvg();
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 14, 16, 6),
       padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
@@ -1449,11 +1493,13 @@ class _SummaryHero extends StatelessWidget {
               : const [Color(0xFFF5F3FF), Color(0xFFEDE9FE)],
         ),
         border: Border.all(
-          color: const Color(0xFF7C3AED).withValues(alpha: isDark ? 0.32 : 0.18),
+          color:
+              const Color(0xFF7C3AED).withValues(alpha: isDark ? 0.32 : 0.18),
         ),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFF7C3AED).withValues(alpha: isDark ? 0.22 : 0.12),
+            color:
+                const Color(0xFF7C3AED).withValues(alpha: isDark ? 0.22 : 0.12),
             blurRadius: 24,
             offset: const Offset(0, 8),
           ),
@@ -1475,25 +1521,46 @@ class _SummaryHero extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 4),
-                Text(
-                  formatCurrency(total),
-                  style: GoogleFonts.plusJakartaSans(
-                    fontSize: 30,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: -0.8,
-                    height: 1,
-                    color: colors.text,
+                if (failed)
+                  Text(
+                    'Could not load totals',
+                    style: GoogleFonts.plusJakartaSans(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                      color: colors.text,
+                    ),
+                  )
+                else
+                  FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      formatCurrency(total),
+                      maxLines: 1,
+                      style: GoogleFonts.plusJakartaSans(
+                        fontSize: 30,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: -0.8,
+                        height: 1,
+                        color: colors.text,
+                      ),
+                    ),
                   ),
-                ),
                 const SizedBox(height: 6),
-                Text(
-                  '$count transaction${count == 1 ? '' : 's'}',
-                  style: GoogleFonts.plusJakartaSans(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: colors.text3,
+                if (failed)
+                  TextButton(
+                    onPressed: onRetry,
+                    child: const Text('Retry'),
+                  )
+                else
+                  Text(
+                    '$count transaction${count == 1 ? '' : 's'}',
+                    style: GoogleFonts.plusJakartaSans(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: colors.text3,
+                    ),
                   ),
-                ),
               ],
             ),
           ),
@@ -1566,7 +1633,7 @@ class _SearchBar extends StatelessWidget {
           hintText: 'Search description, category or note…',
           hintStyle: GoogleFonts.plusJakartaSans(
             fontSize: 12.5,
-            color: colors.text5,
+            color: colors.text4,
           ),
           prefixIcon: Icon(LucideIcons.search, size: 16, color: colors.text4),
           suffixIcon: ValueListenableBuilder<TextEditingValue>(
@@ -1637,9 +1704,7 @@ class _CategoryFilterRow extends StatelessWidget {
                 color: isSel ? color.withValues(alpha: 0.18) : colors.bg2,
                 borderRadius: BorderRadius.circular(999),
                 border: Border.all(
-                  color: isSel
-                      ? color.withValues(alpha: 0.7)
-                      : colors.border,
+                  color: isSel ? color.withValues(alpha: 0.7) : colors.border,
                 ),
               ),
               child: Row(
@@ -1760,7 +1825,7 @@ class _EmptyState extends StatelessWidget {
                 : 'Logged expenses will appear here',
             style: GoogleFonts.plusJakartaSans(
               fontSize: 12,
-              color: colors.text5,
+              color: colors.text4,
             ),
           ),
         ],
@@ -2012,9 +2077,8 @@ class _DetailField extends StatelessWidget {
         color: accent ? AppColors.accent.withValues(alpha: 0.06) : colors.bg2,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(
-          color: accent
-              ? AppColors.accent.withValues(alpha: 0.25)
-              : colors.border,
+          color:
+              accent ? AppColors.accent.withValues(alpha: 0.25) : colors.border,
         ),
       ),
       child: Column(

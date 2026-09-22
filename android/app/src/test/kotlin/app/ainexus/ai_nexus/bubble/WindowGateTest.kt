@@ -77,17 +77,33 @@ class WindowGateTest {
     }
 
     @Test
-    fun `no target yet is never treated as a switch`() {
+    fun `disabled or skipped gates close before a window type is needed`() {
         assertFalse(
-            WindowGate.isRealAppSwitch(
-                targetPackage = null,
-                applicationPackages = setOf("com.whatsapp"),
+            WindowGate.eventGatesOpen(
+                enabled = false,
+                suppressed = false,
+                skipped = false,
             ),
         )
         assertFalse(
-            WindowGate.isRealAppSwitch(
-                targetPackage = "",
-                applicationPackages = setOf("com.whatsapp"),
+            WindowGate.eventGatesOpen(
+                enabled = true,
+                suppressed = true,
+                skipped = false,
+            ),
+        )
+        assertFalse(
+            WindowGate.eventGatesOpen(
+                enabled = true,
+                suppressed = false,
+                skipped = true,
+            ),
+        )
+        assertTrue(
+            WindowGate.eventGatesOpen(
+                enabled = true,
+                suppressed = false,
+                skipped = false,
             ),
         )
     }

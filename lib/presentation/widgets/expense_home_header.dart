@@ -58,16 +58,20 @@ class ExpenseHomeHeader extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 2),
-                Text(
-                  nameLine,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: GoogleFonts.plusJakartaSans(
-                    fontSize: 26,
-                    fontWeight: FontWeight.w800,
-                    height: 1.15,
-                    letterSpacing: -0.6,
-                    color: colors.text,
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    nameLine,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.plusJakartaSans(
+                      fontSize: 26,
+                      fontWeight: FontWeight.w800,
+                      height: 1.15,
+                      letterSpacing: -0.6,
+                      color: colors.text,
+                    ),
                   ),
                 ),
               ],
@@ -75,36 +79,42 @@ class ExpenseHomeHeader extends StatelessWidget {
           ),
           const SizedBox(width: 12),
           if (onWatchTap != null) ...[
-            GestureDetector(
-              key: const Key('watch-entry'),
-              onTap: onWatchTap,
-              behavior: HitTestBehavior.opaque,
-              child: SizedBox(
-                width: 40,
-                height: 40,
-                child: Stack(
-                  clipBehavior: Clip.none,
-                  alignment: Alignment.center,
-                  children: [
-                    Icon(
-                      Icons.local_offer_outlined,
-                      size: 22,
-                      color: colors.text2,
-                    ),
-                    if (watchBadge > 0)
-                      Positioned(
-                        right: 4,
-                        top: 6,
-                        child: Container(
-                          width: 8,
-                          height: 8,
-                          decoration: const BoxDecoration(
-                            color: Color(0xFFEF4444),
-                            shape: BoxShape.circle,
+            Semantics(
+              button: true,
+              label: watchBadge > 0
+                  ? 'Price watch, $watchBadge alerts'
+                  : 'Price watch',
+              child: GestureDetector(
+                key: const Key('watch-entry'),
+                onTap: onWatchTap,
+                behavior: HitTestBehavior.opaque,
+                child: SizedBox(
+                  width: 48,
+                  height: 48,
+                  child: Stack(
+                    clipBehavior: Clip.none,
+                    alignment: Alignment.center,
+                    children: [
+                      Icon(
+                        Icons.local_offer_outlined,
+                        size: 22,
+                        color: colors.text2,
+                      ),
+                      if (watchBadge > 0)
+                        Positioned(
+                          right: 4,
+                          top: 6,
+                          child: Container(
+                            width: 8,
+                            height: 8,
+                            decoration: const BoxDecoration(
+                              color: Color(0xFFEF4444),
+                              shape: BoxShape.circle,
+                            ),
                           ),
                         ),
-                      ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -112,6 +122,7 @@ class ExpenseHomeHeader extends StatelessWidget {
           ],
           UserAvatar(
             size: 40,
+            hitSize: 48,
             photoPath: photoPath,
             onTap: onAvatarTap,
           ),

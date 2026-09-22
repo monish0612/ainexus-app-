@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/utils/reduced_motion.dart';
 import '../../../../domain/entities/expense_insight.dart';
 
 /// Generative, personalized AI recommendation shown above the results.
@@ -56,22 +57,33 @@ class _AiRecommendationCardState extends State<AiRecommendationCard>
       vsync: this,
       duration: const Duration(milliseconds: 1200),
     );
-    if (_isLoading) _shimmer.repeat();
     _scroll.addListener(_onScroll);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _syncShimmer();
   }
 
   @override
   void didUpdateWidget(covariant AiRecommendationCard old) {
     super.didUpdateWidget(old);
-    // Run the shimmer only while loading; stop it the moment content arrives.
-    if (_isLoading && !_shimmer.isAnimating) {
-      _shimmer.repeat();
-    } else if (!_isLoading && _shimmer.isAnimating) {
-      _shimmer.stop();
-    }
+    _syncShimmer();
     // Content can change (template -> composed); recompute overflow next frame.
     if (old.recommendation != widget.recommendation) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _onScroll());
+    }
+  }
+
+  /// Run the shimmer only while loading; stop it the moment content arrives,
+  /// or immediately if the user asked for reduced motion (the skeleton then
+  /// sits at a flat sweep instead of travelling).
+  void _syncShimmer() {
+    if (_isLoading && !reducedMotion(context)) {
+      if (!_shimmer.isAnimating) _shimmer.repeat();
+    } else if (_shimmer.isAnimating) {
+      _shimmer.stop();
     }
   }
 

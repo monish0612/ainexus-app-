@@ -2,6 +2,8 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '../../core/utils/reduced_motion.dart';
+
 /// High-performance procedural wave visualizer driven by [CustomPainter].
 ///
 /// Animates capsule-shaped bars with overlapping sine waves.
@@ -35,10 +37,11 @@ class _WaveVisualizerState extends State<WaveVisualizer>
   void initState() {
     super.initState();
 
+    // Started from didChangeDependencies — MediaQuery is not readable here.
     _waveCtrl = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1800),
-    )..repeat();
+    );
 
     _ampCtrl = AnimationController(
       vsync: this,
@@ -55,10 +58,27 @@ class _WaveVisualizerState extends State<WaveVisualizer>
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (reducedMotion(context)) {
+      // The bars keep their shape and their active/idle amplitude — they
+      // just stop travelling, and the controller stops burning frames.
+      _waveCtrl.stop();
+      _waveCtrl.value = 0;
+    } else if (!_waveCtrl.isAnimating) {
+      _waveCtrl.repeat();
+    }
+  }
+
+  @override
   void didUpdateWidget(covariant WaveVisualizer oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (widget.isActive != oldWidget.isActive) {
-      widget.isActive ? _ampCtrl.forward() : _ampCtrl.reverse();
+      if (reducedMotion(context)) {
+        _ampCtrl.value = widget.isActive ? 1 : 0;
+      } else {
+        widget.isActive ? _ampCtrl.forward() : _ampCtrl.reverse();
+      }
     }
   }
 

@@ -11,6 +11,9 @@ import '../../../core/di/injection.dart';
 import '../../../core/network/ai_error.dart';
 import '../../../core/platform/platform_capabilities.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../../core/theme/app_motion.dart';
+import '../../../core/theme/app_radii.dart';
+import '../../../core/utils/reduced_motion.dart';
 import '../../../data/services/ai_models_service.dart';
 import '../../../data/services/profile_photo_service.dart';
 import '../../../data/services/sms_auto_expense/sms_auto_expense_service.dart';
@@ -22,18 +25,20 @@ import 'bubble_setup_sheet.dart';
 import 'sms_auto_setup_sheet.dart';
 import 'settings_controller.dart';
 
-const _signOutRed = Color(0xFFEF4444);
+const _signOutRed = AppColors.dangerRed;
 
 /// Opens the settings sheet (draggable). Syncs [settingsOpen] on the controller.
 void showSettingsModal(BuildContext context, WidgetRef ref) {
   final notifier = ref.read(settingsProvider.notifier);
   notifier.openSettings();
   notifier.resyncFromServer();
+  final scrim = Theme.of(context).extension<AppColors>()?.scrim ??
+      Colors.black.withValues(alpha: 0.55);
   showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
     backgroundColor: Colors.transparent,
-    barrierColor: Colors.black.withValues(alpha: 0.55),
+    barrierColor: scrim,
     enableDrag: true,
     useSafeArea: true,
     builder: (modalContext) {
@@ -68,7 +73,7 @@ class _SettingsSheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ClipRRect(
-      borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+      borderRadius: AppRadii.brSheetTop,
       child: Consumer(
         builder: (context, ref, _) {
           final colors = Theme.of(context).extension<AppColors>()!;
@@ -88,29 +93,43 @@ class _SettingsSheet extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      const SizedBox(height: 10),
-                      Center(
-                        child: Container(
-                          width: 40,
-                          height: 4,
-                          decoration: BoxDecoration(
-                            color: colors.text5,
-                            borderRadius: BorderRadius.circular(99),
+                      // Sheet header: a soft top-lit band so the grabber and
+                      // title read as chrome rather than as the first row of
+                      // scrolling content.
+                      DecoratedBox(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
+                            colors: <Color>[colors.bg2, Colors.transparent],
                           ),
                         ),
-                      ),
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
-                        child: Center(
-                          child: Text(
-                            'Settings',
-                            style: GoogleFonts.plusJakartaSans(
-                              fontSize: 18,
-                              fontWeight: FontWeight.w800,
-                              color: colors.text,
-                              letterSpacing: -0.5,
+                        child: Column(
+                          children: [
+                            const SizedBox(height: 10),
+                            Center(
+                              child: Container(
+                                width: 40,
+                                height: 4,
+                                decoration: BoxDecoration(
+                                  color: colors.text5,
+                                  borderRadius: AppRadii.brPill,
+                                ),
+                              ),
                             ),
-                          ),
+                            Padding(
+                              padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
+                              child: Center(
+                                child: Text(
+                                  'Settings',
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .headlineSmall
+                                      ?.copyWith(fontWeight: FontWeight.w800),
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                       _ProfileSection(colors: colors),
@@ -214,7 +233,7 @@ class _SettingsSheet extends StatelessWidget {
                           '${AppConstants.appName}  •  ${AppConstants.appVersion}',
                           style: GoogleFonts.plusJakartaSans(
                             fontSize: 11,
-                            color: colors.text5,
+                            color: colors.text4,
                             letterSpacing: 0.3,
                           ),
                         ),
@@ -333,7 +352,7 @@ class _BubbleSectionState extends State<_BubbleSection>
                     LucideIcons.wand2,
                     size: 17,
                     color: _status.active
-                        ? const Color(0xFF0D59F2)
+                        ? AppColors.accent
                         : colors.text3,
                   ),
                   const SizedBox(width: 10),
@@ -362,7 +381,7 @@ class _BubbleSectionState extends State<_BubbleSection>
                   ),
                   Switch.adaptive(
                     value: _status.enabled,
-                    activeThumbColor: const Color(0xFF0D59F2),
+                    activeThumbColor: AppColors.accent,
                     onChanged: _toggle,
                   ),
                 ],
@@ -377,9 +396,9 @@ class _BubbleSectionState extends State<_BubbleSection>
                     await _refresh();
                   },
                   style: OutlinedButton.styleFrom(
-                    foregroundColor: const Color(0xFF0D59F2),
+                    foregroundColor: AppColors.accent,
                     side: BorderSide(
-                      color: const Color(0xFF0D59F2).withValues(alpha: 0.45),
+                      color: AppColors.accent.withValues(alpha: 0.45),
                     ),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12),
@@ -516,7 +535,7 @@ class _SmsAutoSectionState extends ConsumerState<_SmsAutoSection>
                     LucideIcons.smartphoneNfc,
                     size: 17,
                     color: _status.ready
-                        ? const Color(0xFF0D59F2)
+                        ? AppColors.accent
                         : colors.text3,
                   ),
                   const SizedBox(width: 10),
@@ -545,7 +564,7 @@ class _SmsAutoSectionState extends ConsumerState<_SmsAutoSection>
                   ),
                   Switch.adaptive(
                     value: _status.enabled,
-                    activeThumbColor: const Color(0xFF0D59F2),
+                    activeThumbColor: AppColors.accent,
                     onChanged: _toggle,
                   ),
                 ],
@@ -560,9 +579,9 @@ class _SmsAutoSectionState extends ConsumerState<_SmsAutoSection>
                     await _refresh();
                   },
                   style: OutlinedButton.styleFrom(
-                    foregroundColor: const Color(0xFF0D59F2),
+                    foregroundColor: AppColors.accent,
                     side: BorderSide(
-                      color: const Color(0xFF0D59F2).withValues(alpha: 0.45),
+                      color: AppColors.accent.withValues(alpha: 0.45),
                     ),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12),
@@ -609,7 +628,7 @@ class _WatchSectionState extends ConsumerState<_WatchSection> {
   Widget build(BuildContext context) {
     final colors = Theme.of(context).extension<AppColors>()!;
     final prefs = ref.read(watchPrefsProvider);
-    const accent = Color(0xFFF59E0B);
+    const accent = AppColors.warningAmber;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -775,14 +794,14 @@ class _WatchChip extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 160),
+        duration: motionDuration(context, AppMotion.microHover),
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
         decoration: BoxDecoration(
           color: selected ? colors.bg3 : colors.bg,
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
             color: selected
-                ? const Color(0xFFF59E0B).withValues(alpha: 0.55)
+                ? AppColors.warningAmber.withValues(alpha: 0.55)
                 : colors.border,
           ),
         ),
@@ -830,7 +849,7 @@ class _WatchToggleRow extends StatelessWidget {
           ),
           Switch.adaptive(
             value: value,
-            activeThumbColor: const Color(0xFFF59E0B),
+            activeThumbColor: AppColors.warningAmber,
             onChanged: onChanged,
           ),
         ],
@@ -998,6 +1017,7 @@ class _ProfileSectionState extends ConsumerState<_ProfileSection> {
             showEditBadge: true,
             busy: _busy,
             onTap: _openPicker,
+            semanticLabel: 'Change profile photo',
           ),
           const SizedBox(height: 10),
           TextButton(
@@ -1131,7 +1151,7 @@ class _ThemeSegment extends StatelessWidget {
   Widget build(BuildContext context) {
     final fg = selected ? Colors.white : colors.text3;
     return AnimatedContainer(
-      duration: const Duration(milliseconds: 200),
+      duration: motionDuration(context, AppMotion.standardExit),
       curve: Curves.easeOutCubic,
       decoration: BoxDecoration(
         color: selected ? AppColors.accent : Colors.transparent,
@@ -1253,7 +1273,7 @@ class _DeepModelSectionState extends State<_DeepModelSection> {
         ),
         const SizedBox(height: 10),
         AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
+          duration: motionDuration(context, AppMotion.standardExit),
           curve: Curves.easeOutCubic,
           decoration: BoxDecoration(
             color: colors.bg2,
@@ -1269,7 +1289,7 @@ class _DeepModelSectionState extends State<_DeepModelSection> {
               Padding(
                 padding: const EdgeInsets.only(left: 14),
                 child: AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 150),
+                  duration: motionDuration(context, AppMotion.microHover),
                   child: Icon(
                     LucideIcons.brain,
                     key: ValueKey(_editing),
@@ -1300,17 +1320,14 @@ class _DeepModelSectionState extends State<_DeepModelSection> {
                     hintText: 'e.g. gemini-3.1-pro-preview',
                     hintStyle: GoogleFonts.plusJakartaSans(
                       fontSize: 13,
-                      color: colors.text5,
+                      color: colors.text4,
                     ),
                   ),
                 ),
               ),
               AnimatedSwitcher(
-                duration: const Duration(milliseconds: 200),
-                transitionBuilder: (child, animation) => FadeTransition(
-                  opacity: animation,
-                  child: ScaleTransition(scale: animation, child: child),
-                ),
+                duration: motionDuration(context, AppMotion.standardExit),
+                transitionBuilder: fadeScaleTransition(context),
                 child: _editing
                     ? GestureDetector(
                         key: const ValueKey('save'),
@@ -1470,7 +1487,7 @@ class _LiteModelSectionState extends ConsumerState<_LiteModelSection> {
         ),
         const SizedBox(height: 10),
         AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
+          duration: motionDuration(context, AppMotion.standardExit),
           curve: Curves.easeOutCubic,
           decoration: BoxDecoration(
             color: colors.bg2,
@@ -1486,7 +1503,7 @@ class _LiteModelSectionState extends ConsumerState<_LiteModelSection> {
               Padding(
                 padding: const EdgeInsets.only(left: 14),
                 child: AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 150),
+                  duration: motionDuration(context, AppMotion.microHover),
                   child: Icon(
                     LucideIcons.zap,
                     key: ValueKey(_editing),
@@ -1517,17 +1534,14 @@ class _LiteModelSectionState extends ConsumerState<_LiteModelSection> {
                     hintText: 'e.g. gemini-3.1-flash-lite-preview',
                     hintStyle: GoogleFonts.plusJakartaSans(
                       fontSize: 13,
-                      color: colors.text5,
+                      color: colors.text4,
                     ),
                   ),
                 ),
               ),
               AnimatedSwitcher(
-                duration: const Duration(milliseconds: 200),
-                transitionBuilder: (child, animation) => FadeTransition(
-                  opacity: animation,
-                  child: ScaleTransition(scale: animation, child: child),
-                ),
+                duration: motionDuration(context, AppMotion.standardExit),
+                transitionBuilder: fadeScaleTransition(context),
                 child: _editing
                     ? GestureDetector(
                         key: const ValueKey('save-lite'),
@@ -1667,7 +1681,7 @@ class _AvailableModelsRow extends StatelessWidget {
         error!,
         style: GoogleFonts.plusJakartaSans(
           fontSize: 11,
-          color: const Color(0xFFEF4444),
+          color: AppColors.dangerRed,
           height: 1.4,
         ),
       );
@@ -1844,7 +1858,7 @@ class _XGrokSectionState extends State<_XGrokSection> {
     setState(() => _editingThinking = false);
   }
 
-  static const _xgrokColor = Color(0xFFE8453C);
+  static const _xgrokColor = AppColors.xgrokRed;
 
   @override
   Widget build(BuildContext context) {
@@ -1865,7 +1879,7 @@ class _XGrokSectionState extends State<_XGrokSection> {
         GestureDetector(
           onTap: () => widget.onEnabledChanged(!widget.enabled),
           child: AnimatedContainer(
-            duration: const Duration(milliseconds: 250),
+            duration: motionDuration(context, AppMotion.standardEnter),
             curve: Curves.easeOutCubic,
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
             decoration: BoxDecoration(
@@ -1882,7 +1896,7 @@ class _XGrokSectionState extends State<_XGrokSection> {
             child: Row(
               children: [
                 AnimatedContainer(
-                  duration: const Duration(milliseconds: 200),
+                  duration: motionDuration(context, AppMotion.standardExit),
                   curve: Curves.easeOutCubic,
                   width: 20,
                   height: 20,
@@ -1921,7 +1935,7 @@ class _XGrokSectionState extends State<_XGrokSection> {
                     fontWeight: FontWeight.w700,
                     color: widget.enabled
                         ? _xgrokColor.withValues(alpha: 0.7)
-                        : colors.text5,
+                        : colors.text4,
                   ),
                 ),
               ],
@@ -1929,7 +1943,7 @@ class _XGrokSectionState extends State<_XGrokSection> {
           ),
         ),
         AnimatedCrossFade(
-          duration: const Duration(milliseconds: 300),
+          duration: motionDuration(context, AppMotion.standardEnter),
           sizeCurve: Curves.easeOutCubic,
           crossFadeState: widget.enabled
               ? CrossFadeState.showSecond
@@ -2157,7 +2171,7 @@ class _XGrokSectionState extends State<_XGrokSection> {
         ),
         const SizedBox(height: 4),
         AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
+          duration: motionDuration(context, AppMotion.standardExit),
           curve: Curves.easeOutCubic,
           decoration: BoxDecoration(
             color: colors.bg2,
@@ -2200,17 +2214,14 @@ class _XGrokSectionState extends State<_XGrokSection> {
                     hintText: hint,
                     hintStyle: GoogleFonts.plusJakartaSans(
                       fontSize: 12,
-                      color: colors.text5,
+                      color: colors.text4,
                     ),
                   ),
                 ),
               ),
               AnimatedSwitcher(
-                duration: const Duration(milliseconds: 200),
-                transitionBuilder: (child, animation) => FadeTransition(
-                  opacity: animation,
-                  child: ScaleTransition(scale: animation, child: child),
-                ),
+                duration: motionDuration(context, AppMotion.standardExit),
+                transitionBuilder: fadeScaleTransition(context),
                 child: editing
                     ? GestureDetector(
                         key: const ValueKey('save-xgrok'),
@@ -2241,7 +2252,7 @@ class _XGrokSectionState extends State<_XGrokSection> {
                         child: Icon(
                           LucideIcons.pencil,
                           size: 12,
-                          color: colors.text5,
+                          color: colors.text4,
                         ),
                       ),
               ),
@@ -2274,7 +2285,7 @@ class _OverrideSegment extends StatelessWidget {
   Widget build(BuildContext context) {
     final fg = selected ? Colors.white : colors.text3;
     return AnimatedContainer(
-      duration: const Duration(milliseconds: 200),
+      duration: motionDuration(context, AppMotion.standardExit),
       curve: Curves.easeOutCubic,
       decoration: BoxDecoration(
         color: selected ? color : Colors.transparent,
@@ -2500,7 +2511,7 @@ class _BankRow extends StatelessWidget {
                       ),
                       decoration: BoxDecoration(
                         color: isCc
-                            ? const Color(0x33F59E0B)
+                            ? AppColors.warningAmber.withValues(alpha: 0.2)
                             : colors.bg3,
                         borderRadius: BorderRadius.circular(6),
                       ),
@@ -2510,7 +2521,7 @@ class _BankRow extends StatelessWidget {
                           fontSize: 10,
                           fontWeight: FontWeight.w700,
                           color: isCc
-                              ? const Color(0xFFF59E0B)
+                              ? AppColors.warningAmber
                               : colors.text3,
                         ),
                       ),
@@ -2671,7 +2682,7 @@ void _showBankEditor(
                         hintText: 'e.g. HDFC',
                         hintStyle: GoogleFonts.plusJakartaSans(
                           fontSize: 14,
-                          color: colors.text5,
+                          color: colors.text4,
                         ),
                       ),
                     ),
@@ -2703,7 +2714,7 @@ void _showBankEditor(
                     ],
                   ),
                   AnimatedCrossFade(
-                    duration: const Duration(milliseconds: 220),
+                    duration: motionDuration(context, AppMotion.standardExit),
                     sizeCurve: Curves.easeOutCubic,
                     crossFadeState: isCc
                         ? CrossFadeState.showSecond

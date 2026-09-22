@@ -35,6 +35,11 @@ const String _kAiBgChannelDesc =
     'Keeps AI tasks (search, summarize, follow-up Q&A, OCR) running while '
     'the app is in the background or the screen is off.';
 
+/// Payload the FGS isolate sends to the main isolate when Android stops
+/// the service because of a timeout (`Service.onTimeout`, including the
+/// API 35+ `dataSync` 6-hour cap). Must stay a SendPort-safe String.
+const String kFgsTimeoutEvent = 'nexus_fgs_timeout';
+
 @pragma('vm:entry-point')
 void aiBackgroundStartCallback() {
   FlutterForegroundTask.setTaskHandler(_AiBackgroundNoopHandler());
@@ -66,6 +71,9 @@ class _AiBackgroundNoopHandler extends TaskHandler {
 
   @override
   Future<void> onDestroy(DateTime timestamp, bool isTimeout) async {
+    if (isTimeout) {
+      FlutterForegroundTask.sendDataToMain(kFgsTimeoutEvent);
+    }
     if (kDebugMode) {
       // ignore: avoid_print
       print('[AIBgService] destroyed (timeout=$isTimeout)');

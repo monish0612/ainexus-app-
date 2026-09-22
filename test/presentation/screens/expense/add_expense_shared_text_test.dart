@@ -12,6 +12,8 @@ import 'package:ai_nexus/data/services/ai_categorize_service.dart';
 import 'package:ai_nexus/domain/entities/expense_entities.dart';
 import 'package:ai_nexus/presentation/screens/expense/modals/add_expense_modal.dart';
 
+import '../../../android/preload_bundled_google_fonts.dart';
+
 ThemeData _theme() => ThemeData(
       extensions: const <ThemeExtension<dynamic>>[
         AppColors(
@@ -36,6 +38,14 @@ ThemeData _theme() => ThemeData(
           border2: Color(0xFF111827),
           headerBg: Color(0xFF000000),
           navBg: Color(0xFF000000),
+          modeLite: Color(0xFF22D3EE),
+          modeDeep: Color(0xFF8B5CF6),
+          modeThinking: Color(0xFFF5B62C),
+          providerXgrok: Color(0xFF94A3B8),
+          accentText: Color(0xFF5B8CFF),
+          danger: Color(0xFFEF4444),
+          warning: Color(0xFFF59E0B),
+          success: Color(0xFF34D399),
           isDark: true,
         ),
       ],
@@ -49,6 +59,8 @@ const _sampleSms =
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  setUpAll(preloadBundledGoogleFonts);
 
   Future<void> openModal(
     WidgetTester tester, {

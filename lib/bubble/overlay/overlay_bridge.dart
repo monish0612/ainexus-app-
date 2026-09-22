@@ -99,6 +99,12 @@ class OverlayBridge {
   /// Native tap on the collapsed bubble (gestures live natively now).
   void Function()? onTap;
 
+  /// Overlay window left the screen — stop breath/sheen tickers.
+  void Function()? onPause;
+
+  /// Overlay window is showing again — tickers may resume.
+  void Function()? onResume;
+
   Future<void> _onCall(MethodCall call) async {
     switch (call.method) {
       case 'onTarget':
@@ -108,6 +114,10 @@ class OverlayBridge {
         onCollapse?.call();
       case 'onTap':
         onTap?.call();
+      case 'onPause':
+        onPause?.call();
+      case 'onResume':
+        onResume?.call();
     }
   }
 

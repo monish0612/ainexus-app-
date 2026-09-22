@@ -9,6 +9,7 @@ import 'package:lucide_icons/lucide_icons.dart';
 
 import '../../../core/services/news_summarize_store.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../../core/utils/reduced_motion.dart';
 import '../../../domain/entities/news_entities.dart';
 import '../../widgets/block_selectable.dart';
 import 'article_detail_modal.dart';
@@ -959,6 +960,12 @@ class _HeroImage extends StatelessWidget {
               CachedNetworkImage(
                 imageUrl: article.imageUrl,
                 fit: BoxFit.cover,
+                memCacheWidth: (MediaQuery.sizeOf(context).width *
+                        MediaQuery.devicePixelRatioOf(context))
+                    .round(),
+                memCacheHeight: ((MediaQuery.sizeOf(context).width * 9 / 16) *
+                        MediaQuery.devicePixelRatioOf(context))
+                    .round(),
                 placeholder: (_, __) => Container(
                   color: cat.withValues(alpha: 0.08),
                 ),
@@ -1072,7 +1079,7 @@ class _MetaRow extends StatelessWidget {
           ),
         ),
         const SizedBox(width: 8),
-        Icon(LucideIcons.clock, size: 10, color: colors.text5),
+        Icon(LucideIcons.clock, size: 10, color: colors.text4),
         const SizedBox(width: 3),
         Text(
           '${article.readTime}m',
@@ -1588,7 +1595,18 @@ class _SkeletonSummaryState extends State<_SkeletonSummary>
     _ctrl = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1200),
-    )..repeat();
+    );
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Same skeleton shapes either way; reduced motion just holds the sweep.
+    if (reducedMotion(context)) {
+      _ctrl.stop();
+    } else if (!_ctrl.isAnimating) {
+      _ctrl.repeat();
+    }
   }
 
   @override

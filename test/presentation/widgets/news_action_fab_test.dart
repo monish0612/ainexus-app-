@@ -54,6 +54,14 @@ ThemeData _testTheme() {
         border2: Color(0xFFCBD5E1),
         headerBg: Color(0xFFFFFFFF),
         navBg: Color(0xFFFFFFFF),
+        modeLite: Color(0xFF0E7490),
+        modeDeep: Color(0xFF7C3AED),
+        modeThinking: Color(0xFFA16207),
+        providerXgrok: Color(0xFF475569),
+        accentText: Color(0xFF0D59F2),
+        danger: Color(0xFFDC2626),
+        warning: Color(0xFFB45309),
+        success: Color(0xFF047857),
         isDark: false,
       ),
     ],
@@ -99,6 +107,14 @@ Future<_Fired> _pumpFab(
         border2: Color(0xFFCBD5E1),
         headerBg: Color(0xFFFFFFFF),
         navBg: Color(0xFFFFFFFF),
+        modeLite: Color(0xFF0E7490),
+        modeDeep: Color(0xFF7C3AED),
+        modeThinking: Color(0xFFA16207),
+        providerXgrok: Color(0xFF475569),
+        accentText: Color(0xFF0D59F2),
+        danger: Color(0xFFDC2626),
+        warning: Color(0xFFB45309),
+        success: Color(0xFF047857),
         isDark: false,
       );
 
@@ -161,8 +177,7 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   group('NewsActionFab — visibility', () {
-    testWidgets('hides when unreadCount == 0 (regular mode)',
-        (tester) async {
+    testWidgets('hides when unreadCount == 0 (regular mode)', (tester) async {
       await _pumpFab(
         tester,
         activeCategory: 'All',
@@ -317,8 +332,7 @@ void main() {
   });
 
   group('NewsActionFab — regular (non-clearOnly) sheet contents', () {
-    testWidgets('All chip: shows BOTH Summarize and Clear All',
-        (tester) async {
+    testWidgets('All chip: shows BOTH Summarize and Clear All', (tester) async {
       await _pumpFab(
         tester,
         activeCategory: 'All',
@@ -455,8 +469,7 @@ void main() {
       expect(fired.scope, NewsFabScope.currentCategory);
     });
 
-    testWidgets(
-        'regular All chip: Clear-All fires with scope=all (default)',
+    testWidgets('regular All chip: Clear-All fires with scope=all (default)',
         (tester) async {
       final fired = await _pumpFab(
         tester,
@@ -552,6 +565,46 @@ void main() {
       expect(find.byType(Ink), findsNothing);
       expect(find.byIcon(LucideIcons.eraser), findsOneWidget);
       expect(find.text('2'), findsOneWidget);
+    });
+  });
+
+  group('NewsActionFab — semantics', () {
+    testWidgets('sparkles FAB is labeled News actions', (tester) async {
+      final handle = tester.ensureSemantics();
+      try {
+        await _pumpFab(
+          tester,
+          activeCategory: 'All',
+          unreadCount: 2,
+          unreadCountInCategory: 2,
+        );
+        expect(
+          tester.getSemantics(find.byIcon(LucideIcons.sparkles)).label,
+          contains('News actions'),
+        );
+      } finally {
+        handle.dispose();
+      }
+    });
+
+    testWidgets('clearOnly FAB is labeled Clear unread articles',
+        (tester) async {
+      final handle = tester.ensureSemantics();
+      try {
+        await _pumpFab(
+          tester,
+          activeCategory: 'Movies',
+          unreadCount: 4,
+          unreadCountInCategory: 2,
+          clearOnly: true,
+        );
+        expect(
+          tester.getSemantics(find.byIcon(LucideIcons.eraser)).label,
+          contains('Clear unread articles'),
+        );
+      } finally {
+        handle.dispose();
+      }
     });
   });
 }

@@ -58,6 +58,12 @@ class WatchCard extends StatelessWidget {
                         imageUrl: item.imageUrl,
                         width: 56,
                         height: 56,
+                        memCacheWidth: (56 *
+                                MediaQuery.devicePixelRatioOf(context))
+                            .round(),
+                        memCacheHeight: (56 *
+                                MediaQuery.devicePixelRatioOf(context))
+                            .round(),
                         fit: BoxFit.cover,
                       ),
               ),

@@ -189,7 +189,10 @@ void main() {
       expect(xml, contains('android:roundIcon="@mipmap/ic_launcher_round"'));
       expect(xml, contains('@drawable/ic_notification'));
       expect(xml, contains('app.ainexus.NOTIFICATION_ICON'));
-      expect(xml, contains('notification_accent'));
+      expect(
+        read('android/app/src/main/res/values/colors.xml'),
+        contains('notification_accent'),
+      );
     });
 
     test('keep.xml protects the Dart-string status-bar drawable', () {

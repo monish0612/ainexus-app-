@@ -74,7 +74,17 @@ class ExpenseRepository {
   /// Never throws — a widget miss must not fail an expense write.
   Future<void> _syncHomeWidget() async {
     try {
+      final now = DateTime.now();
+      final localMonthStart = DateTime(now.year, now.month, 1);
+      // Widget aggregation is current local month (+ today). Bound the Drift
+      // read with 36h of UTC slack so a TZ-shifted ISO stamp is not dropped
+      // before [ExpenseWidgetService.computeWidgetData] applies the real filter.
+      final bound = localMonthStart
+          .subtract(const Duration(hours: 36))
+          .toUtc()
+          .toIso8601String();
       final rows = await (_db.select(_db.expenses)
+            ..where((t) => t.date.isBiggerOrEqualValue(bound))
             ..orderBy([
               (t) => OrderingTerm(expression: t.date, mode: OrderingMode.desc),
             ]))
@@ -1239,7 +1249,7 @@ class ExpenseRepository {
       );
     } catch (e) {
       TLog.w('ExpenseRepo', 'rangeSummary failed (start=$startIso)', error: e);
-      return (count: 0, total: 0.0);
+      rethrow;
     }
   }
 
@@ -1395,7 +1405,7 @@ class ExpenseRepository {
           .toList();
     } catch (e) {
       TLog.w('ExpenseRepo', 'categoryBreakdown failed', error: e);
-      return const [];
+      rethrow;
     }
   }
 
@@ -1464,7 +1474,7 @@ class ExpenseRepository {
           .toList();
     } catch (e) {
       TLog.w('ExpenseRepo', 'timeBreakdown failed (monthly=$monthly)', error: e);
-      return const [];
+      rethrow;
     }
   }
 

@@ -527,7 +527,9 @@ class _InsightsTabState extends State<InsightsTab> {
     final occurrences = List<int>.filled(7, 0);
     final start = _periodRangeStart(expenses, period);
     final end = _startOfDayLocal(DateTime.now());
-    for (var cursor = start; !cursor.isAfter(end); cursor = cursor.add(const Duration(days: 1))) {
+    for (var cursor = start;
+        !cursor.isAfter(end);
+        cursor = cursor.add(const Duration(days: 1))) {
       occurrences[(cursor.weekday + 6) % 7]++;
     }
 
@@ -626,7 +628,8 @@ class _InsightsTabState extends State<InsightsTab> {
   }) {
     final peak = summary.buckets[peakIndex].label;
     final quiet = quietIndex >= 0 ? summary.buckets[quietIndex].label : null;
-    final quietText = quiet == null ? '' : ' $quiet stays the lightest active day.';
+    final quietText =
+        quiet == null ? '' : ' $quiet stays the lightest active day.';
     final weekendText =
         ' Weekend share is ${summary.weekendShare.toStringAsFixed(0)}%.';
 
@@ -689,7 +692,8 @@ class _InsightsTabState extends State<InsightsTab> {
         _Period.m3 => 90,
         _Period.m6 => 180,
         _Period.all => 1,
-        _Period.nt => DateTime(DateTime.now().year, DateTime.now().month + 2, 0).day,
+        _Period.nt =>
+          DateTime(DateTime.now().year, DateTime.now().month + 2, 0).day,
       };
     }
     final avgDay = days > 0 ? total / days : 0.0;
@@ -761,19 +765,18 @@ class _InsightsTabState extends State<InsightsTab> {
     final isSearching = q.isNotEmpty;
     final searchHits = isSearching
         ? (widget.expenses
-              .where(
-                (e) =>
-                    e.description.toLowerCase().contains(q) ||
-                    e.category.toLowerCase().contains(q) ||
-                    e.bank.toLowerCase().contains(q) ||
-                    e.cardType.toLowerCase().contains(q) ||
-                    e.amount.toString().contains(q),
-              )
-              .toList()
-            ..sort(
-              (a, b) =>
-                  safeParseDate(b.date).compareTo(safeParseDate(a.date)),
-            ))
+            .where(
+              (e) =>
+                  e.description.toLowerCase().contains(q) ||
+                  e.category.toLowerCase().contains(q) ||
+                  e.bank.toLowerCase().contains(q) ||
+                  e.cardType.toLowerCase().contains(q) ||
+                  e.amount.toString().contains(q),
+            )
+            .toList()
+          ..sort(
+            (a, b) => safeParseDate(b.date).compareTo(safeParseDate(a.date)),
+          ))
         : <ExpenseData>[];
     final searchTotal =
         searchHits.fold<double>(0, (s, e) => s + e.amount.toDouble());
@@ -784,8 +787,7 @@ class _InsightsTabState extends State<InsightsTab> {
       final mid = trendData.length ~/ 2;
       final a =
           trendData.sublist(0, mid).fold<double>(0, (s, p) => s + p.amount);
-      final b =
-          trendData.sublist(mid).fold<double>(0, (s, p) => s + p.amount);
+      final b = trendData.sublist(mid).fold<double>(0, (s, p) => s + p.amount);
       if (a > 0) trendDelta = ((b - a) / a) * 100;
     }
 
@@ -892,8 +894,7 @@ class _InsightsTabState extends State<InsightsTab> {
                 ),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(16),
-                  borderSide:
-                      BorderSide(color: accent.withValues(alpha: 0.7)),
+                  borderSide: BorderSide(color: accent.withValues(alpha: 0.7)),
                 ),
               ),
             ),
@@ -1064,7 +1065,8 @@ class _InsightsTabState extends State<InsightsTab> {
                 ),
                 _KpiSlide(
                   label: 'HIGHEST EXPENSE',
-                  value: highestSingle > 0 ? formatCurrency(highestSingle) : '—',
+                  value:
+                      highestSingle > 0 ? formatCurrency(highestSingle) : '—',
                   sub: sortedByAmtDesc.isNotEmpty
                       ? sortedByAmtDesc.first.description
                       : 'No data',
@@ -1144,9 +1146,7 @@ class _InsightsTabState extends State<InsightsTab> {
                         width: active ? 22 : 6,
                         height: 6,
                         decoration: BoxDecoration(
-                          color: active
-                              ? slides[i].accent
-                              : c.text5,
+                          color: active ? slides[i].accent : c.text5,
                           borderRadius: BorderRadius.circular(999),
                         ),
                       );
@@ -1230,12 +1230,16 @@ class _InsightsTabState extends State<InsightsTab> {
                               ),
                             ),
                           )
-                        : LineChart(
-                            _trendLineChartData(
-                              c: c,
-                              accent: accent,
-                              points: trendData,
-                              maxY: maxTrendY,
+                        : Semantics(
+                            label:
+                                'Spending trend, ${formatCurrency(total)} this period',
+                            child: LineChart(
+                              _trendLineChartData(
+                                c: c,
+                                accent: accent,
+                                points: trendData,
+                                maxY: maxTrendY,
+                              ),
                             ),
                           ),
                   ),
@@ -1283,20 +1287,23 @@ class _InsightsTabState extends State<InsightsTab> {
                           },
                         ),
                         const SizedBox(height: 14),
-                        RepaintBoundary(
-                          child: SizedBox(
-                            height: 188,
-                            child: BarChart(
-                              _dowBarChartData(
-                                c: c,
-                                accent: accent,
-                                buckets: dowSummary.buckets,
-                                mode: _dowViewMode,
-                                selectedIndex: selectedDowIndex,
-                                peakIndex: peakDowIndex,
-                                maxY: maxDow,
-                                onSelect: (index) =>
-                                    setState(() => _selectedDowIndex = index),
+                        Semantics(
+                          label: 'Spending by day chart',
+                          child: RepaintBoundary(
+                            child: SizedBox(
+                              height: 188,
+                              child: BarChart(
+                                _dowBarChartData(
+                                  c: c,
+                                  accent: accent,
+                                  buckets: dowSummary.buckets,
+                                  mode: _dowViewMode,
+                                  selectedIndex: selectedDowIndex,
+                                  peakIndex: peakDowIndex,
+                                  maxY: maxDow,
+                                  onSelect: (index) =>
+                                      setState(() => _selectedDowIndex = index),
+                                ),
                               ),
                             ),
                           ),
@@ -1307,7 +1314,8 @@ class _InsightsTabState extends State<InsightsTab> {
                           child: ListView.separated(
                             scrollDirection: Axis.horizontal,
                             itemCount: dowSummary.buckets.length,
-                            separatorBuilder: (_, __) => const SizedBox(width: 8),
+                            separatorBuilder: (_, __) =>
+                                const SizedBox(width: 8),
                             itemBuilder: (context, i) => _DowDayCard(
                               colors: c,
                               accent: accent,
@@ -1372,7 +1380,7 @@ class _InsightsTabState extends State<InsightsTab> {
                               textAlign: TextAlign.center,
                               style: GoogleFonts.plusJakartaSans(
                                 fontSize: 11,
-                                color: c.text5,
+                                color: c.text4,
                               ),
                             ),
                           ],
@@ -1465,8 +1473,7 @@ class _InsightsTabState extends State<InsightsTab> {
               _SectionTitle(
                 colors: c,
                 title: 'Top merchants',
-                subtitle:
-                    '${merchants.length} · ${_periodSubtitles[_period]}',
+                subtitle: '${merchants.length} · ${_periodSubtitles[_period]}',
               ),
               _BreakdownCard(
                 colors: c,
@@ -1492,9 +1499,7 @@ class _InsightsTabState extends State<InsightsTab> {
                   children: [
                     Expanded(
                       child: Text(
-                        _showHighest
-                            ? 'Top 10 highest'
-                            : 'Top 10 lowest',
+                        _showHighest ? 'Top 10 highest' : 'Top 10 lowest',
                         style: GoogleFonts.plusJakartaSans(
                           fontSize: 16,
                           fontWeight: FontWeight.w800,
@@ -1514,15 +1519,13 @@ class _InsightsTabState extends State<InsightsTab> {
                             label: 'Highest',
                             selected: _showHighest,
                             colors: c,
-                            onTap: () =>
-                                setState(() => _showHighest = true),
+                            onTap: () => setState(() => _showHighest = true),
                           ),
                           _ToggleChip(
                             label: 'Lowest',
                             selected: !_showHighest,
                             colors: c,
-                            onTap: () =>
-                                setState(() => _showHighest = false),
+                            onTap: () => setState(() => _showHighest = false),
                           ),
                         ],
                       ),
@@ -1543,9 +1546,8 @@ class _InsightsTabState extends State<InsightsTab> {
                       _TopExpenseItem(
                         colors: c,
                         rank: i + 1,
-                        expense: _showHighest
-                            ? top10Highest[i]
-                            : top10Lowest[i],
+                        expense:
+                            _showHighest ? top10Highest[i] : top10Lowest[i],
                         showDivider: i <
                             (_showHighest
                                     ? top10Highest.length
@@ -1608,13 +1610,11 @@ class _InsightsTabState extends State<InsightsTab> {
                   child: Material(
                     color: Colors.transparent,
                     child: InkWell(
-                      onTap: () =>
-                          setState(() => _visibleTxns += 20),
+                      onTap: () => setState(() => _visibleTxns += 20),
                       borderRadius: BorderRadius.circular(16),
                       child: Container(
                         width: double.infinity,
-                        padding:
-                            const EdgeInsets.symmetric(vertical: 14),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
                         decoration: BoxDecoration(
                           color: accent.withValues(alpha: 0.1),
                           borderRadius: BorderRadius.circular(16),
@@ -1656,7 +1656,7 @@ class _InsightsTabState extends State<InsightsTab> {
                       'All ${allSorted.length} transactions loaded',
                       style: GoogleFonts.plusJakartaSans(
                         fontSize: 11,
-                        color: c.text5,
+                        color: c.text4,
                       ),
                     ),
                   ),
@@ -1691,13 +1691,11 @@ class _InsightsTabState extends State<InsightsTab> {
         verticalInterval: math.max(1, points.length / 6).ceilToDouble(),
         getDrawingHorizontalLine: (_) =>
             FlLine(color: c.border2, strokeWidth: 1),
-        getDrawingVerticalLine: (_) =>
-            FlLine(color: c.border2, strokeWidth: 1),
+        getDrawingVerticalLine: (_) => FlLine(color: c.border2, strokeWidth: 1),
       ),
       borderData: FlBorderData(show: false),
       titlesData: FlTitlesData(
-        topTitles:
-            const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+        topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
         rightTitles:
             const AxisTitles(sideTitles: SideTitles(showTitles: false)),
         leftTitles: AxisTitles(
@@ -1843,8 +1841,7 @@ class _InsightsTabState extends State<InsightsTab> {
       ),
       borderData: FlBorderData(show: false),
       titlesData: FlTitlesData(
-        topTitles:
-            const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+        topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
         rightTitles:
             const AxisTitles(sideTitles: SideTitles(showTitles: false)),
         leftTitles: AxisTitles(
@@ -1883,8 +1880,9 @@ class _InsightsTabState extends State<InsightsTab> {
                   buckets[i].label,
                   style: GoogleFonts.plusJakartaSans(
                     fontSize: 10,
-                    fontWeight:
-                        isSelected || isPeak ? FontWeight.w800 : FontWeight.w600,
+                    fontWeight: isSelected || isPeak
+                        ? FontWeight.w800
+                        : FontWeight.w600,
                     color: isSelected
                         ? c.text
                         : isPeak
@@ -1912,7 +1910,8 @@ class _InsightsTabState extends State<InsightsTab> {
           getTooltipItem: (group, _, rod, __) {
             final bucket = buckets[group.x];
             final copy = switch (mode) {
-              _DowViewMode.total => '${bucket.label}\n${formatCurrency(bucket.total)} · ${bucket.txnCount} txns',
+              _DowViewMode.total =>
+                '${bucket.label}\n${formatCurrency(bucket.total)} · ${bucket.txnCount} txns',
               _DowViewMode.average =>
                 '${bucket.label}\n${formatCurrency(bucket.averagePerOccurrence)} avg · ${bucket.txnCount} txns',
               _DowViewMode.transactions =>
@@ -1937,37 +1936,41 @@ class _InsightsTabState extends State<InsightsTab> {
             final isSelected = i == selectedIndex;
             final isPeak = i == peakIndex;
             return BarChartGroupData(
-            x: i,
-            barRods: [
-              BarChartRodData(
-                toY: value > 0 ? value : maxY * 0.02,
-                width: isSelected ? 24 : isPeak ? 22 : 20,
-                borderRadius: const BorderRadius.vertical(
-                  top: Radius.circular(10),
+              x: i,
+              barRods: [
+                BarChartRodData(
+                  toY: value > 0 ? value : maxY * 0.02,
+                  width: isSelected
+                      ? 24
+                      : isPeak
+                          ? 22
+                          : 20,
+                  borderRadius: const BorderRadius.vertical(
+                    top: Radius.circular(10),
+                  ),
+                  gradient: value > 0
+                      ? LinearGradient(
+                          colors: isSelected
+                              ? [AppColors.accentCyan, accent]
+                              : isPeak
+                                  ? [accent, accent.withValues(alpha: 0.82)]
+                                  : [
+                                      accent.withValues(alpha: 0.55),
+                                      accent.withValues(alpha: 0.25),
+                                    ],
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                        )
+                      : LinearGradient(
+                          colors: [
+                            c.text5.withValues(alpha: 0.18),
+                            c.text5.withValues(alpha: 0.06),
+                          ],
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                        ),
                 ),
-                gradient: value > 0
-                    ? LinearGradient(
-                        colors: isSelected
-                            ? [AppColors.accentCyan, accent]
-                            : isPeak
-                                ? [accent, accent.withValues(alpha: 0.82)]
-                            : [
-                                accent.withValues(alpha: 0.55),
-                                accent.withValues(alpha: 0.25),
-                              ],
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                      )
-                    : LinearGradient(
-                        colors: [
-                          c.text5.withValues(alpha: 0.18),
-                          c.text5.withValues(alpha: 0.06),
-                        ],
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                      ),
-              ),
-            ],
+              ],
             );
           })(),
       ],
@@ -2048,9 +2051,7 @@ class _PeriodChip extends StatelessWidget {
             color: selected ? accent : colors.bg3,
             borderRadius: BorderRadius.circular(999),
             border: Border.all(
-              color: selected
-                  ? accent.withValues(alpha: 0.35)
-                  : colors.border,
+              color: selected ? accent.withValues(alpha: 0.35) : colors.border,
             ),
             boxShadow: selected
                 ? [
@@ -2141,9 +2142,8 @@ class _KpiCarouselCardState extends State<_KpiCarouselCard>
             color: c.bg2,
             borderRadius: BorderRadius.circular(24),
             border: Border.all(
-              color: widget.isActive
-                  ? s.accent.withValues(alpha: 0.35)
-                  : c.border,
+              color:
+                  widget.isActive ? s.accent.withValues(alpha: 0.35) : c.border,
             ),
             boxShadow: widget.isActive
                 ? [
@@ -2232,14 +2232,14 @@ class _KpiCarouselCardState extends State<_KpiCarouselCard>
                         style: GoogleFonts.plusJakartaSans(
                           fontSize: 10,
                           fontWeight: FontWeight.w600,
-                          color: c.text5,
+                          color: c.text4,
                         ),
                       ),
                       const SizedBox(width: 4),
                       Icon(
                         Icons.arrow_forward_rounded,
                         size: 12,
-                        color: c.text5,
+                        color: c.text4,
                       ),
                     ],
                   ),
@@ -2349,18 +2349,17 @@ class _KpiDetailSheet extends StatelessWidget {
                     Divider(height: 1, color: colors.border2),
                 itemBuilder: (context, i) {
                   final e = slide.detailExpenses[i];
-                  final catColor = AppColors.categoryColors[e.category] ??
-                      AppColors.accent;
-                  final emoji =
-                      AppColors.categoryIcons[e.category] ?? '📦';
+                  final catColor =
+                      AppColors.categoryColors[e.category] ?? AppColors.accent;
+                  final emoji = AppColors.categoryIcons[e.category] ?? '📦';
                   final dateStr = formatExpenseWhen(
                     e.date,
                     comments: e.comments,
                   );
 
                   return Padding(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 20, vertical: 12),
                     child: Row(
                       children: [
                         Container(
@@ -2430,11 +2429,13 @@ class _KpiDetailSheet extends StatelessWidget {
 /// it can be unit-tested directly.
 String compactInr(num amount) {
   final abs = amount.abs();
-  String c(double v, String s) =>
-      '₹${v.toStringAsFixed(v >= 100 ? 0 : 1)}$s';
-  if (abs >= 10000000) return amount < 0 ? '-${c(abs / 10000000, 'Cr')}' : c(abs / 10000000, 'Cr');
-  if (abs >= 100000) return amount < 0 ? '-${c(abs / 100000, 'L')}' : c(abs / 100000, 'L');
-  if (abs >= 1000) return amount < 0 ? '-${c(abs / 1000, 'K')}' : c(abs / 1000, 'K');
+  String c(double v, String s) => '₹${v.toStringAsFixed(v >= 100 ? 0 : 1)}$s';
+  if (abs >= 10000000)
+    return amount < 0 ? '-${c(abs / 10000000, 'Cr')}' : c(abs / 10000000, 'Cr');
+  if (abs >= 100000)
+    return amount < 0 ? '-${c(abs / 100000, 'L')}' : c(abs / 100000, 'L');
+  if (abs >= 1000)
+    return amount < 0 ? '-${c(abs / 1000, 'K')}' : c(abs / 1000, 'K');
   return formatCurrency(amount);
 }
 
@@ -2487,7 +2488,11 @@ class _InvestmentPortfolioCard extends StatelessWidget {
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
               colors: isDark
-                  ? const [Color(0xFF04302C), Color(0xFF073D34), Color(0xFF052E2B)]
+                  ? const [
+                      Color(0xFF04302C),
+                      Color(0xFF073D34),
+                      Color(0xFF052E2B)
+                    ]
                   : const [Color(0xFFECFDF5), Color(0xFFD1FAE5)],
             ),
             borderRadius: BorderRadius.circular(22),
@@ -2578,7 +2583,8 @@ class _InvestmentPortfolioCard extends StatelessWidget {
                   style: GoogleFonts.plusJakartaSans(
                     fontSize: 15,
                     fontWeight: FontWeight.w800,
-                    color: colors.isDark ? Colors.white : const Color(0xFF0F766E),
+                    color:
+                        colors.isDark ? Colors.white : const Color(0xFF0F766E),
                   ),
                 ),
                 const SizedBox(height: 4),
@@ -2784,7 +2790,11 @@ class _LoanRepaymentCard extends StatelessWidget {
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
               colors: isDark
-                  ? const [Color(0xFF352A05), Color(0xFF433609), Color(0xFF2C2405)]
+                  ? const [
+                      Color(0xFF352A05),
+                      Color(0xFF433609),
+                      Color(0xFF2C2405)
+                    ]
                   : const [Color(0xFFFFFBEB), Color(0xFFFEF3C7)],
             ),
             borderRadius: BorderRadius.circular(22),
@@ -2875,7 +2885,8 @@ class _LoanRepaymentCard extends StatelessWidget {
                   style: GoogleFonts.plusJakartaSans(
                     fontSize: 15,
                     fontWeight: FontWeight.w800,
-                    color: colors.isDark ? Colors.white : const Color(0xFF92660A),
+                    color:
+                        colors.isDark ? Colors.white : const Color(0xFF92660A),
                   ),
                 ),
                 const SizedBox(height: 4),
@@ -3301,8 +3312,7 @@ class _BudgetStrip extends StatelessWidget {
             ? const Color(0xFFF59E0B)
             : const Color(0xFF34D399);
     final gradient = over
-        ? const LinearGradient(
-            colors: [Color(0xFFF87171), Color(0xFFEF4444)])
+        ? const LinearGradient(colors: [Color(0xFFF87171), Color(0xFFEF4444)])
         : warn
             ? const LinearGradient(
                 colors: [Color(0xFFF59E0B), Color(0xFFFBBF24)])
@@ -3556,7 +3566,8 @@ class _DowHeroCard extends StatelessWidget {
     final headline = switch (mode) {
       _DowViewMode.total => 'TOTAL ON ${bucket.label.toUpperCase()}',
       _DowViewMode.average => 'AVG ON ${bucket.label.toUpperCase()}',
-      _DowViewMode.transactions => 'TRANSACTIONS ON ${bucket.label.toUpperCase()}',
+      _DowViewMode.transactions =>
+        'TRANSACTIONS ON ${bucket.label.toUpperCase()}',
     };
     final subtitle = switch (mode) {
       _DowViewMode.total =>
@@ -3594,7 +3605,8 @@ class _DowHeroCard extends StatelessWidget {
           Row(
             children: [
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                 decoration: BoxDecoration(
                   color: accent.withValues(alpha: 0.16),
                   borderRadius: BorderRadius.circular(999),
@@ -3869,20 +3881,24 @@ class _DowModeSwitcher extends StatelessWidget {
                             ? colors.isDark
                                 ? [
                                     AppColors.accent.withValues(alpha: 0.32),
-                                    AppColors.accentCyan.withValues(alpha: 0.18),
+                                    AppColors.accentCyan
+                                        .withValues(alpha: 0.18),
                                   ]
                                 : [
                                     AppColors.accent.withValues(alpha: 0.16),
-                                    AppColors.accentCyan.withValues(alpha: 0.08),
+                                    AppColors.accentCyan
+                                        .withValues(alpha: 0.08),
                                   ]
                             : colors.isDark
                                 ? [
                                     AppColors.accent.withValues(alpha: 0.08),
-                                    AppColors.accentCyan.withValues(alpha: 0.04),
+                                    AppColors.accentCyan
+                                        .withValues(alpha: 0.04),
                                   ]
                                 : [
                                     AppColors.accent.withValues(alpha: 0.035),
-                                    AppColors.accentCyan.withValues(alpha: 0.02),
+                                    AppColors.accentCyan
+                                        .withValues(alpha: 0.02),
                                   ],
                         begin: Alignment.topLeft,
                         end: Alignment.bottomRight,
@@ -4291,8 +4307,7 @@ class _CategoryRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final catColor =
-        AppColors.categoryColors[name] ?? AppColors.categoryOthers;
+    final catColor = AppColors.categoryColors[name] ?? AppColors.categoryOthers;
     final emoji = AppColors.categoryIcons[name] ?? '📦';
     final pct = totalSpend > 0 ? (amount / totalSpend) * 100 : 0.0;
 
@@ -4313,8 +4328,7 @@ class _CategoryRow extends StatelessWidget {
                       color: catColor.withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(12),
                     ),
-                    child:
-                        Text(emoji, style: const TextStyle(fontSize: 18)),
+                    child: Text(emoji, style: const TextStyle(fontSize: 18)),
                   ),
                   const SizedBox(width: 10),
                   Expanded(
@@ -4371,7 +4385,7 @@ class _CategoryRow extends StatelessWidget {
                     fit: StackFit.expand,
                     children: [
                       ColoredBox(
-                        color: colors.bg3.withValues(alpha: 0.5),
+                        color: colors.bg3,
                       ),
                       FractionallySizedBox(
                         widthFactor: (pct / 100).clamp(0.0, 1.0),
@@ -4475,7 +4489,7 @@ class _BankRow extends StatelessWidget {
                     fit: StackFit.expand,
                     children: [
                       ColoredBox(
-                        color: colors.bg3.withValues(alpha: 0.5),
+                        color: colors.bg3,
                       ),
                       FractionallySizedBox(
                         widthFactor: (pct / 100).clamp(0.0, 1.0),
@@ -4557,8 +4571,7 @@ class _CardTypeRow extends StatelessWidget {
                       color: color.withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(12),
                     ),
-                    child:
-                        Text(icon, style: const TextStyle(fontSize: 18)),
+                    child: Text(icon, style: const TextStyle(fontSize: 18)),
                   ),
                   const SizedBox(width: 10),
                   Expanded(
@@ -4602,7 +4615,7 @@ class _CardTypeRow extends StatelessWidget {
                     fit: StackFit.expand,
                     children: [
                       ColoredBox(
-                        color: colors.bg3.withValues(alpha: 0.5),
+                        color: colors.bg3,
                       ),
                       FractionallySizedBox(
                         widthFactor: (pct / 100).clamp(0.0, 1.0),
@@ -4697,9 +4710,7 @@ class _TopExpenseItem extends StatelessWidget {
                   style: GoogleFonts.plusJakartaSans(
                     fontSize: 11,
                     fontWeight: FontWeight.w800,
-                    color: rank <= 3
-                        ? const Color(0xFFF59E0B)
-                        : colors.text4,
+                    color: rank <= 3 ? const Color(0xFFF59E0B) : colors.text4,
                   ),
                 ),
               ),
@@ -4711,8 +4722,7 @@ class _TopExpenseItem extends StatelessWidget {
                   color: catColor.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child:
-                    Text(emoji, style: const TextStyle(fontSize: 16)),
+                child: Text(emoji, style: const TextStyle(fontSize: 16)),
               ),
               const SizedBox(width: 10),
               Expanded(
@@ -4750,8 +4760,7 @@ class _TopExpenseItem extends StatelessWidget {
             ],
           ),
         ),
-        if (showDivider)
-          Divider(height: 1, color: colors.border2),
+        if (showDivider) Divider(height: 1, color: colors.border2),
       ],
     );
   }
@@ -4856,8 +4865,7 @@ class _SearchExpenseRow extends StatelessWidget {
                   color: catColor.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child:
-                    Text(emoji, style: const TextStyle(fontSize: 20)),
+                child: Text(emoji, style: const TextStyle(fontSize: 20)),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -4885,8 +4893,7 @@ class _SearchExpenseRow extends StatelessWidget {
                           ),
                         ),
                         Text('●',
-                            style: TextStyle(
-                                fontSize: 8, color: colors.text5)),
+                            style: TextStyle(fontSize: 8, color: colors.text5)),
                         Text(
                           dateS,
                           style: GoogleFonts.plusJakartaSans(
@@ -4898,7 +4905,7 @@ class _SearchExpenseRow extends StatelessWidget {
                           timeS,
                           style: GoogleFonts.plusJakartaSans(
                             fontSize: 11,
-                            color: colors.text5,
+                            color: colors.text4,
                           ),
                         ),
                       ],

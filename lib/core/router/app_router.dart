@@ -6,6 +6,8 @@ import '../../presentation/screens/landing/landing_screen.dart';
 import '../../presentation/widgets/app_shell.dart';
 import '../../presentation/screens/watch/watch_navigator.dart';
 import '../auth/auth_service.dart';
+import '../theme/app_motion.dart';
+import '../utils/reduced_motion.dart';
 
 late final GoRouter appRouter;
 
@@ -56,10 +58,15 @@ Widget _fadeTransition(
   Animation<double> secondaryAnimation,
   Widget child,
 ) {
+  // "Remove animations" means remove them: hand back the fully-opaque child
+  // so the route swap is instant rather than a shortened fade.
+  if (reducedMotion(context)) return child;
+
   return FadeTransition(
     opacity: CurvedAnimation(
       parent: animation,
-      curve: Curves.easeOutCubic,
+      curve: AppMotion.standardDecelerate,
+      reverseCurve: AppMotion.standardAccelerate,
     ),
     child: child,
   );

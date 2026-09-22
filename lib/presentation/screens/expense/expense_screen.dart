@@ -14,6 +14,7 @@ import '../../../core/services/expense_widget_service.dart';
 import '../../../core/services/process_text_service.dart';
 import '../../../core/services/telegram_logger.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../../core/utils/reduced_motion.dart';
 import '../../../data/repositories/expense_repository.dart';
 import '../../../data/services/sms_auto_expense/sms_auto_expense_service.dart';
 import '../../providers/profile_photo_provider.dart';
@@ -107,7 +108,9 @@ class _ExpenseScreenState extends ConsumerState<ExpenseScreen>
       final salaryRepo = ref.read(salaryRepositoryProvider);
       // Drain queued offline salary writes BEFORE pulling, so a salary entered
       // offline reaches the cloud and isn't shadowed by a server pull.
-      salaryRepo.drainSyncQueue().then((_) => salaryRepo.syncSalaryFromServer());
+      salaryRepo
+          .drainSyncQueue()
+          .then((_) => salaryRepo.syncSalaryFromServer());
       salaryRepo.retryPendingClear();
       ref.read(savedWordsRepositoryProvider).retryPendingClear();
     });
@@ -158,7 +161,8 @@ class _ExpenseScreenState extends ConsumerState<ExpenseScreen>
       SnackBar(
         content: Row(
           children: [
-            Icon(LucideIcons.cloudOff, size: 16, color: colors.isDark ? Colors.white70 : Colors.white),
+            Icon(LucideIcons.cloudOff,
+                size: 16, color: colors.isDark ? Colors.white70 : Colors.white),
             const SizedBox(width: 8),
             Text(
               'Sync failed — saved locally',
@@ -194,11 +198,7 @@ class _ExpenseScreenState extends ConsumerState<ExpenseScreen>
       smartParse: (text) => aiService.smartParse(
         text,
         liteModel: liteModel,
-        banks: ref
-            .read(settingsProvider)
-            .banks
-            .map((b) => b.name)
-            .toList(),
+        banks: ref.read(settingsProvider).banks.map((b) => b.name).toList(),
       ),
       onAdd: (payload, isManual, meta) async {
         final expense = Expense(
@@ -214,14 +214,17 @@ class _ExpenseScreenState extends ConsumerState<ExpenseScreen>
         );
         final sw = Stopwatch()..start();
         try {
-          final synced = await ref.read(expenseRepositoryProvider).addExpense(expense);
+          final synced =
+              await ref.read(expenseRepositoryProvider).addExpense(expense);
           sw.stop();
           TLog.i('Expense',
               '✅ Added in ${sw.elapsedMilliseconds}ms: ₹${payload.amount.toStringAsFixed(0)} | ${payload.description} | ${payload.category} | ${payload.bank}/${payload.cardType} | conf=${meta.confidence}');
           if (!synced) _showSyncError();
         } catch (e) {
           sw.stop();
-          TLog.e('Expense', 'Failed to add expense (${sw.elapsedMilliseconds}ms)', error: e);
+          TLog.e(
+              'Expense', 'Failed to add expense (${sw.elapsedMilliseconds}ms)',
+              error: e);
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(content: Text('Failed to save expense')),
@@ -244,7 +247,8 @@ class _ExpenseScreenState extends ConsumerState<ExpenseScreen>
       currentBudget: currentBudget,
       onSave: (amount) async {
         try {
-          final synced = await ref.read(expenseRepositoryProvider).setBudget(amount);
+          final synced =
+              await ref.read(expenseRepositoryProvider).setBudget(amount);
           TLog.i('Expense', '📊 Budget set: ₹${amount.toStringAsFixed(0)}');
           if (!synced) _showSyncError();
         } catch (e) {
@@ -276,14 +280,17 @@ class _ExpenseScreenState extends ConsumerState<ExpenseScreen>
       onUpdate: (updated) async {
         final sw = Stopwatch()..start();
         try {
-          final synced = await ref.read(expenseRepositoryProvider).updateExpense(updated);
+          final synced =
+              await ref.read(expenseRepositoryProvider).updateExpense(updated);
           sw.stop();
           TLog.i('Expense',
               '✏️ Updated in ${sw.elapsedMilliseconds}ms: ₹${updated.amount.toStringAsFixed(0)} | ${updated.description} | ${updated.category}');
           if (!synced) _showSyncError();
         } catch (e) {
           sw.stop();
-          TLog.e('Expense', 'Failed to update expense (${sw.elapsedMilliseconds}ms)', error: e);
+          TLog.e('Expense',
+              'Failed to update expense (${sw.elapsedMilliseconds}ms)',
+              error: e);
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(content: Text('Failed to update expense')),
@@ -320,14 +327,14 @@ class _ExpenseScreenState extends ConsumerState<ExpenseScreen>
     }
     try {
       final synced = await ref.read(expenseRepositoryProvider).mergeExpenses(
-        sourceIds: plan.sourceIds,
-        merged: merged,
-      );
+            sourceIds: plan.sourceIds,
+            merged: merged,
+          );
       unawaited(
         ref.read(learningsProvider.notifier).learnFromDescription(
-          merged.description,
-          merged.category,
-        ),
+              merged.description,
+              merged.category,
+            ),
       );
       if (!mounted) return;
       if (!synced) _showSyncError();
@@ -342,13 +349,16 @@ class _ExpenseScreenState extends ConsumerState<ExpenseScreen>
   Future<void> _deleteExpense(String id) async {
     final sw = Stopwatch()..start();
     try {
-      final synced = await ref.read(expenseRepositoryProvider).deleteExpense(id);
+      final synced =
+          await ref.read(expenseRepositoryProvider).deleteExpense(id);
       sw.stop();
       TLog.i('Expense', '🗑️ Deleted in ${sw.elapsedMilliseconds}ms: $id');
       if (!synced) _showSyncError();
     } catch (e) {
       sw.stop();
-      TLog.e('Expense', 'Failed to delete expense (${sw.elapsedMilliseconds}ms)', error: e);
+      TLog.e(
+          'Expense', 'Failed to delete expense (${sw.elapsedMilliseconds}ms)',
+          error: e);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Failed to delete expense')),
@@ -387,8 +397,10 @@ class _ExpenseScreenState extends ConsumerState<ExpenseScreen>
         return;
     }
     if (!serverOk) {
-      TLog.w('Expense', 'Easter egg "$command" — server sync pending, '
-          'will retry automatically on next launch');
+      TLog.w(
+          'Expense',
+          'Easter egg "$command" — server sync pending, '
+              'will retry automatically on next launch');
     }
   }
 
@@ -429,9 +441,8 @@ class _ExpenseScreenState extends ConsumerState<ExpenseScreen>
     showExpenseTimeframeScreen(
       context,
       ExpenseTimeframe(
-        label: category == null || category.isEmpty
-            ? label
-            : '$label · $category',
+        label:
+            category == null || category.isEmpty ? label : '$label · $category',
         startIso: start?.toIso8601String(),
         endIso: end?.toIso8601String(),
         seedCategory: category,
@@ -558,11 +569,7 @@ class _ExpenseScreenState extends ConsumerState<ExpenseScreen>
       smartParse: (text) => aiService.smartParse(
         text,
         liteModel: liteModel,
-        banks: ref
-            .read(settingsProvider)
-            .banks
-            .map((b) => b.name)
-            .toList(),
+        banks: ref.read(settingsProvider).banks.map((b) => b.name).toList(),
       ),
       initialImagePath: imagePath,
       onAdd: (payload, isManual, meta) async {
@@ -587,7 +594,9 @@ class _ExpenseScreenState extends ConsumerState<ExpenseScreen>
           if (!synced) _showSyncError();
         } catch (e) {
           sw.stop();
-          TLog.e('Expense', 'Failed to add expense from share (${sw.elapsedMilliseconds}ms)', error: e);
+          TLog.e('Expense',
+              'Failed to add expense from share (${sw.elapsedMilliseconds}ms)',
+              error: e);
         }
       },
       onTeachAI: (description, category) {
@@ -612,11 +621,7 @@ class _ExpenseScreenState extends ConsumerState<ExpenseScreen>
       smartParse: (text) => aiService.smartParse(
         text,
         liteModel: liteModel,
-        banks: ref
-            .read(settingsProvider)
-            .banks
-            .map((b) => b.name)
-            .toList(),
+        banks: ref.read(settingsProvider).banks.map((b) => b.name).toList(),
       ),
       initialText: sharedText,
       onAdd: (payload, isManual, meta) async {
@@ -641,7 +646,9 @@ class _ExpenseScreenState extends ConsumerState<ExpenseScreen>
           if (!synced) _showSyncError();
         } catch (e) {
           sw.stop();
-          TLog.e('Expense', 'Failed to add expense from shared text (${sw.elapsedMilliseconds}ms)', error: e);
+          TLog.e('Expense',
+              'Failed to add expense from shared text (${sw.elapsedMilliseconds}ms)',
+              error: e);
         }
       },
       onTeachAI: (description, category) {
@@ -865,6 +872,17 @@ class _AiSearchFabState extends State<_AiSearchFab>
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (reducedMotion(context)) {
+      _pulse.stop();
+      _pulse.value = 0;
+    } else if (!_pulse.isAnimating) {
+      _pulse.repeat();
+    }
+  }
+
+  @override
   void dispose() {
     _scaleCtrl.dispose();
     _pulse.dispose();
@@ -873,45 +891,55 @@ class _AiSearchFabState extends State<_AiSearchFab>
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTapDown: (_) => _scaleCtrl.forward(),
-      onTapUp: (_) {
-        _scaleCtrl.reverse();
-        widget.onTap();
-      },
-      onTapCancel: () => _scaleCtrl.reverse(),
-      child: ScaleTransition(
-        scale: _scaleAnim,
-        child: AnimatedBuilder(
-          animation: _pulse,
-          builder: (context, child) {
-            final wave = (math.sin(_pulse.value * 2 * math.pi) + 1) / 2; // 0..1
-            return Container(
-              width: 56,
-              height: 56,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: const LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [_gradC, _gradB],
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: _gradB.withValues(alpha: 0.40 + wave * 0.25),
-                    blurRadius: 16 + wave * 10,
-                    spreadRadius: wave * 1.5,
-                    offset: const Offset(0, 4),
+    final still = reducedMotion(context);
+    return Semantics(
+      button: true,
+      label: 'Ask AI',
+      child: GestureDetector(
+        onTapDown: (_) {
+          if (!still) _scaleCtrl.forward();
+        },
+        onTapUp: (_) {
+          if (!still) _scaleCtrl.reverse();
+          widget.onTap();
+        },
+        onTapCancel: () {
+          if (!still) _scaleCtrl.reverse();
+        },
+        child: ScaleTransition(
+          scale: still ? const AlwaysStoppedAnimation(1.0) : _scaleAnim,
+          child: AnimatedBuilder(
+            animation: _pulse,
+            builder: (context, child) {
+              final wave =
+                  still ? 0.0 : (math.sin(_pulse.value * 2 * math.pi) + 1) / 2;
+              return Container(
+                width: 56,
+                height: 56,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: const LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [_gradC, _gradB],
                   ),
-                ],
-              ),
-              child: child,
-            );
-          },
-          child: const Icon(
-            LucideIcons.sparkles,
-            color: Colors.white,
-            size: 24,
+                  boxShadow: [
+                    BoxShadow(
+                      color: _gradB.withValues(alpha: 0.40 + wave * 0.25),
+                      blurRadius: 16 + wave * 10,
+                      spreadRadius: wave * 1.5,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: child,
+              );
+            },
+            child: const Icon(
+              LucideIcons.sparkles,
+              color: Colors.white,
+              size: 24,
+            ),
           ),
         ),
       ),
@@ -954,37 +982,46 @@ class _AddExpenseFabState extends State<_AddExpenseFab>
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTapDown: (_) => _scaleCtrl.forward(),
-      onTapUp: (_) {
-        _scaleCtrl.reverse();
-        widget.onTap();
-      },
-      onTapCancel: () => _scaleCtrl.reverse(),
-      child: ScaleTransition(
-        scale: _scaleAnim,
-        child: Container(
-          width: 56,
-          height: 56,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            gradient: const LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [Color(0xFF7C3AED), Color(0xFF6366F1)],
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: const Color(0xFF7C3AED).withValues(alpha: 0.6),
-                blurRadius: 20,
-                offset: const Offset(0, 4),
+    final still = reducedMotion(context);
+    return Semantics(
+      button: true,
+      label: 'Add expense',
+      child: GestureDetector(
+        onTapDown: (_) {
+          if (!still) _scaleCtrl.forward();
+        },
+        onTapUp: (_) {
+          if (!still) _scaleCtrl.reverse();
+          widget.onTap();
+        },
+        onTapCancel: () {
+          if (!still) _scaleCtrl.reverse();
+        },
+        child: ScaleTransition(
+          scale: still ? const AlwaysStoppedAnimation(1.0) : _scaleAnim,
+          child: Container(
+            width: 56,
+            height: 56,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: const LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [Color(0xFF7C3AED), Color(0xFF6366F1)],
               ),
-            ],
-          ),
-          child: const Icon(
-            LucideIcons.plus,
-            color: Colors.white,
-            size: 24,
+              boxShadow: [
+                BoxShadow(
+                  color: const Color(0xFF7C3AED).withValues(alpha: 0.6),
+                  blurRadius: 20,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: const Icon(
+              LucideIcons.plus,
+              color: Colors.white,
+              size: 24,
+            ),
           ),
         ),
       ),

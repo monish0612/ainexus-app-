@@ -2273,7 +2273,7 @@ class _HeatCalendar extends StatelessWidget {
                   }
                   final day = days[i - leading];
                   final bg = day.isFuture
-                      ? colors.bg3.withValues(alpha: 0.45)
+                      ? colors.bg3.withValues(alpha: colors.bg3.a * 0.45)
                       : Color.lerp(
                           colors.bg3,
                           hot,

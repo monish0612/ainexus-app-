@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../../../../../core/theme/app_colors.dart';
+import '../../../../../core/utils/reduced_motion.dart';
 
 /// The shared vocabulary both Stats screens are built from: cards, chips, the
 /// live pulse, the offline treatment, and the number formatting.
@@ -237,23 +238,28 @@ class _LivePulseState extends State<LivePulse>
   );
 
   @override
-  void initState() {
-    super.initState();
-    if (widget.live) _controller.repeat(reverse: true);
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _sync();
   }
 
   @override
   void didUpdateWidget(covariant LivePulse old) {
     super.didUpdateWidget(old);
     if (widget.live == old.live) return;
-    if (widget.live) {
-      _controller.repeat(reverse: true);
-    } else {
-      // Stop at full opacity rather than wherever the pulse happened to be, so
-      // a stopped feed does not look like a half-faded bug.
-      _controller.stop();
-      _controller.value = 1;
+    _sync();
+  }
+
+  /// A live feed pulses; a stopped feed — or a user who asked for reduced
+  /// motion — rests at full opacity rather than wherever the pulse happened
+  /// to be, so it never looks like a half-faded bug.
+  void _sync() {
+    if (widget.live && !reducedMotion(context)) {
+      if (!_controller.isAnimating) _controller.repeat(reverse: true);
+      return;
     }
+    _controller.stop();
+    _controller.value = 1;
   }
 
   @override

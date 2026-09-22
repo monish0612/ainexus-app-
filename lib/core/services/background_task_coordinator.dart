@@ -55,10 +55,34 @@ class BackgroundTaskCoordinator {
   /// the throttle window.
   Timer? _pendingRefresh;
 
+  /// True while [HoldToSpeakController] (or any caller) is actually using
+  /// the microphone. Does **not** start the FGS on its own — recording in
+  /// a visible activity does not need one — but if the FGS is already
+  /// running for AI work, Android 14+ requires the `microphone` type.
+  bool _microphoneInUse = false;
+
+  bool _taskDataListening = false;
+
+  /// Types last passed to [FlutterForegroundTask.startService].
+  List<ForegroundServiceTypes> _startedTypes = const [];
+
   /// Initialises the underlying `flutter_foreground_task` configuration.
   /// Safe to call multiple times — the plugin just re-stores the options.
   void init() {
     initBackgroundForegroundTask();
+    _listenForTaskIsolate();
+  }
+
+  void _listenForTaskIsolate() {
+    if (!PlatformCapabilities.canUseForegroundTask) return;
+    if (_taskDataListening) return;
+    _taskDataListening = true;
+    try {
+      FlutterForegroundTask.initCommunicationPort();
+      FlutterForegroundTask.addTaskDataCallback(onTaskIsolateData);
+    } catch (e, st) {
+      TLog.w('BgCoord', 'task-isolate listen failed: $e', error: e, st: st);
+    }
   }
 
   /// True while the foreground service is (intended to be) running.
@@ -73,9 +97,15 @@ class BackgroundTaskCoordinator {
   ///
   /// Calling [acquire] with an existing [slotId] simply updates the label
   /// — useful for "phase change" updates without releasing.
+  ///
+  /// [needsMicrophone] is for slots that record while they are held. Do
+  /// not set it for post-recording network work (smart-parse, STT upload);
+  /// Android 14+ requires the microphone FGS type only while the mic is
+  /// actually in use. Live recording uses [setMicrophoneInUse] instead.
   Future<void> acquire(
     String slotId, {
     required String label,
+    bool needsMicrophone = false,
   }) async {
     if (!PlatformCapabilities.canUseForegroundTask) return;
 
@@ -84,11 +114,13 @@ class BackgroundTaskCoordinator {
     _slots[slotId] = _Slot(
       label: label,
       since: existing?.since ?? DateTime.now(),
+      needsMicrophone: needsMicrophone,
     );
 
     if (wasEmpty) {
       await _startService();
     } else {
+      await _reconcileRunningServiceTypes();
       _scheduleNotificationRefresh();
     }
   }
@@ -102,6 +134,7 @@ class BackgroundTaskCoordinator {
     if (_slots.isEmpty) {
       await _stopService();
     } else {
+      await _reconcileRunningServiceTypes();
       _scheduleNotificationRefresh();
     }
   }
@@ -112,11 +145,108 @@ class BackgroundTaskCoordinator {
     if (!PlatformCapabilities.canUseForegroundTask) return;
     final slot = _slots[slotId];
     if (slot == null) return;
-    _slots[slotId] = _Slot(label: label, since: slot.since);
+    _slots[slotId] = _Slot(
+      label: label,
+      since: slot.since,
+      needsMicrophone: slot.needsMicrophone,
+    );
     _scheduleNotificationRefresh();
   }
 
+  /// Tell the coordinator the process is using the microphone right now.
+  ///
+  /// Does not start a foreground service (that would flash a notification
+  /// on every hold-to-speak). If the AI FGS is already running, it is
+  /// restarted with `dataSync|microphone` so API 34+ does not kill the
+  /// recording. Clearing the flag drops back to `dataSync` only.
+  Future<void> setMicrophoneInUse(bool inUse) async {
+    if (!PlatformCapabilities.canUseForegroundTask) return;
+    if (_microphoneInUse == inUse) return;
+    _microphoneInUse = inUse;
+    if (!_serviceActive) return;
+    await _reconcileRunningServiceTypes();
+  }
+
+  /// Handles messages from the FGS Dart isolate. [kFgsTimeoutEvent] means
+  /// Android 15+ stopped the `dataSync` service (6-hour cap or type
+  /// timeout). Slots are dropped so callers do not think the notification
+  /// is still up; in-flight HTTP on the main isolate keeps running and
+  /// uses its existing error paths.
+  @visibleForTesting
+  void onTaskIsolateData(Object data) {
+    if (data != kFgsTimeoutEvent) return;
+    TLog.w(
+      'BgCoord',
+      'foreground service stopped by OS timeout — work continues without FGS',
+    );
+    _pendingRefresh?.cancel();
+    _pendingRefresh = null;
+    _slots.clear();
+    _serviceActive = false;
+    _startedTypes = const [];
+  }
+
+  @visibleForTesting
+  bool get debugMicrophoneInUse => _microphoneInUse;
+
+  @visibleForTesting
+  bool get debugServiceTypesIncludeMicrophone =>
+      _computeTypes().contains(ForegroundServiceTypes.microphone);
+
+  @visibleForTesting
+  void debugReset() {
+    _pendingRefresh?.cancel();
+    _pendingRefresh = null;
+    _slots.clear();
+    _serviceActive = false;
+    _microphoneInUse = false;
+    _startedTypes = const [];
+  }
+
   // ── Internals ─────────────────────────────────────────────────────────
+
+  List<ForegroundServiceTypes> _computeTypes() {
+    final needMic = _microphoneInUse ||
+        _slots.values.any((slot) => slot.needsMicrophone);
+    if (needMic) {
+      return const [
+        ForegroundServiceTypes.dataSync,
+        ForegroundServiceTypes.microphone,
+      ];
+    }
+    return const [ForegroundServiceTypes.dataSync];
+  }
+
+  bool _sameTypes(
+    List<ForegroundServiceTypes> a,
+    List<ForegroundServiceTypes> b,
+  ) {
+    if (a.length != b.length) return false;
+    final aVals = a.map((e) => e.rawValue).toSet();
+    final bVals = b.map((e) => e.rawValue).toSet();
+    return aVals.length == bVals.length && aVals.containsAll(bVals);
+  }
+
+  Future<void> _reconcileRunningServiceTypes() async {
+    if (!_serviceActive || _slots.isEmpty) return;
+    final desired = _computeTypes();
+    if (_sameTypes(desired, _startedTypes)) return;
+    TLog.d(
+      'BgCoord',
+      'restarting FGS to apply service types (mic=${desired.contains(ForegroundServiceTypes.microphone)})',
+    );
+    try {
+      final running = await FlutterForegroundTask.isRunningService;
+      if (running) {
+        await FlutterForegroundTask.stopService();
+      }
+    } catch (e) {
+      TLog.w('BgCoord', 'reconcile stop threw: $e', error: e);
+    }
+    _serviceActive = false;
+    _startedTypes = const [];
+    await _startService();
+  }
 
   Future<void> _startService() async {
     if (_serviceActive) return;
@@ -124,12 +254,14 @@ class BackgroundTaskCoordinator {
       final already = await FlutterForegroundTask.isRunningService;
       if (already) {
         _serviceActive = true;
+        _startedTypes = _computeTypes();
         await _refreshNotificationNow();
         return;
       }
       final body = _buildBody();
+      final types = _computeTypes();
       final result = await FlutterForegroundTask.startService(
-        serviceTypes: const [ForegroundServiceTypes.dataSync],
+        serviceTypes: types,
         notificationTitle: _kNotifTitle,
         notificationText: body,
         notificationIcon: const NotificationIcon(
@@ -140,6 +272,7 @@ class BackgroundTaskCoordinator {
       );
       if (result is ServiceRequestSuccess) {
         _serviceActive = true;
+        _startedTypes = types;
         _lastNotifAt = DateTime.now();
         TLog.i(
             'BgCoord', 'foreground service started (${_slots.length} slot(s))');
@@ -162,6 +295,7 @@ class BackgroundTaskCoordinator {
   Future<void> _stopService() async {
     if (!_serviceActive) return;
     _serviceActive = false;
+    _startedTypes = const [];
     _pendingRefresh?.cancel();
     _pendingRefresh = null;
     try {
@@ -239,8 +373,13 @@ class BackgroundTaskCoordinator {
 
 @immutable
 class _Slot {
-  const _Slot({required this.label, required this.since});
+  const _Slot({
+    required this.label,
+    required this.since,
+    this.needsMicrophone = false,
+  });
 
   final String label;
   final DateTime since;
+  final bool needsMicrophone;
 }

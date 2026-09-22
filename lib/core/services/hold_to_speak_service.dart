@@ -8,6 +8,7 @@ import 'package:record/record.dart';
 import 'package:speech_to_text/speech_recognition_result.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 
+import 'background_task_coordinator.dart';
 import 'telegram_logger.dart';
 
 /// Lifecycle states emitted by [HoldToSpeakController].
@@ -215,6 +216,11 @@ class HoldToSpeakController extends ChangeNotifier {
   /// route `onStatus`/`onError` to this owner so per-widget state doesn't
   /// leak between sessions. `null` when nobody is listening.
   static HoldToSpeakController? _activeOwner;
+
+  /// True while this controller has told [BackgroundTaskCoordinator] the
+  /// mic is in use. Kept separate from [_holdActive] so we never leave the
+  /// FGS typed as `microphone` after the hold ends.
+  bool _micFgsHeld = false;
 
   // ── Tunables ───────────────────────────────────────────────────────────
 
@@ -441,6 +447,7 @@ class HoldToSpeakController extends ChangeNotifier {
     }
 
     _startElapsedTimer();
+    _setMicrophoneFgs(true);
 
     if (recordAudio) {
       // Fire and forget — recording failures are non-fatal; STT can still work.
@@ -456,6 +463,7 @@ class HoldToSpeakController extends ChangeNotifier {
     if (!started || !_holdActive) {
       _stopElapsedTimer();
       await _stopAudioRecording(discard: true);
+      _setMicrophoneFgs(false);
       if (_holdActive) {
         _holdActive = false;
         if (_activeOwner == this) _activeOwner = null;
@@ -547,6 +555,7 @@ class HoldToSpeakController extends ChangeNotifier {
     }
 
     await _stopAudioRecording(discard: true);
+    _setMicrophoneFgs(false);
 
     final completer = _stopCompleter;
     _stopCompleter = null;
@@ -597,6 +606,7 @@ class HoldToSpeakController extends ChangeNotifier {
         _setStatus(HoldToSpeakStatus.error);
         _holdActive = false;
         if (_activeOwner == this) _activeOwner = null;
+        _setMicrophoneFgs(false);
         return false;
       }
       Future<void>.delayed(_backoff(_consecutivePermFailures), () {
@@ -820,6 +830,7 @@ class HoldToSpeakController extends ChangeNotifier {
     _stopCompleter = null;
     _holdActive = false;
     _stopRequested = false;
+    _setMicrophoneFgs(false);
 
     // Stop audio capture — we want the file flushed before returning.
     unawaited(_stopAudioRecording().then((_) {
@@ -933,6 +944,12 @@ class HoldToSpeakController extends ChangeNotifier {
 
   // ── Status helper ──────────────────────────────────────────────────────
 
+  void _setMicrophoneFgs(bool inUse) {
+    if (_micFgsHeld == inUse) return;
+    _micFgsHeld = inUse;
+    unawaited(BackgroundTaskCoordinator.instance.setMicrophoneInUse(inUse));
+  }
+
   void _setStatus(HoldToSpeakStatus next) {
     if (_disposed || _status == next) return;
     _status = next;
@@ -955,6 +972,7 @@ class HoldToSpeakController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _setMicrophoneFgs(false);
     if (_holdActive || _stopCompleter != null || _activeOwner == this) {
       // Fire-and-forget cancel; everything checks `_disposed` before
       // touching state so it's safe to let it run after super.dispose().

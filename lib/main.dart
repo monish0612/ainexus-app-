@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -18,7 +19,7 @@ import 'core/router/app_router.dart';
 import 'core/network/api_client.dart';
 import 'core/services/expense_widget_service.dart';
 import 'core/services/hold_to_speak_service.dart';
-import 'core/services/news_summarize_fg_task.dart';
+import 'core/services/background_task_coordinator.dart';
 import 'core/services/news_summarize_store.dart';
 import 'core/services/notification_service.dart';
 import 'core/services/notification_tap.dart';
@@ -41,6 +42,19 @@ void main() async {
   runZonedGuarded(
     () async {
       WidgetsFlutterBinding.ensureInitialized();
+      GoogleFonts.config.allowRuntimeFetching = false;
+      LicenseRegistry.addLicense(() async* {
+        for (final name in const [
+          'OFL-PlusJakartaSans.txt',
+          'OFL-JetBrainsMono.txt',
+          'OFL-Lora.txt',
+          'OFL-DMSans.txt',
+        ]) {
+          final license =
+              await rootBundle.loadString('google_fonts/$name');
+          yield LicenseEntryWithLineBreaks(const ['google_fonts'], license);
+        }
+      });
       TLog.init();
 
       FlutterError.onError = (details) {
@@ -119,7 +133,7 @@ void main() async {
       // can promote itself to a foreground service the first time it
       // needs to. Safe to call before the engine renders;
       // FlutterForegroundTask.init just stashes options.
-      initBackgroundForegroundTask();
+      BackgroundTaskCoordinator.instance.init();
       unawaited(NarrationCompletionStore.instance.load(sharedPreferences));
       unawaited(NarrationDownloadStore.instance.hydrate(prefs: sharedPreferences));
       TLog.d('Init', 'Auth + Router + ForegroundTask ready');

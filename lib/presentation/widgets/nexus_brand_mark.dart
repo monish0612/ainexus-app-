@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/theme/app_colors.dart';
+import '../../core/utils/reduced_motion.dart';
 
 /// Live brand mark used on Login / Landing.
 ///
@@ -31,6 +32,17 @@ class _NexusBrandMarkState extends State<NexusBrandMark>
       vsync: this,
       duration: const Duration(seconds: 14),
     )..repeat();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (reducedMotion(context)) {
+      _spin.stop();
+      _spin.value = 0;
+    } else if (!_spin.isAnimating) {
+      _spin.repeat();
+    }
   }
 
   @override

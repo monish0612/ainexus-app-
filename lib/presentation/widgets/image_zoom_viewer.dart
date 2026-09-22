@@ -230,6 +230,12 @@ class _ImageZoomViewerState extends State<ImageZoomViewer>
       imageUrl: widget.imageUrl,
       fit: BoxFit.contain,
       fadeInDuration: const Duration(milliseconds: 180),
+      memCacheWidth: (MediaQuery.sizeOf(context).width *
+              MediaQuery.devicePixelRatioOf(context))
+          .round(),
+      memCacheHeight: (MediaQuery.sizeOf(context).height *
+              MediaQuery.devicePixelRatioOf(context))
+          .round(),
       placeholder: (_, __) => const Center(
         child: SizedBox(
           width: 34,

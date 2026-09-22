@@ -32,6 +32,9 @@ class RephraseAccessibilityService : AccessibilityService() {
     /** When we last touched the overlay window, for the self-event grace period. */
     private var lastOverlayChangeAt = 0L
 
+    private var windowsCachedAt = 0L
+    private var windowsCache: List<AccessibilityWindowInfo> = emptyList()
+
     /** Guards against a double-tap on Use writing the same text twice. */
     private val replaceInFlight = AtomicBoolean(false)
 
@@ -69,11 +72,6 @@ class RephraseAccessibilityService : AccessibilityService() {
             onSettled = ::onFieldSettled,
             onLeave = ::onFocusLost,
         )
-        safe {
-            controller.warm()?.let { engine ->
-                bridge = OverlayBridgeHost(this).also { it.attach(engine) }
-            }
-        }
         Log.i(TAG, "rephrase bubble service connected")
     }
 
@@ -86,6 +84,12 @@ class RephraseAccessibilityService : AccessibilityService() {
                 AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED,
                 AccessibilityEvent.TYPE_VIEW_FOCUSED,
                 AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED -> {
+                    // Master gates before any window/node API so a disabled
+                    // bubble never calls getWindows() on every keystroke.
+                    if (!gatesOpen(event.packageName?.toString())) {
+                        hideBubble()
+                        return@safe
+                    }
                     // Drop overlay / system windows, but ALLOW Nexus app fields
                     // and IME-sourced keystrokes (Android often tags typing as
                     // the keyboard window once it is open).
@@ -96,10 +100,6 @@ class RephraseAccessibilityService : AccessibilityService() {
                             windowType = windowTypeOf(event.windowId),
                         )
                     ) {
-                        return@safe
-                    }
-                    if (!gatesOpen(event.packageName?.toString())) {
-                        hideBubble()
                         return@safe
                     }
                     tracker?.onTyping { resolveFocusedInput() }
@@ -113,6 +113,21 @@ class RephraseAccessibilityService : AccessibilityService() {
                     if (SystemClock.uptimeMillis() - lastOverlayChangeAt <
                         OVERLAY_GRACE_MS
                     ) {
+                        return@safe
+                    }
+                    // Keep WINDOWS_CHANGED subscribed so IME open/close can
+                    // reclamp while showing. When the bubble is gone, skip
+                    // the window walk entirely except a real app switch on
+                    // WINDOW_STATE_CHANGED (clears the long-press suppress).
+                    if (overlay?.isShowing != true) {
+                        if (event.eventType ==
+                            AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED &&
+                            isRealAppSwitch()
+                        ) {
+                            suppressedUntilWindowChange = false
+                            target = null
+                            tracker?.cancel()
+                        }
                         return@safe
                     }
                     // IME open/close is not an app switch — just reclamp the
@@ -131,11 +146,26 @@ class RephraseAccessibilityService : AccessibilityService() {
     }
 
     /** Master toggle, per-app skip list, and the manual dismiss. */
-    private fun gatesOpen(sourcePackage: String?): Boolean {
-        if (suppressedUntilWindowChange) return false
-        if (!BubblePrefs.isEnabled(this)) return false
-        if (sourcePackage != null && sourcePackage in BubblePrefs.skipPackages(this)) return false
-        return true
+    private fun gatesOpen(sourcePackage: String?): Boolean =
+        WindowGate.eventGatesOpen(
+            enabled = BubblePrefs.isEnabled(this),
+            suppressed = suppressedUntilWindowChange,
+            skipped = sourcePackage != null &&
+                sourcePackage in BubblePrefs.skipPackages(this),
+        )
+
+    private fun cachedWindows(): List<AccessibilityWindowInfo> {
+        val now = SystemClock.uptimeMillis()
+        if (windowsCachedAt != 0L && now - windowsCachedAt < WINDOWS_CACHE_MS) {
+            return windowsCache
+        }
+        windowsCachedAt = now
+        windowsCache = try {
+            windows ?: emptyList()
+        } catch (_: Throwable) {
+            emptyList()
+        }
+        return windowsCache
     }
 
     /**
@@ -146,7 +176,7 @@ class RephraseAccessibilityService : AccessibilityService() {
      */
     private fun resolveFocusedInput(): AccessibilityNodeInfo? {
         return try {
-            val snapshot = windows ?: emptyList()
+            val snapshot = cachedWindows()
             for (window in snapshot) {
                 if (!WindowGate.isUsableFieldWindowType(window.type)) continue
                 val focused = window.root?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
@@ -177,7 +207,7 @@ class RephraseAccessibilityService : AccessibilityService() {
         WindowGate.isRealAppSwitch(target?.packageName, applicationPackages())
 
     private fun applicationPackages(): Set<String> = try {
-        (windows ?: emptyList()).mapNotNull { window ->
+        cachedWindows().mapNotNull { window ->
             if (window.type != AccessibilityWindowInfo.TYPE_APPLICATION) return@mapNotNull null
             window.root?.packageName?.toString()?.takeIf { it.isNotEmpty() }
         }.toSet()
@@ -195,7 +225,7 @@ class RephraseAccessibilityService : AccessibilityService() {
     }
 
     private fun windowTypeOf(windowId: Int): Int? = try {
-        windows.firstOrNull { it.id == windowId }?.type
+        cachedWindows().firstOrNull { it.id == windowId }?.type
     } catch (t: Throwable) {
         null
     }
@@ -235,6 +265,7 @@ class RephraseAccessibilityService : AccessibilityService() {
         lastOverlayChangeAt = SystemClock.uptimeMillis()
         overlay?.showBubble(Rect(ref.bounds))
         ensureBridge()
+        bridge?.notifyResume()
         bridge?.notifyTarget(targetPayload())
     }
 
@@ -252,7 +283,10 @@ class RephraseAccessibilityService : AccessibilityService() {
     private fun hideBubble() {
         safe {
             lastOverlayChangeAt = SystemClock.uptimeMillis()
-            if (overlay?.isShowing == true) bridge?.notifyCollapse()
+            if (overlay?.isShowing == true) {
+                bridge?.notifyCollapse()
+                bridge?.notifyPause()
+            }
             overlay?.hide()
         }
     }
@@ -410,6 +444,9 @@ class RephraseAccessibilityService : AccessibilityService() {
 
         /** How long to ignore window churn caused by our own overlay. */
         private const val OVERLAY_GRACE_MS = 500L
+
+        /** Reuse getWindows() snapshots across a burst of accessibility events. */
+        private const val WINDOWS_CACHE_MS = 250L
 
         /**
          * Pure gate for typing events. Allows Nexus APPLICATION windows and

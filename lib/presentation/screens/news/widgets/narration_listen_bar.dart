@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/physics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:just_audio/just_audio.dart';
@@ -10,6 +11,8 @@ import '../../../../core/auth/app_token_store.dart';
 import '../../../../core/network/api_client.dart';
 import '../../../../core/services/telegram_logger.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_motion.dart';
+import '../../../../core/utils/reduced_motion.dart';
 import '../../../../data/services/article_tts_service.dart';
 import '../../../../data/services/narration_api.dart';
 import '../../../../data/services/narration_audio_handler.dart';
@@ -56,8 +59,11 @@ class _NarrationListenBarState extends ConsumerState<NarrationListenBar> {
   Timer? _giveUp;
   bool _starting = false;
   bool _downloading = false;
+  bool _warmed = false;
   int _bootGen = 0;
   int _transientTries = 0;
+  DateTime? _pollStartedAt;
+  bool _offeredUnreachableFallback = false;
   ListenSurface? _surface;
 
   static bool get _inWidgetTest => WidgetsBinding.instance.runtimeType
@@ -81,6 +87,8 @@ class _NarrationListenBarState extends ConsumerState<NarrationListenBar> {
         _booted = false;
         _job = const NarrationJob(status: NarrationJobStatus.unknown);
         _transientTries = 0;
+        _offeredUnreachableFallback = false;
+        _pollStartedAt = null;
         _surface = null;
       });
       unawaited(_boot());
@@ -189,44 +197,9 @@ class _NarrationListenBarState extends ConsumerState<NarrationListenBar> {
   void _startPoll() {
     _poll?.cancel();
     _transientTries = 0;
-    _poll = Timer.periodic(const Duration(seconds: 2), (_) async {
-      final job = await _api.status(widget.article.id);
-      if (!mounted) return;
-      final gen = _bootGen;
-      if (job.isReady || job.isPreparing) {
-        _applyJob(job, gen: gen);
-        if (job.isReady) {
-          _poll?.cancel();
-          _giveUp?.cancel();
-        }
-        if (job.isPreparing) _transientTries = 0;
-        return;
-      }
-      if (isTransientNarrationFailure(job)) {
-        _transientTries += 1;
-        // ~45s of unknown/unreachable before offering on-device TTS.
-        // Keep polling so a late Local LLM ready still upgrades the bar.
-        if (_transientTries == 22) {
-          _applyJob(
-            const NarrationJob(
-              status: NarrationJobStatus.fallback,
-              configured: false,
-              reason: 'unreachable_exhausted',
-            ),
-            gen: gen,
-            allowTerminalFallback: true,
-          );
-        } else {
-          _applyJob(job, gen: gen);
-        }
-        return;
-      }
-      _applyJob(
-        job,
-        gen: gen,
-        allowTerminalFallback: isTerminalNarrationFailure(job),
-      );
-    });
+    _offeredUnreachableFallback = false;
+    _pollStartedAt = DateTime.now();
+    _armPoll();
     _giveUp?.cancel();
     _giveUp = Timer(const Duration(minutes: 8), () {
       if (!mounted) return;
@@ -243,6 +216,57 @@ class _NarrationListenBarState extends ConsumerState<NarrationListenBar> {
     });
   }
 
+  void _armPoll() {
+    _poll?.cancel();
+    _poll = Timer(narrationPollInterval(_transientTries), () {
+      unawaited(_onPollTick());
+    });
+  }
+
+  Future<void> _onPollTick() async {
+    final job = await _api.status(widget.article.id);
+    if (!mounted) return;
+    final gen = _bootGen;
+    if (job.isReady || job.isPreparing) {
+      _applyJob(job, gen: gen);
+      if (job.isReady) {
+        _poll?.cancel();
+        _giveUp?.cancel();
+        return;
+      }
+      if (job.isPreparing) _transientTries = 0;
+      if (mounted) _armPoll();
+      return;
+    }
+    if (isTransientNarrationFailure(job)) {
+      _transientTries += 1;
+      final elapsed = DateTime.now().difference(_pollStartedAt ?? DateTime.now());
+      if (!_offeredUnreachableFallback &&
+          narrationShouldOfferUnreachableFallback(elapsed)) {
+        _offeredUnreachableFallback = true;
+        _applyJob(
+          const NarrationJob(
+            status: NarrationJobStatus.fallback,
+            configured: false,
+            reason: 'unreachable_exhausted',
+          ),
+          gen: gen,
+          allowTerminalFallback: true,
+        );
+      } else {
+        _applyJob(job, gen: gen);
+      }
+      if (mounted && shouldKeepPollingNarration(_job)) _armPoll();
+      return;
+    }
+    _applyJob(
+      job,
+      gen: gen,
+      allowTerminalFallback: isTerminalNarrationFailure(job),
+    );
+    if (mounted && shouldKeepPollingNarration(_job)) _armPoll();
+  }
+
   Future<bool> _waitUntilReady() async {
     final deadline = DateTime.now().add(const Duration(minutes: 8));
     while (mounted && DateTime.now().isBefore(deadline)) {
@@ -253,9 +277,36 @@ class _NarrationListenBarState extends ConsumerState<NarrationListenBar> {
     return _job.isReady;
   }
 
+  /// AudioService.init is the long pole on a cold Listen tap: it spins up
+  /// the media session, the notification channel and ExoPlayer. Paying for
+  /// it while the user is still reading — once, off the first frame that
+  /// shows a playable card — takes it off the tap path entirely.
+  void _warmAudioService() {
+    if (_warmed || _inWidgetTest) return;
+    _warmed = true;
+    if (narrationHandler != null) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      try {
+        await initNarrationAudio(NarrationApi(ref.read(apiClientProvider)));
+      } catch (e) {
+        TLog.w('Narration', 'AudioService warm-up failed: $e');
+      }
+    });
+  }
+
+  void _setStarting(bool value) {
+    if (_starting == value) return;
+    if (!mounted) {
+      _starting = value;
+      return;
+    }
+    setState(() => _starting = value);
+  }
+
   Future<void> _playServer() async {
     if (_starting) return;
-    _starting = true;
+    _setStarting(true);
     try {
       final localReady =
           await NarrationDownloadStore.instance.hasPlayableFile(
@@ -297,9 +348,32 @@ class _NarrationListenBarState extends ConsumerState<NarrationListenBar> {
         return;
       }
       if (isNarrationIdDropped(widget.article.id)) return;
-      await handler
-          .playArticle(widget.article, queue: widget.queue)
-          .timeout(const Duration(seconds: 20));
+      // just_audio's `play()` future does not complete until the track
+      // ENDS, and playArticle awaits it — so awaiting playArticle held the
+      // button in its pending state for the whole article and tripped the
+      // 20s timeout on every single play. Wait for first audio instead.
+      final started = Completer<void>();
+      final sub = handler.player.playingStream.listen((isPlaying) {
+        if (isPlaying && !started.isCompleted) started.complete();
+      });
+      final play = handler.playArticle(widget.article, queue: widget.queue);
+      unawaited(play.then(
+        (_) {
+          if (!started.isCompleted) started.complete();
+        },
+        onError: (Object e, StackTrace s) {
+          if (started.isCompleted) {
+            TLog.w('Narration', 'playback ended with an error: $e');
+          } else {
+            started.completeError(e, s);
+          }
+        },
+      ));
+      try {
+        await started.future.timeout(const Duration(seconds: 20));
+      } finally {
+        unawaited(sub.cancel());
+      }
     } catch (e) {
       if (!mounted) return;
       final localReady = await NarrationDownloadStore.instance.hasPlayableFile(
@@ -321,7 +395,7 @@ class _NarrationListenBarState extends ConsumerState<NarrationListenBar> {
         allowTerminalFallback: true,
       );
     } finally {
-      _starting = false;
+      _setStarting(false);
     }
   }
 
@@ -397,11 +471,13 @@ class _NarrationListenBarState extends ConsumerState<NarrationListenBar> {
               onDownload: _downloadAudio,
             );
           case ListenSurface.server:
+            _warmAudioService();
             return _ServerPlayerCard(
               article: widget.article,
               accentColor: widget.accentColor,
               colors: widget.colors,
               isFullContent: widget.isFullContent,
+              starting: _starting,
               onPlay: _playServer,
               onDownload: _downloadAudio,
             );
@@ -474,6 +550,7 @@ class _ServerPlayerCard extends StatelessWidget {
     required this.accentColor,
     required this.colors,
     required this.isFullContent,
+    required this.starting,
     required this.onPlay,
     required this.onDownload,
   });
@@ -482,6 +559,9 @@ class _ServerPlayerCard extends StatelessWidget {
   final Color accentColor;
   final AppColors colors;
   final bool isFullContent;
+
+  /// Play was tapped and the load is still in flight.
+  final bool starting;
   final VoidCallback onPlay;
   final VoidCallback onDownload;
 
@@ -575,12 +655,14 @@ class _ServerPlayerCard extends StatelessWidget {
                                 ),
                                 const SizedBox(height: 2),
                                 Text(
-                                  narrationStatusLabel(
-                                    isThisArticle: playingThis,
-                                    playing: playing,
-                                    completed: completed,
-                                    listened: done,
-                                  ),
+                                  starting && !playing
+                                      ? 'Loading audio…'
+                                      : narrationStatusLabel(
+                                          isThisArticle: playingThis,
+                                          playing: playing,
+                                          completed: completed,
+                                          listened: done,
+                                        ),
                                   maxLines: 2,
                                   overflow: TextOverflow.ellipsis,
                                   style: GoogleFonts.plusJakartaSans(
@@ -602,6 +684,7 @@ class _ServerPlayerCard extends StatelessWidget {
                           NewsListenPlayDisc(
                             accentColor: accentColor,
                             playing: playing,
+                            pending: starting && !playing,
                             onTap: () {
                               final h = handler;
                               final tap = narrationPlayTap(
@@ -890,54 +973,137 @@ class NewsListenDownloadDisc extends StatelessWidget {
   }
 }
 
-class NewsListenPlayDisc extends StatelessWidget {
+class NewsListenPlayDisc extends StatefulWidget {
   const NewsListenPlayDisc({
     super.key,
     required this.accentColor,
     required this.playing,
+    this.pending = false,
     this.onTap,
   });
 
   final Color accentColor;
   final bool playing;
+
+  /// The tap has been accepted but audio has not started yet. Server
+  /// narration spends multiple seconds here on a cold start (AudioService
+  /// boot + source load), so the disc must stop looking idle immediately.
+  final bool pending;
   final VoidCallback? onTap;
 
   @override
+  State<NewsListenPlayDisc> createState() => _NewsListenPlayDiscState();
+}
+
+class _NewsListenPlayDiscState extends State<NewsListenPlayDisc>
+    with SingleTickerProviderStateMixin {
+  static const double _pressedScale = 0.92;
+
+  late final AnimationController _press = AnimationController.unbounded(
+    vsync: this,
+    value: 1,
+  );
+
+  @override
+  void dispose() {
+    _press.dispose();
+    super.dispose();
+  }
+
+  void _pressDown() {
+    if (reducedMotion(context)) return;
+    _press.animateTo(
+      _pressedScale,
+      duration: AppMotion.microPress,
+      curve: AppMotion.standard,
+    );
+  }
+
+  void _pressUp() {
+    if (reducedMotion(context)) {
+      _press.value = 1;
+      return;
+    }
+    _press.animateWith(
+      SpringSimulation(AppSprings.magnetic, _press.value, 1, 0),
+    );
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final accent = widget.accentColor;
+    final glyph = widget.pending
+        ? const SizedBox(
+            key: ValueKey<String>('pending'),
+            width: 20,
+            height: 20,
+            child: CircularProgressIndicator(
+              strokeWidth: 2.4,
+              color: Colors.white,
+            ),
+          )
+        : Padding(
+            key: ValueKey<bool>(widget.playing),
+            padding: EdgeInsets.only(left: widget.playing ? 0 : 2),
+            child: Icon(
+              widget.playing ? LucideIcons.pause : LucideIcons.play,
+              size: 20,
+              color: Colors.white,
+            ),
+          );
+
     final disc = Container(
       width: 48,
       height: 48,
       alignment: Alignment.center,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
-        color: accentColor,
+        color: accent,
         boxShadow: [
           BoxShadow(
-            color: accentColor.withValues(alpha: 0.45),
-            blurRadius: 14,
+            color: accent.withValues(alpha: accent.a * 0.45),
+            blurRadius: widget.pending ? 20 : 14,
             offset: const Offset(0, 5),
           ),
         ],
       ),
-      child: Padding(
-        padding: EdgeInsets.only(left: playing ? 0 : 2),
-        child: Icon(
-          playing ? LucideIcons.pause : LucideIcons.play,
-          size: 20,
-          color: Colors.white,
-        ),
+      child: AnimatedSwitcher(
+        duration: motionDuration(context, AppMotion.microHover),
+        transitionBuilder: fadeScaleTransition(context),
+        child: glyph,
       ),
     );
-    if (onTap == null) return disc;
+
+    final labelled = Semantics(
+      button: true,
+      enabled: widget.onTap != null,
+      label: widget.pending
+          ? 'Starting audio'
+          : (widget.playing ? 'Pause' : 'Play'),
+      child: ExcludeSemantics(child: disc),
+    );
+
+    if (widget.onTap == null) return labelled;
+
     return Material(
       color: Colors.transparent,
       type: MaterialType.transparency,
       shape: const CircleBorder(),
       clipBehavior: Clip.none,
       child: InkWell(
-        onTap: onTap,
+        onTap: widget.onTap,
+        onTapDown: (_) => _pressDown(),
+        onTapUp: (_) => _pressUp(),
+        onTapCancel: _pressUp,
         customBorder: const CircleBorder(),
-        child: disc,
+        child: AnimatedBuilder(
+          animation: _press,
+          builder: (context, child) => Transform.scale(
+            scale: _press.value,
+            child: child,
+          ),
+          child: labelled,
+        ),
       ),
     );
   }

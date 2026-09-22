@@ -50,6 +50,17 @@ class _GlassContainerState extends State<GlassContainer>
   }
 
   @override
+  void didUpdateWidget(GlassContainer oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final still = !widget.animateSheen || reducedMotion(context);
+    if (still) {
+      _sheen.stop();
+    } else if (!_sheen.isAnimating) {
+      _sheen.repeat();
+    }
+  }
+
+  @override
   void dispose() {
     _sheen.dispose();
     super.dispose();

@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 import '../../core/auth/app_token_store.dart';
 import '../../core/auth/auth_service.dart';
@@ -21,7 +22,8 @@ import 'tokens.dart';
 /// needs: the Telegram logger and the JWT (plus its refresher, for a 401).
 Future<void> runBubbleOverlay() async {
   WidgetsFlutterBinding.ensureInitialized();
-  TLog.init();
+  GoogleFonts.config.allowRuntimeFetching = false;
+  TLog.init(allowRemote: false);
   try {
     await AuthService.instance.init();
     await AppTokenStore.instance.load();
@@ -30,7 +32,6 @@ Future<void> runBubbleOverlay() async {
     // The overlay still renders; the first rephrase will surface an auth error.
     TLog.w('Bubble', 'Overlay auth bootstrap failed', error: e, st: st);
   }
-  unawaited(_warmApiTls());
   runApp(const BubbleOverlayApp());
 }
 
@@ -59,6 +60,8 @@ class _BubbleOverlayAppState extends State<BubbleOverlayApp> {
 
   BubbleTarget _target = const BubbleTarget.empty();
   bool _expanded = false;
+  bool _hostPaused = false;
+  bool _tlsWarmed = false;
 
   /// True while the collapsed bubble is on screen. Used so a typing pause does
   /// not remount it and replay the liquid entrance over a parked bubble.
@@ -72,10 +75,15 @@ class _BubbleOverlayAppState extends State<BubbleOverlayApp> {
     super.initState();
     // A fresh field means a fresh panel.
     _bridge.onTarget = (target) {
+      if (!_tlsWarmed) {
+        _tlsWarmed = true;
+        unawaited(_warmApiTls());
+      }
       if (!mounted) return;
       setState(() {
         _target = target;
         _expanded = false;
+        _hostPaused = false;
         if (!_collapsedOnScreen) {
           _generation++;
           _collapsedOnScreen = true;
@@ -88,6 +96,14 @@ class _BubbleOverlayAppState extends State<BubbleOverlayApp> {
         _expanded = false;
         _collapsedOnScreen = false;
       });
+    };
+    _bridge.onPause = () {
+      if (!mounted) return;
+      setState(() => _hostPaused = true);
+    };
+    _bridge.onResume = () {
+      if (!mounted) return;
+      setState(() => _hostPaused = false);
     };
     // Bubble gestures are native; a tap arrives here as a notification.
     _bridge.onTap = () {
@@ -188,7 +204,10 @@ class _BubbleOverlayAppState extends State<BubbleOverlayApp> {
                     onPlatformUsed: _bridge.saveLastPlatform,
                   ),
                 )
-              : RephraseBubble(key: ValueKey('bubble$_generation')),
+              : RephraseBubble(
+                  key: ValueKey('bubble$_generation'),
+                  animate: _collapsedOnScreen && !_hostPaused,
+                ),
         ),
       ),
     );

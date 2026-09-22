@@ -6,6 +6,7 @@ import 'package:google_fonts/google_fonts.dart';
 
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/utils/currency_formatter.dart';
+import '../../../../core/utils/reduced_motion.dart';
 import '../../../../core/services/expense_pace_metrics.dart';
 import '../../settings/settings_controller.dart';
 
@@ -117,6 +118,14 @@ class _BudgetRingBodyState extends State<_BudgetRingBody>
     _controller.forward();
   }
 
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (reducedMotion(context)) {
+      _controller.value = 1.0;
+    }
+  }
+
   void _onTick() => setState(() {});
 
   @override
@@ -126,12 +135,15 @@ class _BudgetRingBodyState extends State<_BudgetRingBody>
       _progressAnim.removeListener(_onTick);
       final from = _progressAnim.value;
       _controller.reset();
-      _progressAnim = Tween<double>(begin: from, end: widget.targetProgress)
-          .animate(
-            CurvedAnimation(parent: _controller, curve: Curves.easeOut),
-          )
-        ..addListener(_onTick);
-      _controller.forward();
+      _progressAnim =
+          Tween<double>(begin: from, end: widget.targetProgress).animate(
+        CurvedAnimation(parent: _controller, curve: Curves.easeOut),
+      )..addListener(_onTick);
+      if (reducedMotion(context)) {
+        _controller.value = 1.0;
+      } else {
+        _controller.forward();
+      }
     }
   }
 
@@ -153,85 +165,104 @@ class _BudgetRingBodyState extends State<_BudgetRingBody>
         widget.budget <= 0 ? widget.colors.text3 : widget.statusColor;
 
     if (widget.budget <= 0) {
-      return _buildNoBudget();
+      return Semantics(
+        button: widget.onSetBudget != null,
+        label: widget.onSetBudget != null
+            ? 'Set monthly budget'
+            : 'Monthly budget not set',
+        child: _buildNoBudget(),
+      );
     }
 
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        SizedBox(
-          width: widget.size,
-          height: widget.size,
-          child: Stack(
-            alignment: Alignment.center,
-            children: [
-              CustomPaint(
-                size: Size.square(widget.size),
-                painter: _BudgetRingPainter(
-                  trackColor: trackColor,
-                  progressColor: progressColor,
-                  progress: _progressAnim.value,
-                  strokeWidth: widget.strokeWidth,
-                  glowColor: progressColor,
+    final spentStr = formatCurrency(widget.spent);
+    final budgetStr = formatCurrency(widget.budget);
+    final status = widget.statusLabel.isEmpty
+        ? ''
+        : ', ${widget.statusLabel.toLowerCase()}';
+
+    return Semantics(
+      label: 'Spent $spentStr of $budgetStr$status',
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SizedBox(
+            width: widget.size,
+            height: widget.size,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                CustomPaint(
+                  size: Size.square(widget.size),
+                  painter: _BudgetRingPainter(
+                    trackColor: trackColor,
+                    progressColor: progressColor,
+                    progress: _progressAnim.value,
+                    strokeWidth: widget.strokeWidth,
+                    glowColor: progressColor,
+                  ),
                 ),
-              ),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      isOver
-                          ? '-${formatCurrency(remaining.abs())}'
-                          : formatCurrency(remaining),
-                      textAlign: TextAlign.center,
-                      style: GoogleFonts.plusJakartaSans(
-                        fontSize: isOver ? 20 : 22,
-                        fontWeight: FontWeight.w800,
-                        color: widget.statusColor,
-                        height: 1.1,
-                        letterSpacing: -0.5,
-                      ),
-                    ),
-                    if (widget.statusLabel.isNotEmpty) ...[
-                      const SizedBox(height: 3),
-                      Text(
-                        widget.statusLabel,
-                        textAlign: TextAlign.center,
-                        style: GoogleFonts.plusJakartaSans(
-                          fontSize: 8,
-                          fontWeight: FontWeight.w700,
-                          color: widget.colors.text4,
-                          letterSpacing: 1.8,
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text(
+                          isOver
+                              ? '-${formatCurrency(remaining.abs())}'
+                              : formatCurrency(remaining),
+                          maxLines: 1,
+                          textAlign: TextAlign.center,
+                          style: GoogleFonts.plusJakartaSans(
+                            fontSize: isOver ? 20 : 22,
+                            fontWeight: FontWeight.w800,
+                            color: widget.statusColor,
+                            height: 1.1,
+                            letterSpacing: -0.5,
+                          ),
                         ),
                       ),
+                      if (widget.statusLabel.isNotEmpty) ...[
+                        const SizedBox(height: 3),
+                        Text(
+                          widget.statusLabel,
+                          textAlign: TextAlign.center,
+                          style: GoogleFonts.plusJakartaSans(
+                            fontSize: 8,
+                            fontWeight: FontWeight.w700,
+                            color: widget.colors.text4,
+                            letterSpacing: 1.8,
+                          ),
+                        ),
+                      ],
                     ],
-                  ],
+                  ),
                 ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _StatPill(
+                label: 'Spent',
+                value: formatCurrency(widget.spent),
+                color: widget.colors.text2,
+                bg: widget.colors.bg3,
+              ),
+              const SizedBox(width: 8),
+              _StatPill(
+                label: 'Budget',
+                value: formatCurrency(widget.budget),
+                color: widget.colors.text3,
+                bg: widget.colors.bg2,
               ),
             ],
           ),
-        ),
-        const SizedBox(height: 12),
-        Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _StatPill(
-              label: 'Spent',
-              value: formatCurrency(widget.spent),
-              color: widget.colors.text2,
-              bg: widget.colors.bg3,
-            ),
-            const SizedBox(width: 8),
-            _StatPill(
-              label: 'Budget',
-              value: formatCurrency(widget.budget),
-              color: widget.colors.text3,
-              bg: widget.colors.bg2,
-            ),
-          ],
-        ),
-      ],
+        ],
+      ),
     );
   }
 

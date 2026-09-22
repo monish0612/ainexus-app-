@@ -8,8 +8,12 @@ import 'package:lucide_icons/lucide_icons.dart';
 
 import '../../../../core/di/injection.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_radii.dart';
+import '../../../../core/theme/app_spacing.dart';
+import '../../../../core/utils/reduced_motion.dart';
 import '../../../../data/services/ai_categorize_service.dart' show keywordRules;
 import '../../../../core/services/nuke_report.dart';
+import '../../../widgets/nexus_loader.dart';
 import '../../settings/settings_controller.dart';
 import '../expense_timeframe_screen.dart';
 import '../salary_screen.dart';
@@ -41,10 +45,19 @@ const _suggestions = <String>[
   'Last trip cost',
 ];
 
-// AI gradient palette — matches the app's premium summarize aesthetic.
-const _gradA = Color(0xFF6366F1); // indigo
-const _gradB = Color(0xFFA855F7); // purple
-const _gradC = Color(0xFF22D3EE); // cyan
+// AI gradient palette — the same tokens the InsightAI composer is built on, so
+// the two Ask-AI bars read as one product rather than two.
+const _gradA = AppColors.composerGradientStart; // indigo
+const _gradB = AppColors.composerGradientEnd; // violet
+const _gradC = AppColors.accentCyan; // cyan / live
+
+/// The wait copy for a local expense query: parse the question with the AI,
+/// then run the resolved spec against the on-device DB.
+const _askStages = <String>[
+  'Understanding your question\u2026',
+  'Searching your expenses\u2026',
+  'Preparing results\u2026',
+];
 
 class _ExpenseAiAskSheet extends ConsumerStatefulWidget {
   const _ExpenseAiAskSheet({this.initialQuestion});
@@ -269,23 +282,45 @@ class _ExpenseAiAskSheetState extends ConsumerState<_ExpenseAiAskSheet> {
               ),
             ),
             // Sleek, single-row suggestion rail. It collapses the moment the
-            // user starts typing so the sheet stays clean and uncluttered.
+            // user starts typing so the sheet stays clean and uncluttered —
+            // and while a question is in flight the same slot carries the
+            // wait state instead of leaving the sheet mute.
             AnimatedSize(
-              duration: const Duration(milliseconds: 280),
+              duration: reducedMotion(context)
+                  ? Duration.zero
+                  : const Duration(milliseconds: 280),
               curve: Curves.easeOutCubic,
               child: AnimatedSwitcher(
-                duration: const Duration(milliseconds: 220),
-                transitionBuilder: (child, anim) => FadeTransition(
-                  opacity: anim,
-                  child: SizeTransition(sizeFactor: anim, child: child),
-                ),
-                child: _hasText
-                    ? const SizedBox(width: double.infinity)
-                    : _SuggestionRail(
-                        colors: colors,
-                        loading: _loading,
-                        onPick: _submit,
-                      ),
+                duration: reducedMotion(context)
+                    ? Duration.zero
+                    : const Duration(milliseconds: 220),
+                transitionBuilder: reducedMotion(context)
+                    ? (child, anim) =>
+                        FadeTransition(opacity: anim, child: child)
+                    : (child, anim) => FadeTransition(
+                          opacity: anim,
+                          child: SizeTransition(sizeFactor: anim, child: child),
+                        ),
+                child: _loading
+                    ? const Padding(
+                        key: ValueKey<String>('ask-ai-wait'),
+                        padding: EdgeInsets.fromLTRB(20, 20, 20, 8),
+                        child: Center(
+                          child: NexusLoader(
+                            variant: NexusLoaderVariant.research,
+                            tone: NexusLoaderTone.lite,
+                            stages: _askStages,
+                            size: 104,
+                          ),
+                        ),
+                      )
+                    : _hasText
+                        ? const SizedBox(width: double.infinity)
+                        : _SuggestionRail(
+                            colors: colors,
+                            loading: _loading,
+                            onPick: _submit,
+                          ),
               ),
             ),
             SizedBox(height: 16 + MediaQuery.paddingOf(context).bottom),
@@ -334,7 +369,8 @@ class _SuggestionRail extends StatelessWidget {
           ),
         ),
         SizedBox(
-          height: 38,
+          // 48dp so the pills clear the minimum interactive target.
+          height: AppSpacing.tapTarget,
           child: ShaderMask(
             shaderCallback: (rect) => const LinearGradient(
               begin: Alignment.centerLeft,
@@ -410,6 +446,20 @@ class _GlowInputBarState extends State<_GlowInputBar>
     widget.focus.addListener(_onFocus);
     // Field autofocuses on open, so light it up from the start.
     _focusCtrl.value = 1;
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // `repeat()` keeps ticking regardless of the OS setting, so the ring has to
+    // be stopped explicitly. Stopped at t=0 it still paints — just static.
+    final still = reducedMotion(context);
+    if (still && _rotate.isAnimating) {
+      _rotate.stop();
+      _rotate.value = 0;
+    } else if (!still && !_rotate.isAnimating) {
+      _rotate.repeat();
+    }
   }
 
   void _onFocus() {
@@ -511,43 +561,51 @@ class _SendButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    final colors = Theme.of(context).extension<AppColors>()!;
+    return Semantics(
+      button: true,
+      enabled: !loading,
+      label: loading ? 'Asking AI' : 'Ask AI',
       onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        width: 42,
-        height: 42,
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          gradient: loading
-              ? null
-              : const LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [_gradC, _gradB],
-                ),
-          color: loading ? Theme.of(context).extension<AppColors>()!.bg3 : null,
-          borderRadius: BorderRadius.circular(13),
-          boxShadow: loading
-              ? null
-              : [
-                  BoxShadow(
-                    color: _gradB.withValues(alpha: 0.45),
-                    blurRadius: 14,
-                    offset: const Offset(0, 4),
-                  ),
-                ],
+      child: ExcludeSemantics(
+        child: GestureDetector(
+          onTap: onTap,
+          child: AnimatedContainer(
+            duration: reducedMotion(context)
+                ? Duration.zero
+                : const Duration(milliseconds: 200),
+            width: AppSpacing.tapTarget,
+            height: AppSpacing.tapTarget,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              gradient: loading
+                  ? null
+                  : const LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [_gradC, _gradB],
+                    ),
+              color: loading ? colors.bg3 : null,
+              borderRadius: AppRadii.brMd,
+              boxShadow: loading
+                  ? null
+                  : [
+                      BoxShadow(
+                        color: _gradB.withValues(alpha: 0.45),
+                        blurRadius: 14,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
+            ),
+            // The wait itself is the NexusLoader in the sheet body — the
+            // button just goes quiet rather than hosting a second spinner.
+            child: Icon(
+              LucideIcons.arrowUp,
+              size: 20,
+              color: loading ? colors.text5 : Colors.white,
+            ),
+          ),
         ),
-        child: loading
-            ? const SizedBox(
-                width: 18,
-                height: 18,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  valueColor: AlwaysStoppedAnimation<Color>(_gradB),
-                ),
-              )
-            : const Icon(LucideIcons.arrowUp, size: 20, color: Colors.white),
       ),
     );
   }
@@ -631,6 +689,19 @@ class _AiOrbState extends State<_AiOrb> with SingleTickerProviderStateMixin {
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // The orb's glow pulse is decoration; it stops dead under reduced motion.
+    final still = reducedMotion(context);
+    if (still && _c.isAnimating) {
+      _c.stop();
+      _c.value = 0;
+    } else if (!still && !_c.isAnimating) {
+      _c.repeat();
+    }
+  }
+
+  @override
   void dispose() {
     _c.dispose();
     super.dispose();
@@ -690,33 +761,45 @@ class _SuggestionChipState extends State<_SuggestionChip> {
   @override
   Widget build(BuildContext context) {
     final colors = widget.colors;
-    return GestureDetector(
-      onTapDown: widget.onTap == null ? null : (_) => setState(() => _pressed = true),
-      onTapCancel: () => setState(() => _pressed = false),
-      onTapUp: (_) => setState(() => _pressed = false),
+    final still = reducedMotion(context);
+    return Semantics(
+      button: true,
+      enabled: widget.onTap != null,
+      label: 'Ask: ${widget.label}',
       onTap: widget.onTap,
-      child: AnimatedScale(
-        scale: _pressed ? 0.94 : 1.0,
-        duration: const Duration(milliseconds: 110),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 150),
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            color: _pressed ? _gradB.withValues(alpha: 0.14) : colors.bg2,
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(
-              color: _pressed
-                  ? _gradB.withValues(alpha: 0.5)
-                  : colors.border,
-            ),
-          ),
-          child: Text(
-            widget.label,
-            style: GoogleFonts.plusJakartaSans(
-              fontSize: 12.5,
-              fontWeight: FontWeight.w600,
-              color: colors.text2,
+      child: ExcludeSemantics(
+        child: GestureDetector(
+          onTapDown: widget.onTap == null
+              ? null
+              : (_) => setState(() => _pressed = true),
+          onTapCancel: () => setState(() => _pressed = false),
+          onTapUp: (_) => setState(() => _pressed = false),
+          onTap: widget.onTap,
+          child: AnimatedScale(
+            scale: still ? 1.0 : (_pressed ? 0.94 : 1.0),
+            duration: still ? Duration.zero : const Duration(milliseconds: 110),
+            child: AnimatedContainer(
+              duration:
+                  still ? Duration.zero : const Duration(milliseconds: 150),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: _pressed ? _gradB.withValues(alpha: 0.14) : colors.bg2,
+                borderRadius: AppRadii.brLg,
+                border: Border.all(
+                  color: _pressed
+                      ? _gradB.withValues(alpha: 0.5)
+                      : colors.border,
+                ),
+              ),
+              child: Text(
+                widget.label,
+                style: GoogleFonts.plusJakartaSans(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w600,
+                  color: colors.text2,
+                ),
+              ),
             ),
           ),
         ),

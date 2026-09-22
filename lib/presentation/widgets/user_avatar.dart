@@ -19,6 +19,8 @@ class UserAvatar extends StatelessWidget {
     this.showEditBadge = false,
     this.fallbackEmoji = '😎',
     this.busy = false,
+    this.hitSize,
+    this.semanticLabel,
   });
 
   final double size;
@@ -27,6 +29,12 @@ class UserAvatar extends StatelessWidget {
   final bool showEditBadge;
   final String fallbackEmoji;
   final bool busy;
+
+  /// Minimum tap target. Visual diameter stays [size].
+  final double? hitSize;
+
+  /// Spoken name when [onTap] is set. Headers default to Settings.
+  final String? semanticLabel;
 
   bool get _hasFile {
     if (kIsWeb) return false;
@@ -74,60 +82,76 @@ class UserAvatar extends StatelessWidget {
               )
             : _EmojiFallback(size: size, emoji: fallbackEmoji, fill: fill);
 
-    return GestureDetector(
-      key: const Key('user-avatar'),
-      onTap: onTap,
-      child: SizedBox(
-        width: size,
-        height: size,
-        child: Stack(
-          clipBehavior: Clip.none,
-          children: [
-            Container(
+    final hit = (hitSize != null && hitSize! > size) ? hitSize! : size;
+    final spoken = onTap == null ? null : (semanticLabel ?? 'Settings');
+
+    return Semantics(
+      button: onTap != null,
+      enabled: onTap != null,
+      label: spoken,
+      excludeSemantics: true,
+      child: GestureDetector(
+        key: const Key('user-avatar'),
+        onTap: onTap,
+        behavior: HitTestBehavior.opaque,
+        child: SizedBox(
+          width: hit,
+          height: hit,
+          child: Center(
+            child: SizedBox(
               width: size,
               height: size,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: const LinearGradient(
-                  colors: [AppColors.accent, AppColors.accentCyan],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-                border: Border.all(
-                  color: AppColors.accent.withValues(alpha: 0.35),
-                  width: 1.5,
-                ),
-              ),
-              padding: EdgeInsets.all(inset),
-              child: ClipOval(child: face),
-            ),
-            if (showEditBadge && !busy)
-              Positioned(
-                right: -1,
-                bottom: -1,
-                child: Container(
-                  width: 22,
-                  height: 22,
-                  decoration: BoxDecoration(
-                    color: AppColors.accent,
-                    shape: BoxShape.circle,
-                    border: Border.all(color: ring, width: 2),
-                    boxShadow: const [
-                      BoxShadow(
-                        color: Color(0x66000000),
-                        blurRadius: 4,
-                        offset: Offset(0, 1),
+              child: Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  Container(
+                    width: size,
+                    height: size,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      gradient: const LinearGradient(
+                        colors: [AppColors.accent, AppColors.accentCyan],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
                       ),
-                    ],
+                      border: Border.all(
+                        color: AppColors.accent.withValues(alpha: 0.35),
+                        width: 1.5,
+                      ),
+                    ),
+                    padding: EdgeInsets.all(inset),
+                    child: ClipOval(child: face),
                   ),
-                  child: const Icon(
-                    Icons.camera_alt_rounded,
-                    size: 11,
-                    color: Colors.white,
-                  ),
-                ),
+                  if (showEditBadge && !busy)
+                    Positioned(
+                      right: -1,
+                      bottom: -1,
+                      child: Container(
+                        width: 22,
+                        height: 22,
+                        decoration: BoxDecoration(
+                          color: AppColors.accent,
+                          shape: BoxShape.circle,
+                          border: Border.all(color: ring, width: 2),
+                          boxShadow: const [
+                            BoxShadow(
+                              color: Color(0x66000000),
+                              blurRadius: 4,
+                              offset: Offset(0, 1),
+                            ),
+                          ],
+                        ),
+                        child: const Icon(
+                          Icons.camera_alt_rounded,
+                          size: 11,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                ],
               ),
-          ],
+            ),
+          ),
         ),
       ),
     );

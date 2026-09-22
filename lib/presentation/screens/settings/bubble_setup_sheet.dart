@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
 import '../../../bubble/bubble_settings_channel.dart';
+import '../../../bubble/overlay/bubble.dart';
 import '../../../bubble/rephrase/bubble_rephrase_client.dart';
 import '../../../bubble/rephrase/resilience.dart';
 import '../../../core/theme/app_colors.dart';
@@ -134,8 +135,14 @@ class _BubbleSetupSheetState extends State<_BubbleSetupSheet>
                 const SizedBox(height: 16),
                 Row(
                   children: [
-                    const Icon(LucideIcons.wand2, size: 18, color: _accent),
-                    const SizedBox(width: 8),
+                    // The real overlay mark, not an approximation — this is
+                    // exactly what appears over other apps.
+                    const SizedBox(
+                      width: 56,
+                      height: 56,
+                      child: RephraseBubble(),
+                    ),
+                    const SizedBox(width: 12),
                     Expanded(
                       child: Text(
                         'Rephrase bubble setup',
@@ -151,7 +158,7 @@ class _BubbleSetupSheetState extends State<_BubbleSetupSheet>
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  'Type in any app, pause, and a small glass bubble appears next to '
+                  'Type in any app, pause, and the bubble appears next to '
                   'the field. Pick a platform and the text is replaced in place. '
                   'Password fields are skipped and nothing is logged.',
                   style: GoogleFonts.plusJakartaSans(
@@ -252,7 +259,7 @@ class _BubbleSetupSheetState extends State<_BubbleSetupSheet>
                     hintText: 'Something to rephrase',
                     hintStyle: GoogleFonts.plusJakartaSans(
                       fontSize: 13,
-                      color: colors.text5,
+                      color: colors.text4,
                     ),
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(14),

@@ -135,7 +135,7 @@ void main() {
 
   setUp(() async {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-        .setMockMethodCallHandler(channel, (_) async {});
+        .setMockMethodCallHandler(channel, (_) async => null);
     SharedPreferences.setMockInitialValues(<String, Object>{});
     final prefs = await SharedPreferences.getInstance();
     database = db.AppDatabase.forTesting(NativeDatabase.memory());

@@ -60,8 +60,40 @@ const Color kPanelStroke = Color(0xFF2A2A2A);
 /// Soft elevation so the opaque panel lifts off the app underneath.
 const Color kPanelShadow = Color(0x99000000);
 
+/// Panel accent. Deliberately NOT the brand blue: `kBrandAccent` on true
+/// black is 2.2:1, well under AA, and this colour carries label text.
 const Color kAccent = Color(0xFF6EA8FF);
 const Color kAccent2 = Color(0xFFB98CFF);
+
+// ── Collapsed-bubble identity ───────────────────────────────────────────────
+//
+// The bubble floats over arbitrary third-party apps, so it carries its own
+// contrast instead of tinting whatever is behind it: an opaque brand-blue
+// core, a white separation ring for dark backdrops, and a tight shadow for
+// light ones. White on `kBrandAccent` is ~7:1.
+
+/// Product accent — the primary CTA blue.
+const Color kBrandAccent = Color(0xFF0D59F2);
+
+/// Lifted edge of the core gradient (top-left light source).
+const Color kBrandAccentLift = Color(0xFF3B82F6);
+
+/// Shaded edge of the core gradient (bottom-right).
+const Color kBrandAccentDeep = Color(0xFF0B3FB8);
+
+/// Live / sync cyan. Rim arc and sparkle only — never behind the glyph,
+/// where white would fall to 1.8:1.
+const Color kBrandCyan = Color(0xFF22D3EE);
+
+/// Separation ring against dark backdrops.
+const Color kBubbleRingLight = Color(0xF2FFFFFF);
+
+/// Separation ring against light backdrops.
+const Color kBubbleRingDark = Color(0x33091024);
+
+/// Tight contact shadow. Blur + offset must stay inside the 10dp margin the
+/// 76dp overlay window leaves around a 56dp bubble, or it clips to a square.
+const Color kBubbleShadow = Color(0x4D020617);
 const Color kTextPrimary = Color(0xFFF4F6FF);
 const Color kTextMuted = Color(0x99F4F6FF);
 const Color kDanger = Color(0xFFFF6E8A);

@@ -12,6 +12,23 @@ import android.view.accessibility.AccessibilityWindowInfo
 object WindowGate {
 
     /**
+     * Master bubble gates that must fail closed before any window/node API.
+     *
+     * Disabled, dismissed-until-app-switch, and skipped packages return false
+     * without needing a window type — callers must check this first.
+     */
+    fun eventGatesOpen(
+        enabled: Boolean,
+        suppressed: Boolean,
+        skipped: Boolean,
+    ): Boolean {
+        if (suppressed) return false
+        if (!enabled) return false
+        if (skipped) return false
+        return true
+    }
+
+    /**
      * Whether a typing event may drive the tracker.
      *
      * IME-sourced TEXT_CHANGED is allowed: with the keyboard open, Android often

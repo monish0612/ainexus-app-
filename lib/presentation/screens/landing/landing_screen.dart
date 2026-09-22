@@ -6,6 +6,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
 import '../../../core/theme/app_colors.dart';
+import '../../../core/utils/reduced_motion.dart';
 import '../../widgets/nexus_brand_mark.dart';
 
 /// Onboarding / welcome screen — follows the selected app theme.
@@ -32,10 +33,11 @@ class _LandingScreenState extends State<LandingScreen>
   @override
   void initState() {
     super.initState();
+    // Started from didChangeDependencies — MediaQuery is not readable here.
     _pulseController = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 3),
-    )..repeat(reverse: true);
+    );
 
     _pulseScale = Tween<double>(begin: 0.95, end: 1.05).animate(
       CurvedAnimation(
@@ -47,7 +49,7 @@ class _LandingScreenState extends State<LandingScreen>
     _entranceController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 2000),
-    )..forward();
+    );
 
     _orbEnter = CurvedAnimation(
       parent: _entranceController,
@@ -78,6 +80,25 @@ class _LandingScreenState extends State<LandingScreen>
       parent: _entranceController,
       curve: const Interval(0.55, 0.95, curve: Curves.easeOut),
     );
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (reducedMotion(context)) {
+      // Same layout, arrived: the stagger lands complete and the orb rests
+      // at its mid-scale with the controller stopped.
+      _entranceController.value = 1;
+      _pulseController.stop();
+      _pulseController.value = 0.5;
+    } else {
+      if (!_entranceController.isAnimating && _entranceController.value == 0) {
+        _entranceController.forward();
+      }
+      if (!_pulseController.isAnimating) {
+        _pulseController.repeat(reverse: true);
+      }
+    }
   }
 
   @override

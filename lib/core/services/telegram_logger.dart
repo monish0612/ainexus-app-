@@ -24,8 +24,15 @@ import 'package:flutter/foundation.dart';
 class TLog {
   TLog._();
 
-  static const _botToken = '5837094484:AAHLHOPIWIW7vuktHFB1zSYeJrUS8I8PFQE';
-  static const _chatId = '671766797';
+  /// Opt-in remote shipping. Default false so release/profile builds never
+  /// open a Telegram socket unless `--dart-define=TLOG_REMOTE=true` is set
+  /// together with `TLOG_BOT_TOKEN` and `TLOG_CHAT_ID`.
+  ///
+  /// If a bot token was previously committed, revoke it in BotFather.
+  static const bool remoteEnabled =
+      bool.fromEnvironment('TLOG_REMOTE', defaultValue: false);
+  static const _botToken = String.fromEnvironment('TLOG_BOT_TOKEN');
+  static const _chatId = String.fromEnvironment('TLOG_CHAT_ID');
   static const _apiUrl =
       'https://api.telegram.org/bot$_botToken/sendMessage';
 
@@ -42,6 +49,7 @@ class TLog {
   static Timer? _batchTimer;
   static bool _flushing = false;
   static bool _initialized = false;
+  static bool _remoteDispatch = false;
   static int _consecutiveFailures = 0;
   static final _random = Random();
 
@@ -57,18 +65,27 @@ class TLog {
     Object? error,
   })? debugOnLog;
 
+  @visibleForTesting
+  static int get debugQueueLength => _queue.length;
+
   // ── Public API ──────────────────────────────────────────────────────────
 
-  static void init() {
+  static void init({bool allowRemote = true}) {
     if (_initialized) return;
     _initialized = true;
-    _dio = Dio(
-      BaseOptions(
-        connectTimeout: const Duration(seconds: 10),
-        receiveTimeout: const Duration(seconds: 10),
-        sendTimeout: const Duration(seconds: 10),
-      ),
-    );
+    _remoteDispatch = allowRemote &&
+        remoteEnabled &&
+        _botToken.isNotEmpty &&
+        _chatId.isNotEmpty;
+    if (_remoteDispatch) {
+      _dio = Dio(
+        BaseOptions(
+          connectTimeout: const Duration(seconds: 10),
+          receiveTimeout: const Duration(seconds: 10),
+          sendTimeout: const Duration(seconds: 10),
+        ),
+      );
+    }
     i('App', 'Nexus AI started');
   }
 
@@ -142,6 +159,8 @@ class TLog {
         observer(level.name, tag, message, error: error);
       } catch (_) {/* never propagate test-observer errors */}
     }
+
+    if (!_remoteDispatch) return;
 
     if (_queue.length >= _maxQueueSize) {
       _evictLowestPriority();

@@ -33,7 +33,7 @@ class ProfilePhotoController extends StateNotifier<String?> {
       if (!mounted) return;
       state = path;
       if (_remote != null) {
-        final synced = await ProfilePhotoSynchronizer(_store, _remote!).sync();
+        final synced = await ProfilePhotoSynchronizer(_store, _remote).sync();
         if (!mounted) return;
         state = synced;
       }

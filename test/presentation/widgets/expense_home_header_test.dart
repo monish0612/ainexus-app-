@@ -199,6 +199,32 @@ void main() {
     expect(box.size.height, AppConstants.headerHeight);
   });
 
+  testWidgets('CompactHeader title still fits at 2x text scale',
+      (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ThemeData(
+          brightness: Brightness.dark,
+          extensions: const <ThemeExtension<dynamic>>[AppColors.dark],
+        ),
+        builder: (context, child) {
+          return MediaQuery(
+            data: MediaQuery.of(context).copyWith(
+              textScaler: const TextScaler.linear(2.0),
+            ),
+            child: child!,
+          );
+        },
+        home: const Scaffold(
+          body: CompactHeader(title: 'News'),
+        ),
+      ),
+    );
+    expect(tester.takeException(), isNull);
+    final box = tester.renderObject<RenderBox>(find.byType(CompactHeader));
+    expect(box.size.height, AppConstants.headerHeight);
+  });
+
   testWidgets('watch entry is hidden until onWatchTap is set', (tester) async {
     await tester.pumpWidget(
       wrap(
@@ -224,5 +250,36 @@ void main() {
     );
     await tester.tap(find.byKey(const Key('watch-entry')));
     expect(taps, 1);
+    final watch = tester.getSize(find.byKey(const Key('watch-entry')));
+    expect(watch.width, greaterThanOrEqualTo(48));
+    expect(watch.height, greaterThanOrEqualTo(48));
+  });
+
+  testWidgets('avatar hitSize is 48 while the face stays 32', (tester) async {
+    await tester.pumpWidget(
+      wrap(
+        UserAvatar(size: 32, hitSize: 48, onTap: () {}),
+      ),
+    );
+    final box = tester.getSize(find.byKey(const Key('user-avatar')));
+    expect(box.width, 48);
+    expect(box.height, 48);
+  });
+
+  testWidgets('tappable avatar is labeled Settings', (tester) async {
+    final handle = tester.ensureSemantics();
+    try {
+      await tester.pumpWidget(
+        wrap(
+          UserAvatar(size: 32, hitSize: 48, onTap: () {}),
+        ),
+      );
+      expect(
+        tester.getSemantics(find.byKey(const Key('user-avatar'))).label,
+        contains('Settings'),
+      );
+    } finally {
+      handle.dispose();
+    }
   });
 }

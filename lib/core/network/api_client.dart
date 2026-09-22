@@ -1,6 +1,7 @@
 import 'dart:math';
 
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../auth/app_token_store.dart';
@@ -145,7 +146,9 @@ class LoggingInterceptor extends Interceptor {
   @override
   void onRequest(RequestOptions options, RequestInterceptorHandler handler) {
     options.extra['_requestStartMs'] = DateTime.now().millisecondsSinceEpoch;
-    TLog.d('HTTP', '→ ${options.method} ${options.uri}');
+    if (kDebugMode || TLog.remoteEnabled) {
+      TLog.d('HTTP', '→ ${options.method} ${options.uri}');
+    }
     handler.next(options);
   }
 
@@ -154,8 +157,10 @@ class LoggingInterceptor extends Interceptor {
     final startMs =
         response.requestOptions.extra['_requestStartMs'] as int? ?? 0;
     final elapsed = DateTime.now().millisecondsSinceEpoch - startMs;
-    TLog.d('HTTP',
-        '← ${response.statusCode} ${response.requestOptions.uri} (${elapsed}ms)');
+    if (kDebugMode || TLog.remoteEnabled) {
+      TLog.d('HTTP',
+          '← ${response.statusCode} ${response.requestOptions.uri} (${elapsed}ms)');
+    }
     handler.next(response);
   }
 

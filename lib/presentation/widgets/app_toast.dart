@@ -4,6 +4,10 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../../core/services/telegram_logger.dart';
+import '../../core/theme/app_motion.dart';
+import '../../core/theme/app_radii.dart';
+import '../../core/theme/app_spacing.dart';
+import '../../core/utils/reduced_motion.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  AppToast — Overlay-based toast with TWO independent dismiss timers
@@ -56,7 +60,7 @@ class AppToast {
   static const Duration _kDefaultDuration = Duration(seconds: 3);
 
   /// Slide-out animation length — kept in sync with [_AppToastEntryState].
-  static const Duration _kAnimationOut = Duration(milliseconds: 220);
+  static const Duration _kAnimationOut = AppMotion.standardExit;
 
   /// How long after the configured [duration] the watchdog timer fires
   /// to force-remove a still-mounted entry. Generous enough that the
@@ -241,11 +245,15 @@ class _AppToastEntryState extends State<_AppToastEntry>
     super.initState();
     _ctrl = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 220),
-      reverseDuration: const Duration(milliseconds: 200),
+      duration: AppMotion.standardEnter,
+      reverseDuration: AppMotion.standardExit,
     );
-    _slide = CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic);
-    _fade = CurvedAnimation(parent: _ctrl, curve: Curves.easeOut);
+    _slide = CurvedAnimation(
+      parent: _ctrl,
+      curve: AppMotion.standardDecelerate,
+      reverseCurve: AppMotion.standardAccelerate,
+    );
+    _fade = CurvedAnimation(parent: _ctrl, curve: AppMotion.standard);
     _ctrl.forward();
     // Hand the parent a reference so it can trigger the slide-out
     // animation deterministically when AppToast.hide() is called.
@@ -269,6 +277,7 @@ class _AppToastEntryState extends State<_AppToastEntry>
   Widget build(BuildContext context) {
     final media = MediaQuery.of(context);
     final colors = _variantColors(widget.variant);
+    final reduced = reducedMotion(context);
 
     return Positioned(
       left: 0,
@@ -276,21 +285,22 @@ class _AppToastEntryState extends State<_AppToastEntry>
       // Anchored to the bottom edge with a comfortable inset above the
       // gesture-nav area. The 16-pt extra clearance keeps the toast
       // visually distinct from any bottom-sheet input bars.
-      bottom: media.padding.bottom + 16,
+      bottom: media.padding.bottom + AppSpacing.lg,
       child: SafeArea(
         top: false,
         child: AnimatedBuilder(
           animation: _ctrl,
           builder: (context, child) {
-            // Slide up from below by 32 px and fade in.
-            final dy = (1 - _slide.value) * 32;
+            // Slide up from below by 32 px and fade in. Under reduced
+            // motion only the opacity changes — same 250/200 ms budget.
+            final dy = reduced ? 0.0 : (1 - _slide.value) * 32;
             return Opacity(
               opacity: _fade.value,
               child: Transform.translate(offset: Offset(0, dy), child: child),
             );
           },
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
+            padding: AppSpacing.pageH,
             child: Material(
               // Fully opaque so the toast renders the same way on every
               // device + theme. No BackdropFilter (that's a GPU path with
@@ -298,7 +308,7 @@ class _AppToastEntryState extends State<_AppToastEntry>
               color: colors.bg,
               elevation: 8,
               shadowColor: const Color(0x55000000),
-              borderRadius: BorderRadius.circular(14),
+              borderRadius: AppRadii.brMd,
               clipBehavior: Clip.antiAlias,
               child: GestureDetector(
                 behavior: HitTestBehavior.opaque,
@@ -308,39 +318,82 @@ class _AppToastEntryState extends State<_AppToastEntry>
                 },
                 child: Container(
                   decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(14),
-                    border:
-                        Border.all(color: colors.border, width: 0.6),
+                    borderRadius: AppRadii.brMd,
+                    border: Border.all(color: colors.border, width: 0.6),
+                    // A hairline rail in the variant colour along the leading
+                    // edge, so the variant is legible without relying on the
+                    // icon (info has none) or on hue alone.
+                    gradient: LinearGradient(
+                      begin: Alignment.centerLeft,
+                      end: Alignment.centerRight,
+                      stops: const <double>[0.0, 0.012, 0.012, 1.0],
+                      colors: <Color>[
+                        colors.rail,
+                        colors.rail,
+                        colors.bg,
+                        colors.bg,
+                      ],
+                    ),
                   ),
-                  padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
+                  padding: const EdgeInsets.fromLTRB(
+                    AppSpacing.lg,
+                    AppSpacing.sm,
+                    AppSpacing.sm,
+                    AppSpacing.sm,
+                  ),
                   child: Row(
                     children: [
                       if (colors.icon != null) ...[
-                        Icon(colors.icon, size: 18, color: colors.iconColor),
-                        const SizedBox(width: 10),
+                        // Icon sits in a tinted disc rather than floating
+                        // bare against the fill.
+                        Container(
+                          width: 26,
+                          height: 26,
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: colors.iconColor.withValues(alpha: 0.16),
+                          ),
+                          child: Icon(
+                            colors.icon,
+                            size: 16,
+                            color: colors.iconColor,
+                          ),
+                        ),
+                        AppSpacing.hGapSm,
                       ],
                       Expanded(
-                        child: Text(
-                          widget.message,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: GoogleFonts.plusJakartaSans(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.white,
-                            height: 1.3,
+                        child: Padding(
+                          // Keeps the 48dp action pill from making short
+                          // messages look top-heavy.
+                          padding: const EdgeInsets.symmetric(
+                            vertical: AppSpacing.xs,
+                          ),
+                          child: Semantics(
+                            liveRegion: true,
+                            child: Text(
+                              widget.message,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: GoogleFonts.plusJakartaSans(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: Colors.white,
+                                height: 1.3,
+                              ),
+                            ),
                           ),
                         ),
                       ),
                       if (widget.action != null) ...[
-                        const SizedBox(width: 10),
+                        AppSpacing.hGapSm,
                         // Dedicated action chip — separate hit-target so
                         // the body's tap-to-dismiss doesn't swallow it.
                         Material(
-                          color: Colors.transparent,
-                          borderRadius: BorderRadius.circular(8),
+                          color: colors.actionFill,
+                          borderRadius: AppRadii.brSm,
                           child: InkWell(
-                            borderRadius: BorderRadius.circular(8),
+                            borderRadius: AppRadii.brSm,
                             onTap: () {
                               TLog.d('AppToast',
                                   'action="${widget.action}" pressed');
@@ -366,15 +419,27 @@ class _AppToastEntryState extends State<_AppToastEntry>
                                     caughtStack ?? StackTrace.current);
                               }
                             },
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 12, vertical: 8),
-                              child: Text(
-                                widget.action!,
-                                style: GoogleFonts.plusJakartaSans(
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w800,
-                                  color: const Color(0xFFC084FC),
+                            // 48dp minimum target — the old 13px label with
+                            // 8px padding came out at ~33dp.
+                            child: ConstrainedBox(
+                              constraints: const BoxConstraints(
+                                minWidth: AppSpacing.tapTarget,
+                                minHeight: AppSpacing.tapTarget,
+                              ),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: AppSpacing.lg,
+                                ),
+                                child: Center(
+                                  widthFactor: 1,
+                                  child: Text(
+                                    widget.action!,
+                                    style: GoogleFonts.plusJakartaSans(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w800,
+                                      color: colors.actionColor,
+                                    ),
+                                  ),
                                 ),
                               ),
                             ),
@@ -392,6 +457,12 @@ class _AppToastEntryState extends State<_AppToastEntry>
     );
   }
 
+  // The toast surface stays dark on BOTH themes. That is deliberate and
+  // predates this restyle: an opaque fixed fill is the only way the toast
+  // renders identically across every Android device/OS combo, and it also
+  // keeps it from being mistaken for a Material SnackBar. So the action
+  // colours below are measured against the toast's own fill, not the
+  // palette background.
   _ToastColors _variantColors(AppToastVariant v) {
     switch (v) {
       case AppToastVariant.success:
@@ -399,25 +470,34 @@ class _AppToastEntryState extends State<_AppToastEntry>
           // Fully opaque dark gray-green. Sits great on dark backgrounds
           // and is clearly distinct from "info".
           bg: Color(0xFF14532D),
+          rail: Color(0xFF22C55E),
           border: Color(0xFF22C55E),
           icon: Icons.check_circle_outline,
           iconColor: Color(0xFF22C55E),
+          actionColor: Color(0xFF86EFAC), // 6.49:1 on #14532D
+          actionFill: Color(0x1FFFFFFF),
         );
       case AppToastVariant.error:
         return const _ToastColors(
           bg: Color(0xFF7F1D1D),
+          rail: Color(0xFFFCA5A5),
           border: Color(0xFFFCA5A5),
           icon: Icons.error_outline,
           iconColor: Color(0xFFFCA5A5),
+          actionColor: Color(0xFFFECACA), // 6.93:1 on #7F1D1D
+          actionFill: Color(0x1FFFFFFF),
         );
       case AppToastVariant.info:
         return const _ToastColors(
           // Fully opaque dark slate — matches our dark theme exactly so
           // it's never mistaken for a Material SnackBar in dark mode.
           bg: Color(0xFF111827),
+          rail: Color(0xFF5B8CFF),
           border: Color(0xFF374151),
           icon: null,
           iconColor: Colors.white,
+          actionColor: Color(0xFF5B8CFF), // 5.61:1 on #111827
+          actionFill: Color(0x1FFFFFFF),
         );
     }
   }
@@ -426,13 +506,25 @@ class _AppToastEntryState extends State<_AppToastEntry>
 class _ToastColors {
   const _ToastColors({
     required this.bg,
+    required this.rail,
     required this.border,
     required this.icon,
     required this.iconColor,
+    required this.actionColor,
+    required this.actionFill,
   });
 
   final Color bg;
+
+  /// Leading hairline in the variant colour.
+  final Color rail;
   final Color border;
   final IconData? icon;
   final Color iconColor;
+
+  /// Label colour of the action pill, contrast-checked against [bg].
+  final Color actionColor;
+
+  /// Faint wash behind the action pill so it reads as a control.
+  final Color actionFill;
 }

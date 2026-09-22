@@ -10,6 +10,8 @@ import '../../core/constants/app_constants.dart';
 import '../../core/di/injection.dart';
 import '../../core/services/hold_to_speak_service.dart';
 import '../../core/theme/app_colors.dart';
+import '../../core/theme/app_spacing.dart';
+import '../../core/utils/reduced_motion.dart';
 import '../../data/services/stt_gateway_service.dart';
 
 /// Self-contained hold-to-speak mic button for follow-up chat inputs.
@@ -113,7 +115,7 @@ class _VoiceInputButtonState extends ConsumerState<VoiceInputButton>
     if (listening != _wasListening) {
       _wasListening = listening;
       widget.onListeningChanged?.call(listening);
-      if (listening) {
+      if (listening && !reducedMotion(context)) {
         _pulseCtrl.repeat(reverse: true);
       } else {
         _pulseCtrl.stop();
@@ -180,12 +182,20 @@ class _VoiceInputButtonState extends ConsumerState<VoiceInputButton>
   @override
   Widget build(BuildContext context) {
     final active = _voice.isListening;
-    final color = active ? const Color(0xFFF87171) : AppColors.accent;
+    // Recording is a state, not a failure — the `listening` role token, not
+    // `danger`. `accentText` rather than the CTA fill: this is an icon.
+    final color = active ? widget.colors.listening : widget.colors.accentText;
     final opacity = widget.disabled && !active ? 0.35 : 1.0;
 
-    return Opacity(
+    return Semantics(
+      button: true,
+      enabled: !widget.disabled,
+      label: active ? 'Listening' : 'Voice input',
+      hint: 'Press and hold to dictate',
+      child: Opacity(
       opacity: opacity,
-      child: Listener(
+      child: ExcludeSemantics(
+        child: Listener(
         behavior: HitTestBehavior.opaque,
         onPointerDown: (_) => _onPointerDown(),
         onPointerUp: (_) => _onPointerUp(),
@@ -206,10 +216,12 @@ class _VoiceInputButtonState extends ConsumerState<VoiceInputButton>
             );
           },
           child: AnimatedContainer(
-            duration: const Duration(milliseconds: 180),
+            duration: reducedMotion(context)
+                ? Duration.zero
+                : const Duration(milliseconds: 180),
             curve: Curves.easeOutCubic,
-            width: 40,
-            height: 40,
+            width: AppSpacing.tapTarget,
+            height: AppSpacing.tapTarget,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
               color: color.withValues(alpha: active ? 0.18 : 0.10),
@@ -232,7 +244,7 @@ class _VoiceInputButtonState extends ConsumerState<VoiceInputButton>
               children: [
                 Icon(
                   active ? LucideIcons.micOff : LucideIcons.mic,
-                  size: 16,
+                  size: 18,
                   color: color,
                 ),
                 if (active)
@@ -251,6 +263,8 @@ class _VoiceInputButtonState extends ConsumerState<VoiceInputButton>
             ),
           ),
         ),
+      ),
+      ),
       ),
     );
   }

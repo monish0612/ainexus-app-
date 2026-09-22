@@ -1,18 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  FileProvider paths for image_picker camera capture.
+  FileProvider paths for camera / share URIs.
 
-  cache-path: maps to context.getCacheDir() — image_picker drops the
-  captured JPEG here so we hand the OS camera intent a content:// URI
-  it can write to without needing legacy storage permissions.
+  cache-path: maps to context.getCacheDir() — image_picker and hold-to-speak
+  drop temp media here. Kept at "." because the cache dir is app-private
+  and already short-lived.
 
-  files-path / external-files-path are also exposed so that any future
-  upload flow (e.g. file_picker writing temp PDFs / docs / shared
-  receipts) can reuse the same authority without another manifest edit.
+  files-path / external-files-path / external-path were previously "." which
+  exposed the whole files dir (including the Drift DB) and shared external
+  storage. No Dart/Kotlin caller uses getExternalStorageDirectory or this
+  authority for those roots, so they are not declared.
 -->
 <paths>
     <cache-path name="my_images" path="."/>
-    <files-path name="my_files" path="."/>
-    <external-files-path name="external_files" path="."/>
-    <external-path name="external" path="."/>
 </paths>

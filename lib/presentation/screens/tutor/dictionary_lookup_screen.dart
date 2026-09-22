@@ -391,7 +391,7 @@ class _DictionaryLookupScreenState
                         style: GoogleFonts.plusJakartaSans(
                           fontSize: 10,
                           fontWeight: FontWeight.w700,
-                          color: colors.text5,
+                          color: colors.text4,
                           letterSpacing: 1.2,
                         ),
                       ),
@@ -422,7 +422,7 @@ class _DictionaryLookupScreenState
                               style: GoogleFonts.plusJakartaSans(
                                 fontSize: 10,
                                 fontWeight: FontWeight.w700,
-                                color: colors.text5,
+                                color: colors.text4,
                                 letterSpacing: 1.2,
                               ),
                             ),
@@ -520,7 +520,7 @@ class _DictionaryLookupScreenState
                           style: GoogleFonts.plusJakartaSans(
                             fontSize: 10,
                             fontWeight: FontWeight.w700,
-                            color: colors.text5,
+                            color: colors.text4,
                             letterSpacing: 1.2,
                           ),
                         ),

@@ -1,3 +1,4 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -281,12 +282,23 @@ class _PreviewCard extends StatelessWidget {
           if (hit.imageUrl.isNotEmpty)
             ClipRRect(
               borderRadius: BorderRadius.circular(10),
-              child: Image.network(
-                hit.imageUrl,
+              child: CachedNetworkImage(
+                imageUrl: hit.imageUrl,
                 width: 56,
                 height: 56,
                 fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => const SizedBox(width: 56, height: 56),
+                memCacheWidth: (56 *
+                        MediaQuery.devicePixelRatioOf(context))
+                    .round(),
+                memCacheHeight: (56 *
+                        MediaQuery.devicePixelRatioOf(context))
+                    .round(),
+                placeholder: (_, __) => ColoredBox(
+                  color: colors.bg3,
+                  child: const SizedBox(width: 56, height: 56),
+                ),
+                errorWidget: (_, __, ___) =>
+                    const SizedBox(width: 56, height: 56),
               ),
             )
           else

@@ -23,23 +23,37 @@ object BubblePrefs {
 
     const val DEFAULT_MIN_CHARS = 8
 
+    @Volatile private var enabledCache: Boolean? = null
+    @Volatile private var minCharsCache: Int? = null
+
     private fun prefs(context: Context): SharedPreferences =
         context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
 
     /** Defaults on: enabling the accessibility service is already an opt-in. */
-    fun isEnabled(context: Context): Boolean =
-        prefs(context).getBoolean(KEY_ENABLED, true)
+    fun isEnabled(context: Context): Boolean {
+        enabledCache?.let { return it }
+        val value = prefs(context).getBoolean(KEY_ENABLED, true)
+        enabledCache = value
+        return value
+    }
 
     fun setEnabled(context: Context, enabled: Boolean) {
+        enabledCache = enabled
         prefs(context).edit().putBoolean(KEY_ENABLED, enabled).apply()
     }
 
     /** Shortest field text that is worth offering a rephrase for. */
-    fun minChars(context: Context): Int =
-        prefs(context).getInt(KEY_MIN_CHARS, DEFAULT_MIN_CHARS).coerceAtLeast(1)
+    fun minChars(context: Context): Int {
+        minCharsCache?.let { return it }
+        val value = prefs(context).getInt(KEY_MIN_CHARS, DEFAULT_MIN_CHARS).coerceAtLeast(1)
+        minCharsCache = value
+        return value
+    }
 
     fun setMinChars(context: Context, value: Int) {
-        prefs(context).edit().putInt(KEY_MIN_CHARS, value.coerceIn(1, 500)).apply()
+        val clamped = value.coerceIn(1, 500)
+        minCharsCache = clamped
+        prefs(context).edit().putInt(KEY_MIN_CHARS, clamped).apply()
     }
 
     @Volatile private var skipRaw: String? = null

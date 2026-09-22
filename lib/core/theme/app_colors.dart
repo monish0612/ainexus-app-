@@ -24,6 +24,19 @@ class AppColors extends ThemeExtension<AppColors> {
     required this.cardGradientBottom,
     required this.shimmerBase,
     required this.shimmerHighlight,
+    // Role tokens added after the palette shipped. They default to the dark
+    // values so the dozens of hand-built `AppColors(...)` literals in the
+    // widget tests keep compiling; `dark` and `white` below still pass every
+    // one of them explicitly.
+    this.modeLite = const Color(0xFF22D3EE),
+    this.modeDeep = const Color(0xFF8B5CF6),
+    this.modeThinking = const Color(0xFFF5B62C),
+    this.providerXgrok = const Color(0xFF94A3B8),
+    this.accentText = const Color(0xFF5B8CFF),
+    this.danger = const Color(0xFFEF4444),
+    this.warning = const Color(0xFFF59E0B),
+    this.success = const Color(0xFF34D399),
+    this.listening = const Color(0xFFF87171),
     required this.isDark,
   });
 
@@ -60,6 +73,44 @@ class AppColors extends ThemeExtension<AppColors> {
   final Color shimmerBase;
   final Color shimmerHighlight;
 
+  // ── Mode identity (Lite / Deep / Thinking) ─────────────────────────────
+  //
+  // No single hex clears AA text contrast on BOTH #000000 and #FFFFFF — the
+  // luminance window is under one percentage point wide — so each mode ships
+  // a per-theme pair. Use these when the mode name is *text*; use the
+  // `mode*Edge` statics below for borders, focus rings and other non-text.
+
+  /// Lite / live / sync. 11.62:1 on black, 5.36:1 on white.
+  final Color modeLite;
+
+  /// Deep research. 4.96:1 on black, 5.70:1 on white.
+  final Color modeDeep;
+
+  /// Thinking (xGrok only). 11.61:1 on black, 4.92:1 on white.
+  final Color modeThinking;
+
+  /// xGrok provider identity: deliberately FLAT slate, drawn with angular
+  /// corners. Gemini is a rounded gradient ([geminiGradient]) so the two read
+  /// as different providers in grayscale, not just by hue.
+  final Color providerXgrok;
+
+  /// Blue for *text* and icons. [accent] is the CTA fill only — it is
+  /// 3.73:1 on black, which fails as text. 6.64:1 / 5.63:1 as this pair.
+  final Color accentText;
+
+  /// Destructive / failure. 5.58:1 on black, 4.83:1 on white.
+  final Color danger;
+
+  /// Caution, price-watch, rate limits. 9.78:1 on black, 5.02:1 on white.
+  final Color warning;
+
+  /// Confirmation. 10.92:1 on black, 5.48:1 on white.
+  final Color success;
+
+  /// Live microphone / hold-to-speak. Distinct from [danger] on purpose —
+  /// recording is a state, not a failure. 7.59:1 on black, 6.29:1 on white.
+  final Color listening;
+
   final bool isDark;
 
   static const dark = AppColors(
@@ -70,9 +121,9 @@ class AppColors extends ThemeExtension<AppColors> {
     bg4: Color(0x1FFFFFFF), // rgba(255,255,255,0.12)
     text: Color(0xFFF1F5F9),
     text2: Color(0xFF94A3B8),
-    text3: Color(0x6BFFFFFF), // rgba(255,255,255,0.42)
-    text4: Color(0x47FFFFFF), // rgba(255,255,255,0.28)
-    text5: Color(0x2EFFFFFF), // rgba(255,255,255,0.18)
+    text3: Color(0x99FFFFFF), // white @ 0.60 — 7.37:1 on #000000
+    text4: Color(0x78FFFFFF), // white @ 0.47 — 4.76:1 on #000000
+    text5: Color(0x5CFFFFFF), // white @ 0.36 — 3.14:1, non-text only
     border: Color(0x14FFFFFF), // rgba(255,255,255,0.08)
     border2: Color(0x0DFFFFFF), // rgba(255,255,255,0.05)
     headerBg: Color(0xFF000000),
@@ -84,6 +135,15 @@ class AppColors extends ThemeExtension<AppColors> {
     cardGradientBottom: Color(0xFF060608),
     shimmerBase: Color(0x14FFFFFF), // rgba(255,255,255,0.08)
     shimmerHighlight: Color(0x2EFFFFFF), // rgba(255,255,255,0.18)
+    modeLite: Color(0xFF22D3EE), // 11.62:1
+    modeDeep: Color(0xFF8B5CF6), // 4.96:1
+    modeThinking: Color(0xFFF5B62C), // 11.61:1
+    providerXgrok: Color(0xFF94A3B8), // 8.19:1
+    accentText: Color(0xFF5B8CFF), // 6.64:1
+    danger: Color(0xFFEF4444), // 5.58:1
+    warning: Color(0xFFF59E0B), // 9.78:1
+    success: Color(0xFF34D399), // 10.92:1
+    listening: Color(0xFFF87171), // 7.59:1
     isDark: true,
   );
 
@@ -95,9 +155,9 @@ class AppColors extends ThemeExtension<AppColors> {
     bg4: Color(0x17000000), // rgba(0,0,0,0.09)
     text: Color(0xFF0F172A),
     text2: Color(0xFF475569),
-    text3: Color(0x8C000000), // rgba(0,0,0,0.55)
-    text4: Color(0x61000000), // rgba(0,0,0,0.38)
-    text5: Color(0x40000000), // rgba(0,0,0,0.25)
+    text3: Color(0xA8000000), // black @ 0.66 — 7.23:1 on #FFFFFF
+    text4: Color(0x8C000000), // black @ 0.55 — 4.74:1 on #FFFFFF
+    text5: Color(0x6E000000), // black @ 0.43 — 3.15:1, non-text only
     border: Color(0x17000000), // rgba(0,0,0,0.09)
     border2: Color(0x0F000000), // rgba(0,0,0,0.06)
     headerBg: Color(0xFFFFFFFF),
@@ -110,12 +170,71 @@ class AppColors extends ThemeExtension<AppColors> {
     cardGradientBottom: Color(0xFFF8FAFC),
     shimmerBase: Color(0x0F000000), // rgba(0,0,0,0.06)
     shimmerHighlight: Color(0x05000000), // rgba(0,0,0,0.02)
+    modeLite: Color(0xFF0E7490), // 5.36:1
+    modeDeep: Color(0xFF7C3AED), // 5.70:1
+    modeThinking: Color(0xFFA16207), // 4.92:1
+    providerXgrok: Color(0xFF475569), // 7.58:1
+    accentText: Color(0xFF0D59F2), // 5.63:1
+    danger: Color(0xFFDC2626), // 4.83:1
+    warning: Color(0xFFB45309), // 5.02:1
+    success: Color(0xFF047857), // 5.48:1
+    listening: Color(0xFFBE123C), // 6.29:1
     isDark: false,
   );
 
-  // Accent blue used across settings, buttons, profile ring
+  // Accent blue used across settings, buttons, profile ring.
+  // CTA FILL ONLY — 3.73:1 on #000000 fails as text. For blue text or icons
+  // read `AppColors.of(context).accentText` instead.
   static const accent = Color(0xFF0D59F2);
   static const accentCyan = Color(0xFF22D3EE);
+
+  /// Sugar for the usual `Theme.of(context).extension<AppColors>()!`.
+  static AppColors of(BuildContext context) =>
+      Theme.of(context).extension<AppColors>()!;
+
+  // ── Mode edges (non-text) ───────────────────────────────────────────────
+  //
+  // Single hexes that clear the 3:1 non-text threshold on BOTH #000000 and
+  // #FFFFFF, so borders, focus rings and dividers need no per-theme branch.
+  static const modeLiteEdge = Color(0xFF0891B2); // 5.70 / 3.68
+  static const modeDeepEdge = Color(0xFF7D67C1); // 4.58 / 4.58
+  static const modeThinkingEdge = Color(0xFF9A6C3F); // 4.59 / 4.57
+
+  // ── Provider identity ───────────────────────────────────────────────────
+  //
+  // Gemini = rounded/radial GRADIENT. xGrok = angular FLAT slate
+  // (`providerXgrok`). The gradient-vs-flat and round-vs-angular contrast
+  // survives grayscale, so the two never rely on hue alone. Neither uses
+  // [accent] — that stays reserved for the CTA.
+  static const geminiGradientStart = Color(0xFF4F8DF7);
+  static const geminiGradientEnd = Color(0xFF8B5CF6);
+  static const geminiGradient = LinearGradient(
+    begin: Alignment.topLeft,
+    end: Alignment.bottomRight,
+    colors: <Color>[geminiGradientStart, geminiGradientEnd],
+  );
+
+  /// Radial form of [geminiGradient], for orbs and avatars.
+  static const geminiRadialGradient = RadialGradient(
+    center: Alignment(-0.3, -0.4),
+    radius: 1.1,
+    colors: <Color>[geminiGradientStart, geminiGradientEnd],
+  );
+
+  // ── Legacy identity hexes, promoted out of inline literals ──────────────
+  //
+  // Kept as statics so existing call sites can migrate to a named token
+  // without a visual change. Prefer the theme-extension fields above for
+  // anything that must lerp across a theme switch.
+  static const geminiBlue = Color(0xFF4285F4);
+  static const xgrokRed = Color(0xFFE8453C);
+  static const deepViolet = Color(0xFFC084FC);
+  static const composerGradientStart = Color(0xFF6366F1);
+  static const composerGradientEnd = Color(0xFF8B5CF6);
+  static const dangerRed = Color(0xFFEF4444);
+  static const listeningRed = Color(0xFFF87171);
+  static const warningAmber = Color(0xFFF59E0B);
+  static const successGreen = Color(0xFF34D399);
 
   // Category colors (from expense.ts CATEGORY_COLORS)
   static const categoryFood = Color(0xFFFF6B6B);
@@ -255,6 +374,15 @@ class AppColors extends ThemeExtension<AppColors> {
     Color? cardGradientBottom,
     Color? shimmerBase,
     Color? shimmerHighlight,
+    Color? modeLite,
+    Color? modeDeep,
+    Color? modeThinking,
+    Color? providerXgrok,
+    Color? accentText,
+    Color? danger,
+    Color? warning,
+    Color? success,
+    Color? listening,
     bool? isDark,
   }) {
     return AppColors(
@@ -279,6 +407,15 @@ class AppColors extends ThemeExtension<AppColors> {
       cardGradientBottom: cardGradientBottom ?? this.cardGradientBottom,
       shimmerBase: shimmerBase ?? this.shimmerBase,
       shimmerHighlight: shimmerHighlight ?? this.shimmerHighlight,
+      modeLite: modeLite ?? this.modeLite,
+      modeDeep: modeDeep ?? this.modeDeep,
+      modeThinking: modeThinking ?? this.modeThinking,
+      providerXgrok: providerXgrok ?? this.providerXgrok,
+      accentText: accentText ?? this.accentText,
+      danger: danger ?? this.danger,
+      warning: warning ?? this.warning,
+      success: success ?? this.success,
+      listening: listening ?? this.listening,
       isDark: isDark ?? this.isDark,
     );
   }
@@ -309,6 +446,15 @@ class AppColors extends ThemeExtension<AppColors> {
           Color.lerp(cardGradientBottom, other.cardGradientBottom, t)!,
       shimmerBase: Color.lerp(shimmerBase, other.shimmerBase, t)!,
       shimmerHighlight: Color.lerp(shimmerHighlight, other.shimmerHighlight, t)!,
+      modeLite: Color.lerp(modeLite, other.modeLite, t)!,
+      modeDeep: Color.lerp(modeDeep, other.modeDeep, t)!,
+      modeThinking: Color.lerp(modeThinking, other.modeThinking, t)!,
+      providerXgrok: Color.lerp(providerXgrok, other.providerXgrok, t)!,
+      accentText: Color.lerp(accentText, other.accentText, t)!,
+      danger: Color.lerp(danger, other.danger, t)!,
+      warning: Color.lerp(warning, other.warning, t)!,
+      success: Color.lerp(success, other.success, t)!,
+      listening: Color.lerp(listening, other.listening, t)!,
       isDark: t < 0.5 ? isDark : other.isDark,
     );
   }

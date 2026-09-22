@@ -22,6 +22,7 @@ import '../../../../core/services/credit_card_forecast_engine.dart';
 import '../../../../core/services/hold_to_speak_service.dart';
 import '../../../../core/services/telegram_logger.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/utils/amount_input_formatter.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../../../core/utils/expense_logged_at.dart';
 import '../../../../data/services/ai_categorize_service.dart';
@@ -1453,7 +1454,7 @@ class _AddExpenseSheetState extends State<_AddExpenseSheet>
 
     widget.onAdd(
       ExpenseSubmitPayload(
-        amount: n!,
+        amount: n,
         description: desc,
         category: _category,
         bank: _bank,
@@ -1470,15 +1471,6 @@ class _AddExpenseSheetState extends State<_AddExpenseSheet>
       ),
     );
     Navigator.of(context).pop();
-  }
-
-  bool get _canSubmit {
-    final n = double.tryParse(_amountCtrl.text.replaceAll(',', ''));
-    return n != null &&
-        n > 0 &&
-        _descCtrl.text.trim().isNotEmpty &&
-        _bank.isNotEmpty &&
-        _cardType.isNotEmpty;
   }
 
   bool get _showWand =>
@@ -2206,6 +2198,7 @@ class _AddExpenseSheetState extends State<_AddExpenseSheet>
                       controller: _amountCtrl,
                       keyboardType:
                           const TextInputType.numberWithOptions(decimal: true),
+                      inputFormatters: const [AmountInputFormatter()],
                       style: textTheme.displaySmall?.copyWith(
                         color: colors.text,
                         fontWeight: FontWeight.w900,
@@ -2791,7 +2784,7 @@ class _ModeCell extends StatelessWidget {
                         fontSize: 8,
                         color: selected
                             ? Colors.white.withValues(alpha: 0.6)
-                            : colors.text5,
+                            : colors.text4,
                         letterSpacing: 0.3,
                       ),
                     ),
@@ -3022,6 +3015,7 @@ class _AmountField extends StatelessWidget {
                   controller: controller,
                   keyboardType:
                       const TextInputType.numberWithOptions(decimal: true),
+                  inputFormatters: const [AmountInputFormatter()],
                   style: textTheme.titleLarge?.copyWith(
                     color: colors.text,
                     fontWeight: FontWeight.w800,

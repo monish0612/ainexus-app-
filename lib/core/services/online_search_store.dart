@@ -182,7 +182,8 @@ class OnlineSearchStore with WidgetsBindingObserver {
     }
     _releaseCoordSlot(queryKey);
     _listeners[queryKey]?.call();
-    TLog.d('SearchStore', 'Cancelled search for key="${queryKey.length > 50 ? '${queryKey.substring(0, 50)}\u2026' : queryKey}"');
+    TLog.d('SearchStore',
+        'Cancelled search for key="${queryKey.length > 50 ? '${queryKey.substring(0, 50)}\u2026' : queryKey}"');
   }
 
   void remove(String queryKey) {
@@ -257,8 +258,6 @@ class OnlineSearchStore with WidgetsBindingObserver {
       _scheduleStageUpdate(queryKey, 5000, 'Preparing answer\u2026');
       _scheduleStageUpdate(queryKey, 12000, 'Almost there\u2026');
 
-      Object? groundedError;
-
       try {
         if (cancelToken?.isCancelled ?? false) return;
 
@@ -270,7 +269,8 @@ class OnlineSearchStore with WidgetsBindingObserver {
           liteModel: params.useXGrok ? null : params.liteModel,
           xgrokLiteModel: params.useXGrok ? params.xgrokLiteModel : null,
           xgrokDeepModel: params.useXGrok ? params.xgrokDeepModel : null,
-          xgrokThinkingModel: params.useXGrok ? params.xgrokThinkingModel : null,
+          xgrokThinkingModel:
+              params.useXGrok ? params.xgrokThinkingModel : null,
           cancelToken: cancelToken,
         );
         if (!_jobs.containsKey(queryKey)) return;
@@ -278,10 +278,11 @@ class OnlineSearchStore with WidgetsBindingObserver {
 
         sw.stop();
         _resumeRetryCount.remove(queryKey);
-        TLog.i('SearchStore',
+        TLog.i(
+            'SearchStore',
             'Search \u2713 provider=$providerTag mode=$modeTag model=${result.model} '
-            'sources=${result.sources.length} ${sw.elapsedMilliseconds}ms '
-            'retry=$isRetry inBackground=$_appInBackground');
+                'sources=${result.sources.length} ${sw.elapsedMilliseconds}ms '
+                'retry=$isRetry inBackground=$_appInBackground');
 
         job
           ..groundedResult = result
@@ -293,15 +294,16 @@ class OnlineSearchStore with WidgetsBindingObserver {
           if (_appInBackground || _retryQueue.containsKey(queryKey)) {
             keepPending = true;
           }
-          TLog.d('SearchStore',
+          TLog.d(
+              'SearchStore',
               'Grounded search cancelled ${sw.elapsedMilliseconds}ms '
-              '(keepPending=$keepPending)');
+                  '(keepPending=$keepPending)');
           return;
         }
-        groundedError = e;
-        TLog.w('SearchStore',
+        TLog.w(
+            'SearchStore',
             '$providerTag grounded search [$modeTag] failed ${sw.elapsedMilliseconds}ms '
-            '(${e.runtimeType}): ${_errorSummary(e)}');
+                '(${e.runtimeType}): ${_errorSummary(e)}');
       }
 
       // ── Phase 2: Tavily fallback ────────────────────────────────────────
@@ -332,10 +334,11 @@ class OnlineSearchStore with WidgetsBindingObserver {
 
         sw.stop();
         _resumeRetryCount.remove(queryKey);
-        TLog.i('SearchStore',
+        TLog.i(
+            'SearchStore',
             'Tavily fallback \u2713 results=${result.results.length} '
-            '${sw.elapsedMilliseconds}ms retry=$isRetry '
-            'inBackground=$_appInBackground');
+                '${sw.elapsedMilliseconds}ms retry=$isRetry '
+                'inBackground=$_appInBackground');
 
         job
           ..tavilyResult = result
@@ -347,41 +350,44 @@ class OnlineSearchStore with WidgetsBindingObserver {
           if (_appInBackground || _retryQueue.containsKey(queryKey)) {
             keepPending = true;
           }
-          TLog.d('SearchStore',
+          TLog.d(
+              'SearchStore',
               'Tavily search cancelled ${sw.elapsedMilliseconds}ms '
-              '(keepPending=$keepPending)');
+                  '(keepPending=$keepPending)');
           return;
         }
         tavilyError = e;
-        TLog.w('SearchStore',
+        TLog.w(
+            'SearchStore',
             'Tavily fallback also failed ${sw.elapsedMilliseconds}ms '
-            '(${e.runtimeType}): ${_errorSummary(e)}');
+                '(${e.runtimeType}): ${_errorSummary(e)}');
       }
 
       // ── Both failed ─────────────────────────────────────────────────────
-      final finalError = tavilyError ?? groundedError;
+      // Tavily's catch always assigns before we get here (success returns).
+      final finalError = tavilyError;
 
-      if (finalError != null &&
-          _isRetryableError(finalError) &&
+      if (_isRetryableError(finalError) &&
           _appInBackground &&
           _jobs.containsKey(queryKey)) {
         _retryQueue[queryKey] = params;
         keepPending = true;
         job.stage = 'Will retry when connection restores\u2026';
-        TLog.w('SearchStore',
+        TLog.w(
+            'SearchStore',
             'All providers failed with retryable error (app in background) '
-            '\u2014 queued auto-retry on resume for "${params.query}"');
+                '\u2014 queued auto-retry on resume for "${params.query}"');
       } else if (_jobs.containsKey(queryKey)) {
         sw.stop();
-        TLog.e('SearchStore',
+        TLog.e(
+            'SearchStore',
             'All search providers FAILED '
-            '${sw.elapsedMilliseconds}ms '
-            '(inBackground=$_appInBackground '
-            'retryable=${finalError != null && _isRetryableError(finalError)})',
+                '${sw.elapsedMilliseconds}ms '
+                '(inBackground=$_appInBackground '
+                'retryable=${_isRetryableError(finalError)})',
             error: finalError);
         job
-          ..error =
-              'Search failed. Please check your connection and try again.'
+          ..error = 'Search failed. Please check your connection and try again.'
           ..loading = false
           ..stage = '';
       }
@@ -392,8 +398,7 @@ class OnlineSearchStore with WidgetsBindingObserver {
       // newer execution owns the slot + token entry and we must leave
       // them alone — otherwise we'd kill the FG service mid-retry and
       // remove the live cancel-token from the map.
-      final isStillActive =
-          identical(_cancelTokens[queryKey], cancelToken);
+      final isStillActive = identical(_cancelTokens[queryKey], cancelToken);
 
       if (isStillActive) {
         _cancelTokens.remove(queryKey);
@@ -402,9 +407,7 @@ class OnlineSearchStore with WidgetsBindingObserver {
         }
         _listeners[queryKey]?.call();
 
-        if (_appInBackground &&
-            !keepPending &&
-            _jobs.containsKey(queryKey)) {
+        if (_appInBackground && !keepPending && _jobs.containsKey(queryKey)) {
           unawaited(_cancelProcessingNotification());
           final j = _jobs[queryKey]!;
           if (j.error == null &&
@@ -474,9 +477,10 @@ class OnlineSearchStore with WidgetsBindingObserver {
 
       if (!_appInBackground && inFlightKeys.isNotEmpty) {
         _appInBackground = true;
-        TLog.d('SearchStore',
+        TLog.d(
+            'SearchStore',
             'App \u2192 BACKGROUND with ${inFlightKeys.length} in-flight '
-            'search(es)');
+                'search(es)');
         unawaited(_showProcessingNotification(inFlightKeys.first));
       }
       return;
@@ -532,9 +536,10 @@ class OnlineSearchStore with WidgetsBindingObserver {
 
         final attempts = (_resumeRetryCount[queryKey] ?? 0) + 1;
         if (attempts > _kMaxResumeRetries) {
-          TLog.e('SearchStore',
+          TLog.e(
+              'SearchStore',
               'Max resume retries ($_kMaxResumeRetries) exhausted for '
-              '"${p.query.length > 50 ? '${p.query.substring(0, 50)}\u2026' : p.query}"');
+                  '"${p.query.length > 50 ? '${p.query.substring(0, 50)}\u2026' : p.query}"');
           job
             ..error = 'Connection could not be restored after '
                 '$_kMaxResumeRetries attempts. Please try again.'
@@ -549,9 +554,10 @@ class OnlineSearchStore with WidgetsBindingObserver {
         }
         _resumeRetryCount[queryKey] = attempts;
 
-        TLog.i('SearchStore',
+        TLog.i(
+            'SearchStore',
             'Resume retry $attempts/$_kMaxResumeRetries for '
-            '"${p.query.length > 50 ? '${p.query.substring(0, 50)}\u2026' : p.query}"');
+                '"${p.query.length > 50 ? '${p.query.substring(0, 50)}\u2026' : p.query}"');
 
         job
           ..loading = true
@@ -615,8 +621,7 @@ class OnlineSearchStore with WidgetsBindingObserver {
         const NotificationDetails(android: details),
       );
     } catch (e) {
-      TLog.w('SearchStore', 'Failed to show processing notification',
-          error: e);
+      TLog.w('SearchStore', 'Failed to show processing notification', error: e);
     }
   }
 
@@ -644,8 +649,7 @@ class OnlineSearchStore with WidgetsBindingObserver {
         payload: 'tutor_tab',
       );
     } catch (e) {
-      TLog.w('SearchStore', 'Failed to show completion notification',
-          error: e);
+      TLog.w('SearchStore', 'Failed to show completion notification', error: e);
     }
   }
 

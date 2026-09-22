@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Cleartext is off for the whole app except the production STT gateway.
+  Host must match AppConstants.prodSttGatewayHost. Debug builds overlay
+  this file to also allow localhost / emulator loopback.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">72.60.219.97</domain>
+    </domain-config>
+</network-security-config>

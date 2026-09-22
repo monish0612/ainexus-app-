@@ -17,6 +17,7 @@ import '../../../core/services/on_demand_summarize_store.dart';
 import '../../../core/services/share_sheet.dart';
 import '../../../core/services/telegram_logger.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../../core/utils/reduced_motion.dart';
 import '../../../data/services/article_tts_service.dart';
 import '../../../data/services/narration_download_store.dart';
 import '../../../domain/entities/news_entities.dart';
@@ -78,6 +79,9 @@ class _MarkdownArticleImage extends StatelessWidget {
                     // and no overflow regardless of the source image dimensions.
                     fit: BoxFit.fitWidth,
                     width: double.infinity,
+                    memCacheWidth: (MediaQuery.sizeOf(context).width *
+                            MediaQuery.devicePixelRatioOf(context))
+                        .round(),
                     placeholder: (_, __) => Container(
                       height: 180,
                       color: colors.bg2,
@@ -1263,12 +1267,24 @@ class _SummaryLoadingCardState extends State<_SummaryLoadingCard>
     _c = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1500),
-    )..repeat();
+    );
+    // The status copy keeps advancing on its own clock under reduced motion —
+    // the progress it reports is information, not decoration.
     _phaseTimer = Timer.periodic(const Duration(milliseconds: 1900), (_) {
       if (!mounted) return;
       final phases = widget.isMovie ? _moviePhases : _phases;
       setState(() => _phase = (_phase + 1) % phases.length);
     });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (reducedMotion(context)) {
+      _c.stop();
+    } else if (!_c.isAnimating) {
+      _c.repeat();
+    }
   }
 
   @override
@@ -1960,6 +1976,12 @@ class _HeroImage extends StatelessWidget {
                 child: CachedNetworkImage(
                   imageUrl: article.imageUrl,
                   fit: BoxFit.cover,
+                  memCacheWidth: (MediaQuery.sizeOf(context).width *
+                          MediaQuery.devicePixelRatioOf(context))
+                      .round(),
+                  memCacheHeight: (300 *
+                          MediaQuery.devicePixelRatioOf(context))
+                      .round(),
                   placeholder: (_, __) => Container(
                     color: cat.withValues(alpha: 0.08),
                   ),
@@ -2101,7 +2123,7 @@ class _MetaRow extends StatelessWidget {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(LucideIcons.clock, size: 12, color: colors.text5),
+              Icon(LucideIcons.clock, size: 12, color: colors.text4),
               const SizedBox(width: 4),
               Text(
                 '${article.readTime} min',
@@ -2119,7 +2141,7 @@ class _MetaRow extends StatelessWidget {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(LucideIcons.calendar, size: 12, color: colors.text5),
+              Icon(LucideIcons.calendar, size: 12, color: colors.text4),
               const SizedBox(width: 4),
               Text(
                 article.date,
@@ -2493,7 +2515,7 @@ class _BarPill extends StatelessWidget {
 // TTS Player Bar — inline player for on-device article narration
 // ---------------------------------------------------------------------------
 
-class _TtsPlayerBar extends StatelessWidget {
+class _TtsPlayerBar extends StatefulWidget {
   const _TtsPlayerBar({
     required this.ttsService,
     required this.article,
@@ -2514,26 +2536,65 @@ class _TtsPlayerBar extends StatelessWidget {
   final bool onDevice;
 
   @override
+  State<_TtsPlayerBar> createState() => _TtsPlayerBarState();
+}
+
+class _TtsPlayerBarState extends State<_TtsPlayerBar> {
+  /// The whole markdown-strip chain used to re-run on every rebuild of the
+  /// bar, including each idle↔speaking flip. Strip once per article.
+  late String _text = ArticleTtsService.extractSpeakableText(widget.article);
+
+  /// Tapped, but the engine has not reported `onStart` yet. Android's TTS
+  /// can take a few hundred ms to hand back the first utterance.
+  bool _starting = false;
+
+  Color get accentColor => widget.accentColor;
+  AppColors get colors => widget.colors;
+  Article get article => widget.article;
+  ArticleTtsService get ttsService => widget.ttsService;
+  bool get isFullContent => widget.isFullContent;
+  bool get onDevice => widget.onDevice;
+
+  @override
+  void didUpdateWidget(_TtsPlayerBar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.article != widget.article) {
+      _text = ArticleTtsService.extractSpeakableText(widget.article);
+      _starting = false;
+    }
+  }
+
+  Future<void> _speak() async {
+    if (_starting) return;
+    setState(() => _starting = true);
+    try {
+      await ttsService.speak(_text);
+    } finally {
+      if (mounted) setState(() => _starting = false);
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final text = ArticleTtsService.extractSpeakableText(article);
+    final text = _text;
     if (text.isEmpty) return const SizedBox.shrink();
 
     return ValueListenableBuilder<TtsState>(
       valueListenable: ttsService.stateNotifier,
       builder: (context, state, _) {
         return AnimatedSize(
-          duration: const Duration(milliseconds: 350),
+          duration: motionDuration(context, const Duration(milliseconds: 350)),
           curve: Curves.easeOutCubic,
           alignment: Alignment.topCenter,
           child: state == TtsState.idle
-              ? _buildIdle(text)
+              ? _buildIdle()
               : _buildActive(state, text),
         );
       },
     );
   }
 
-  Widget _buildIdle(String text) {
+  Widget _buildIdle() {
     return NewsListenSurface(
       accentColor: accentColor,
       colors: colors,
@@ -2566,7 +2627,11 @@ class _TtsPlayerBar extends StatelessWidget {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  onDevice ? 'On-device voice' : 'On-device voice narration',
+                  _starting
+                      ? 'Warming up the voice…'
+                      : (onDevice
+                          ? 'On-device voice'
+                          : 'On-device voice narration'),
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: GoogleFonts.plusJakartaSans(
@@ -2592,7 +2657,8 @@ class _TtsPlayerBar extends StatelessWidget {
           NewsListenPlayDisc(
             accentColor: accentColor,
             playing: false,
-            onTap: () => ttsService.speak(text),
+            pending: _starting,
+            onTap: () => unawaited(_speak()),
           ),
         ],
       ),

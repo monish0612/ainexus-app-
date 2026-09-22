@@ -281,6 +281,36 @@ void main() {
       // media type instead of a misleading 'image/jpeg'. Lock that contract.
       expect(out.width, equals(0));
       expect(out.height, equals(0));
+      expect(out.thumbnailIsJpeg, isFalse);
+    });
+
+    test(
+        'REGRESSION: an undecodable source OVER the 50 KB thumb cap does not '
+        'throw "Start Of Image marker not found."', () async {
+      // The vision flow died here: the fall-through hands the ORIGINAL
+      // bytes back as the thumbnail, and anything over the hard cap was
+      // then fed to the JPEG-only decoder for a second q40 pass. Any
+      // non-JPEG source (PNG/WEBP/HEIC) blew up the whole pick.
+      final junk = Uint8List.fromList(
+        List<int>.generate(80 * 1024, (i) => (i * 31) & 0xFF),
+      );
+      expect(junk.lengthInBytes, greaterThan(50 * 1024));
+
+      final out = await pipeline.debugCompressAndThumbnail(junk);
+
+      expect(out.thumbnail, equals(junk),
+          reason: 'undecodable bytes pass through untouched');
+      expect(out.thumbnailIsJpeg, isFalse,
+          reason: 'caller must label the thumb with the REAL media type');
+    });
+
+    test(
+        'REGRESSION: a decodable PNG reports thumbnailIsJpeg so the wire '
+        'media type stays image/jpeg', () async {
+      final src = _png(width: 1200, height: 900);
+      final out = await pipeline.debugCompressAndThumbnail(src);
+      expect(out.thumbnailIsJpeg, isTrue);
+      expect(img.decodeJpg(out.thumbnail), isNotNull);
     });
 
     test(

@@ -423,7 +423,7 @@ class _MergeExpensesSheetState extends State<_MergeExpensesSheet> {
                         style: GoogleFonts.plusJakartaSans(
                           fontSize: 9,
                           fontWeight: FontWeight.w600,
-                          color: colors.text5,
+                          color: colors.text4,
                           letterSpacing: 0.5,
                         ),
                       ),
@@ -455,7 +455,7 @@ class _MergeExpensesSheetState extends State<_MergeExpensesSheet> {
                       hintText: 'Add a reminder or note',
                       hintStyle: GoogleFonts.plusJakartaSans(
                         fontSize: 12,
-                        color: colors.text5,
+                        color: colors.text4,
                       ),
                       prefixIcon: Padding(
                         padding: const EdgeInsets.only(left: 12, right: 8),

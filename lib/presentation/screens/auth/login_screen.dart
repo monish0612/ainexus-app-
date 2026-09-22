@@ -7,6 +7,7 @@ import 'package:lucide_icons/lucide_icons.dart';
 
 import '../../../core/auth/auth_service.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../../core/utils/reduced_motion.dart';
 import '../../widgets/nexus_brand_mark.dart';
 import 'login_copy.dart';
 
@@ -54,10 +55,12 @@ class _LoginScreenState extends State<LoginScreen>
       _usernameCtl.text = AuthService.instance.username;
     }
 
+    // Both controllers are started from didChangeDependencies, which is the
+    // first place MediaQuery is legal to read.
     _pulse = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 3),
-    )..repeat(reverse: true);
+    );
     _pulseScale = Tween<double>(begin: 0.96, end: 1.04).animate(
       CurvedAnimation(parent: _pulse, curve: Curves.easeInOut),
     );
@@ -65,7 +68,7 @@ class _LoginScreenState extends State<LoginScreen>
     _entrance = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1800),
-    )..forward();
+    );
 
     _orbFade = CurvedAnimation(
       parent: _entrance,
@@ -132,6 +135,22 @@ class _LoginScreenState extends State<LoginScreen>
       TweenSequenceItem(tween: Tween(begin: -7, end: 4), weight: 2),
       TweenSequenceItem(tween: Tween(begin: 4, end: 0), weight: 1),
     ]).animate(CurvedAnimation(parent: _shake, curve: Curves.easeInOut));
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (reducedMotion(context)) {
+      // Same composition, no movement: the staggered entrance lands complete
+      // and the orb's breathing halts at its mid-scale. A stopped controller
+      // also costs zero frames while the user sits on the login form.
+      _entrance.value = 1;
+      _pulse.stop();
+      _pulse.value = 0.5;
+    } else {
+      if (!_entrance.isAnimating && _entrance.value == 0) _entrance.forward();
+      if (!_pulse.isAnimating) _pulse.repeat(reverse: true);
+    }
   }
 
   @override

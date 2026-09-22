@@ -7,6 +7,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+import '../../android/preload_bundled_google_fonts.dart';
+
 ThemeData _theme(AppColors p) => ThemeData(
       brightness: p.isDark ? Brightness.dark : Brightness.light,
       scaffoldBackgroundColor: p.bg,
@@ -46,6 +48,8 @@ Future<void> _pumpMark(
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   GoogleFonts.config.allowRuntimeFetching = false;
+
+  setUpAll(preloadBundledGoogleFonts);
 
   group('NexusBrandMark', () {
     testWidgets('renders the logo asset without exceptions', (tester) async {

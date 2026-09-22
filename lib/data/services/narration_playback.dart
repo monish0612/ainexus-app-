@@ -63,6 +63,17 @@ bool shouldKeepPollingNarration(NarrationJob job) {
   return job.isPreparing || isTransientNarrationFailure(job);
 }
 
+/// Status-poll spacing while a job is still preparing / unreachable.
+Duration narrationPollInterval(int transientTries) {
+  if (transientTries >= 4) return const Duration(seconds: 10);
+  if (transientTries >= 2) return const Duration(seconds: 5);
+  return const Duration(seconds: 2);
+}
+
+/// Same ~45s unreachable window as the old 22 × 2s poll, independent of backoff.
+bool narrationShouldOfferUnreachableFallback(Duration elapsed) =>
+    elapsed >= const Duration(seconds: 45);
+
 /// Play errors must not hide an already-ready Local LLM / opus track.
 bool shouldShowOnDeviceAfterPlayError({
   required bool localReady,

@@ -58,120 +58,127 @@ class _PriceHistoryChartState extends State<PriceHistoryChart> {
       target: widget.targetPrice,
       base: widget.basePrice,
     );
-    return RepaintBoundary(
-      child: SizedBox(
-        height: widget.height,
-        child: LineChart(
-          LineChartData(
-            minX: spots.first.x,
-            maxX: spots.last.x,
-            minY: bounds.$1,
-            maxY: bounds.$2,
-            gridData: const FlGridData(show: false),
-            titlesData: const FlTitlesData(show: false),
-            borderData: FlBorderData(show: false),
-            extraLinesData: ExtraLinesData(
-              extraLinesOnTop: false,
-              horizontalLines: [
-                if (widget.basePrice != null && widget.basePrice! > 0)
-                  HorizontalLine(
-                    y: widget.basePrice!,
-                    color: colors.text5,
-                    strokeWidth: 1,
-                    dashArray: const [6, 5],
-                  ),
-                if (widget.targetPrice != null && widget.targetPrice! > 0)
-                  HorizontalLine(
-                    y: widget.targetPrice!,
-                    color: accent.withValues(alpha: 0.55),
-                    strokeWidth: 1.2,
-                    dashArray: const [5, 4],
-                  ),
-              ],
-            ),
-            lineBarsData: [
-              LineChartBarData(
-                spots: spots,
-                isCurved: true,
-                preventCurveOverShooting: true,
-                color: accent,
-                barWidth: 2.4,
-                isStrokeCapRound: true,
-                dotData: const FlDotData(show: false),
-                belowBarData: BarAreaData(
-                  show: true,
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [
-                      accent.withValues(alpha: 0.28),
-                      accent.withValues(alpha: 0.02),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-            lineTouchData: LineTouchData(
-              handleBuiltInTouches: true,
-              getTouchedSpotIndicator: (bar, indexes) {
-                return [
-                  for (final _ in indexes)
-                    TouchedSpotIndicatorData(
-                      FlLine(color: accent.withValues(alpha: 0.35), strokeWidth: 1),
-                      FlDotData(
-                        show: true,
-                        getDotPainter: (spot, _, __, ___) => FlDotCirclePainter(
-                          radius: 5,
-                          color: accent,
-                          strokeWidth: 2,
-                          strokeColor: colors.bg1,
-                        ),
-                      ),
+    return Semantics(
+      label: 'Price history, ${widget.series.points.length} checks',
+      child: RepaintBoundary(
+        child: SizedBox(
+          height: widget.height,
+          child: LineChart(
+            LineChartData(
+              minX: spots.first.x,
+              maxX: spots.last.x,
+              minY: bounds.$1,
+              maxY: bounds.$2,
+              gridData: const FlGridData(show: false),
+              titlesData: const FlTitlesData(show: false),
+              borderData: FlBorderData(show: false),
+              extraLinesData: ExtraLinesData(
+                extraLinesOnTop: false,
+                horizontalLines: [
+                  if (widget.basePrice != null && widget.basePrice! > 0)
+                    HorizontalLine(
+                      y: widget.basePrice!,
+                      color: colors.text5,
+                      strokeWidth: 1,
+                      dashArray: const [6, 5],
                     ),
-                ];
-              },
-              touchTooltipData: LineTouchTooltipData(
-                getTooltipColor: (_) => colors.bg3,
-                tooltipRoundedRadius: 12,
-                tooltipPadding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 8,
+                  if (widget.targetPrice != null && widget.targetPrice! > 0)
+                    HorizontalLine(
+                      y: widget.targetPrice!,
+                      color: accent.withValues(alpha: 0.55),
+                      strokeWidth: 1.2,
+                      dashArray: const [5, 4],
+                    ),
+                ],
+              ),
+              lineBarsData: [
+                LineChartBarData(
+                  spots: spots,
+                  isCurved: true,
+                  preventCurveOverShooting: true,
+                  color: accent,
+                  barWidth: 2.4,
+                  isStrokeCapRound: true,
+                  dotData: const FlDotData(show: false),
+                  belowBarData: BarAreaData(
+                    show: true,
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        accent.withValues(alpha: 0.28),
+                        accent.withValues(alpha: 0.02),
+                      ],
+                    ),
+                  ),
                 ),
-                getTooltipItems: (touched) {
+              ],
+              lineTouchData: LineTouchData(
+                handleBuiltInTouches: true,
+                getTouchedSpotIndicator: (bar, indexes) {
                   return [
-                    for (final t in touched)
-                      LineTooltipItem(
-                        _tooltip(widget.series.nearestRaw(t.x)),
-                        GoogleFonts.plusJakartaSans(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w700,
-                          color: colors.text,
-                          height: 1.35,
+                    for (final _ in indexes)
+                      TouchedSpotIndicatorData(
+                        FlLine(
+                            color: accent.withValues(alpha: 0.35),
+                            strokeWidth: 1),
+                        FlDotData(
+                          show: true,
+                          getDotPainter: (spot, _, __, ___) =>
+                              FlDotCirclePainter(
+                            radius: 5,
+                            color: accent,
+                            strokeWidth: 2,
+                            strokeColor: colors.bg1,
+                          ),
                         ),
                       ),
                   ];
                 },
-              ),
-              touchCallback: (event, response) {
-                if (!event.isInterestedForInteractions ||
-                    response?.lineBarSpots == null ||
-                    response!.lineBarSpots!.isEmpty) {
-                  if (_lastSnapId != null) {
-                    _lastSnapId = null;
-                    widget.onSelectPoint?.call(null);
+                touchTooltipData: LineTouchTooltipData(
+                  getTooltipColor: (_) => colors.bg3,
+                  tooltipRoundedRadius: 12,
+                  tooltipPadding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 8,
+                  ),
+                  getTooltipItems: (touched) {
+                    return [
+                      for (final t in touched)
+                        LineTooltipItem(
+                          _tooltip(widget.series.nearestRaw(t.x)),
+                          GoogleFonts.plusJakartaSans(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: colors.text,
+                            height: 1.35,
+                          ),
+                        ),
+                    ];
+                  },
+                ),
+                touchCallback: (event, response) {
+                  if (!event.isInterestedForInteractions ||
+                      response?.lineBarSpots == null ||
+                      response!.lineBarSpots!.isEmpty) {
+                    if (_lastSnapId != null) {
+                      _lastSnapId = null;
+                      widget.onSelectPoint?.call(null);
+                    }
+                    return;
                   }
-                  return;
-                }
-                final p = widget.series.nearestRaw(response.lineBarSpots!.first.x);
-                if (p == null || p.id == _lastSnapId) return;
-                _lastSnapId = p.id;
-                HapticFeedback.selectionClick();
-                widget.onSelectPoint?.call(p);
-              },
+                  final p =
+                      widget.series.nearestRaw(response.lineBarSpots!.first.x);
+                  if (p == null || p.id == _lastSnapId) return;
+                  _lastSnapId = p.id;
+                  HapticFeedback.selectionClick();
+                  widget.onSelectPoint?.call(p);
+                },
+              ),
             ),
+            duration: const Duration(milliseconds: 280),
+            curve: Curves.easeOutCubic,
           ),
-          duration: const Duration(milliseconds: 280),
-          curve: Curves.easeOutCubic,
         ),
       ),
     );

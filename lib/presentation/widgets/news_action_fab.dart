@@ -6,6 +6,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
 import '../../core/theme/app_colors.dart';
+import '../../core/utils/reduced_motion.dart';
 
 /// Two scopes the FAB sheet exposes when a category chip is active.
 enum NewsFabScope { all, currentCategory }
@@ -96,6 +97,17 @@ class _NewsActionFabState extends State<NewsActionFab>
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (reducedMotion(context)) {
+      _pulseCtrl.stop();
+      _pulseCtrl.value = 0;
+    } else if (!_pulseCtrl.isAnimating) {
+      _pulseCtrl.repeat(reverse: true);
+    }
+  }
+
+  @override
   void dispose() {
     _expandCtrl.dispose();
     _pulseCtrl.dispose();
@@ -167,8 +179,8 @@ class _NewsActionFabState extends State<NewsActionFab>
                       sigmaY: 12 * _expand.value,
                     ),
                     child: ColoredBox(
-                      color: widget.colors.scrim
-                          .withValues(alpha: widget.colors.scrim.a * _expand.value),
+                      color: widget.colors.scrim.withValues(
+                          alpha: widget.colors.scrim.a * _expand.value),
                     ),
                   ),
                 );
@@ -269,92 +281,98 @@ class _FabCircle extends StatelessWidget {
     return AnimatedBuilder(
       animation: Listenable.merge([pulse, expand]),
       builder: (_, __) {
-        final scale = 1.0 + 0.04 * pulse.value;
+        final still = reducedMotion(context);
+        final scale = still ? 1.0 : 1.0 + 0.04 * pulse.value;
         final rotate = expand.value * 0.785; // 45deg
         final glowA = isDark ? 0.45 : 0.22;
         final glowB = isDark ? 0.30 : 0.14;
-        return Transform.scale(
-          scale: scale,
-          child: GestureDetector(
-            onTap: onTap,
-            child: SizedBox(
-              width: 60,
-              height: 60,
-              child: Stack(
-                alignment: Alignment.center,
-                clipBehavior: Clip.none,
-                children: [
-                  Container(
-                    width: 60,
-                    height: 60,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      gradient: LinearGradient(
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                        colors: clearOnly
-                            ? const [Color(0xFFEF4444), Color(0xFFF97316)]
-                            : const [Color(0xFF6366F1), Color(0xFFA855F7)],
+        return Semantics(
+          button: true,
+          label: clearOnly ? 'Clear unread articles' : 'News actions',
+          excludeSemantics: true,
+          child: Transform.scale(
+            scale: scale,
+            child: GestureDetector(
+              onTap: onTap,
+              child: SizedBox(
+                width: 60,
+                height: 60,
+                child: Stack(
+                  alignment: Alignment.center,
+                  clipBehavior: Clip.none,
+                  children: [
+                    Container(
+                      width: 60,
+                      height: 60,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        gradient: LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: clearOnly
+                              ? const [Color(0xFFEF4444), Color(0xFFF97316)]
+                              : const [Color(0xFF6366F1), Color(0xFFA855F7)],
+                        ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: (clearOnly
+                                    ? const Color(0xFFEF4444)
+                                    : const Color(0xFF6366F1))
+                                .withValues(alpha: glowA),
+                            blurRadius: isDark ? 22 : 16,
+                            spreadRadius: isDark ? 1 : 0,
+                          ),
+                          BoxShadow(
+                            color: (clearOnly
+                                    ? const Color(0xFFF97316)
+                                    : const Color(0xFFA855F7))
+                                .withValues(alpha: glowB),
+                            blurRadius: isDark ? 32 : 20,
+                            offset: const Offset(0, 10),
+                          ),
+                        ],
                       ),
-                      boxShadow: [
-                        BoxShadow(
-                          color: (clearOnly
-                                  ? const Color(0xFFEF4444)
-                                  : const Color(0xFF6366F1))
-                              .withValues(alpha: glowA),
-                          blurRadius: isDark ? 22 : 16,
-                          spreadRadius: isDark ? 1 : 0,
+                      child: Transform.rotate(
+                        angle: rotate,
+                        child: Icon(
+                          clearOnly ? LucideIcons.eraser : LucideIcons.sparkles,
+                          size: 24,
+                          color: Colors.white,
                         ),
-                        BoxShadow(
-                          color: (clearOnly
-                                  ? const Color(0xFFF97316)
-                                  : const Color(0xFFA855F7))
-                              .withValues(alpha: glowB),
-                          blurRadius: isDark ? 32 : 20,
-                          offset: const Offset(0, 10),
-                        ),
-                      ],
-                    ),
-                    child: Transform.rotate(
-                      angle: rotate,
-                      child: Icon(
-                        clearOnly ? LucideIcons.eraser : LucideIcons.sparkles,
-                        size: 24,
-                        color: Colors.white,
                       ),
                     ),
-                  ),
-                  if (unreadCount > 0)
-                    Positioned(
-                      top: -2,
-                      right: -2,
-                      child: Container(
-                        constraints: const BoxConstraints(
-                          minWidth: 18,
-                          minHeight: 18,
-                        ),
-                        padding: const EdgeInsets.symmetric(horizontal: 5),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFEF4444),
-                          borderRadius: BorderRadius.circular(999),
-                          border: Border.all(
-                            color: Colors.white.withValues(alpha: 0.85),
-                            width: 1.5,
+                    if (unreadCount > 0)
+                      Positioned(
+                        top: -2,
+                        right: -2,
+                        child: Container(
+                          constraints: const BoxConstraints(
+                            minWidth: 18,
+                            minHeight: 18,
+                          ),
+                          padding: const EdgeInsets.symmetric(horizontal: 5),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFEF4444),
+                            borderRadius: BorderRadius.circular(999),
+                            border: Border.all(
+                              color: Colors.white.withValues(alpha: 0.85),
+                              width: 1.5,
+                            ),
+                          ),
+                          alignment: Alignment.center,
+                          child: Text(
+                            unreadCount > 99 ? '99+' : '$unreadCount',
+                            style: GoogleFonts.plusJakartaSans(
+                              fontSize: 9,
+                              fontWeight: FontWeight.w800,
+                              color: Colors.white,
+                              height: 1.0,
+                            ),
                           ),
                         ),
-                        alignment: Alignment.center,
-                        child: Text(
-                          unreadCount > 99 ? '99+' : '$unreadCount',
-                          style: GoogleFonts.plusJakartaSans(
-                            fontSize: 9,
-                            fontWeight: FontWeight.w800,
-                            color: Colors.white,
-                            height: 1.0,
-                          ),
-                        ),
                       ),
-                    ),
-                ],
+                  ],
+                ),
               ),
             ),
           ),
@@ -540,9 +558,7 @@ class _ScopeToggle extends StatelessWidget {
     required bool selected,
     required VoidCallback onTap,
   }) {
-    final selectedFill = colors.isDark
-        ? const Color(0xFF1A1A24)
-        : Colors.white;
+    final selectedFill = colors.isDark ? const Color(0xFF1A1A24) : Colors.white;
     return Expanded(
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
@@ -613,9 +629,7 @@ class _ActionRow extends StatelessWidget {
             color: colors.bg2,
             borderRadius: BorderRadius.circular(14),
             border: Border.all(
-              color: destructive
-                  ? const Color(0x33EF4444)
-                  : colors.border,
+              color: destructive ? const Color(0x33EF4444) : colors.border,
             ),
           ),
           padding: const EdgeInsets.fromLTRB(12, 12, 14, 12),
@@ -652,9 +666,8 @@ class _ActionRow extends StatelessWidget {
                       style: GoogleFonts.plusJakartaSans(
                         fontSize: 14,
                         fontWeight: FontWeight.w700,
-                        color: destructive
-                            ? const Color(0xFFEF4444)
-                            : colors.text,
+                        color:
+                            destructive ? const Color(0xFFEF4444) : colors.text,
                         letterSpacing: -0.1,
                       ),
                     ),

@@ -57,40 +57,41 @@ class _NexusAiAppState extends ConsumerState<NexusAiApp>
   Widget build(BuildContext context) {
     final isDark = ref.watch(settingsProvider.select((s) => s.isDark));
 
-    SystemChrome.setSystemUIOverlayStyle(
-      SystemUiOverlayStyle(
-        statusBarColor: Colors.transparent,
-        statusBarIconBrightness: isDark ? Brightness.light : Brightness.dark,
-        systemNavigationBarColor: Colors.transparent,
-        systemNavigationBarIconBrightness:
-            isDark ? Brightness.light : Brightness.dark,
-        systemNavigationBarContrastEnforced: false,
-      ),
+    final overlay = SystemUiOverlayStyle(
+      statusBarColor: Colors.transparent,
+      statusBarIconBrightness: isDark ? Brightness.light : Brightness.dark,
+      systemNavigationBarColor: Colors.transparent,
+      systemNavigationBarIconBrightness:
+          isDark ? Brightness.light : Brightness.dark,
+      systemNavigationBarContrastEnforced: false,
     );
 
-    return MaterialApp.router(
-      title: AppConstants.appName,
-      debugShowCheckedModeBanner: false,
-      theme: AppTheme.whiteTheme,
-      darkTheme: AppTheme.darkTheme,
-      themeMode: isDark ? ThemeMode.dark : ThemeMode.light,
-      routerConfig: appRouter,
-      builder: (context, router) {
-        // Wraps the entire navigated tree. On Android and on narrow web
-        // viewports it returns [router] unchanged. On wide web viewports
-        // it centres the existing mobile UI inside a phone-width column
-        // with a tasteful backdrop, giving the app a polished look on
-        // desktop without rewriting any of the existing screens.
-        //
-        // The SMS review overlay sits *above* the navigator so Approve /
-        // Reject still shows when Settings or another sheet is open.
-        return Stack(
-          children: [
-            WebResponsiveFrame(child: router ?? const SizedBox.shrink()),
-            const SmsExpenseReviewHost(),
-          ],
-        );
-      },
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: overlay,
+      child: MaterialApp.router(
+        title: AppConstants.appName,
+        debugShowCheckedModeBanner: false,
+        theme: AppTheme.whiteTheme,
+        darkTheme: AppTheme.darkTheme,
+        themeMode: isDark ? ThemeMode.dark : ThemeMode.light,
+        routerConfig: appRouter,
+        builder: (context, router) {
+          // Wraps the entire navigated tree. On Android and on narrow web
+          // viewports it returns [router] unchanged. On wide web viewports
+          // it centres the existing mobile UI inside a phone-width column
+          // with a tasteful backdrop, giving the app a polished look on
+          // desktop without rewriting any of the existing screens.
+          //
+          // The SMS review overlay sits *above* the navigator so Approve /
+          // Reject still shows when Settings or another sheet is open.
+          return Stack(
+            children: [
+              WebResponsiveFrame(child: router ?? const SizedBox.shrink()),
+              const SmsExpenseReviewHost(),
+            ],
+          );
+        },
+      ),
     );
   }
 }

@@ -58,8 +58,10 @@ class PickedImage {
   final Uint8List uploadBytes;
   final String uploadMediaType; // always 'image/jpeg' for upload bytes
 
-  /// Tiny JPEG for cross-device sync inside SavedSearchStore. Always
-  /// JPEG, regardless of the source media type.
+  /// Tiny JPEG for cross-device sync inside SavedSearchStore. Normally
+  /// JPEG; on the fall-through path (pure-Dart codec can't decode the
+  /// source) these are the untouched source bytes, and
+  /// [thumbnailMediaType] reports their real type instead of lying.
   final Uint8List thumbnailBytes;
   final String thumbnailMediaType;
 
@@ -168,7 +170,8 @@ class ImagePipeline {
         uploadBytes: compressed.uploadBytes,
         uploadMediaType: uploadType,
         thumbnailBytes: compressed.thumbnailBytes,
-        thumbnailMediaType: 'image/jpeg',
+        thumbnailMediaType:
+            compressed.thumbnailIsJpeg ? 'image/jpeg' : sourceMediaType,
         sourcePath: picked.path,
         sourceBytes: rawBytes,
         sourceMediaType: sourceMediaType,
@@ -191,12 +194,19 @@ class ImagePipeline {
   /// the private `_compressAndThumbnail` so tests catch any production
   /// regression in compression behaviour.
   @visibleForTesting
-  Future<({Uint8List upload, Uint8List thumbnail, int width, int height})>
-      debugCompressAndThumbnail(Uint8List src) async {
+  Future<
+      ({
+        Uint8List upload,
+        Uint8List thumbnail,
+        bool thumbnailIsJpeg,
+        int width,
+        int height
+      })> debugCompressAndThumbnail(Uint8List src) async {
     final r = await _compressAndThumbnail(src);
     return (
       upload: r.uploadBytes,
       thumbnail: r.thumbnailBytes,
+      thumbnailIsJpeg: r.thumbnailIsJpeg,
       width: r.width,
       height: r.height,
     );
@@ -224,18 +234,17 @@ class ImagePipeline {
     ]);
 
     Uint8List thumbBytes = results[1].bytes;
+    // width/height == 0 is the isolate's "I could not decode this" signal, in
+    // which case `thumbBytes` are the UNTOUCHED source bytes — PNG, WEBP,
+    // HEIC, whatever the gallery handed us — not JPEG.
+    final thumbIsJpeg = results[1].width > 0 && results[1].height > 0;
     // Hard cap: if the q60/256px thumb is still over 50 KB (rare —
     // happens on noisy photos where JPEG can't compress well), do a
     // second pass at q40 in the foreground. The thumbnail at this size
     // is so small that a foreground pass is ~5 ms even on a slow CPU.
-    if (thumbBytes.lengthInBytes > _kThumbHardCapBytes) {
-      final decoded = img.decodeJpg(thumbBytes);
-      if (decoded != null) {
-        final lower = img.encodeJpg(decoded, quality: 40);
-        if (lower.lengthInBytes < thumbBytes.lengthInBytes) {
-          thumbBytes = Uint8List.fromList(lower);
-        }
-      }
+    if (thumbIsJpeg && thumbBytes.lengthInBytes > _kThumbHardCapBytes) {
+      final lower = _recompressThumbnail(thumbBytes);
+      if (lower != null) thumbBytes = lower;
     }
 
     sw.stop();
@@ -250,10 +259,28 @@ class ImagePipeline {
     return _PipelineRunResult(
       uploadBytes: upload.bytes,
       thumbnailBytes: thumbBytes,
+      thumbnailIsJpeg: thumbIsJpeg,
       width: upload.width,
       height: upload.height,
       totalMs: sw.elapsedMilliseconds,
     );
+  }
+
+  /// Second q40 pass for an oversized thumbnail. Format-agnostic on the
+  /// way in so a non-JPEG byte string can never raise the JPEG decoder's
+  /// "Start Of Image marker not found."; returns null to mean "keep what
+  /// you have".
+  static Uint8List? _recompressThumbnail(Uint8List bytes) {
+    try {
+      final decoded = img.decodeImage(bytes);
+      if (decoded == null) return null;
+      final lower = img.encodeJpg(decoded, quality: 40);
+      if (lower.lengthInBytes >= bytes.lengthInBytes) return null;
+      return Uint8List.fromList(lower);
+    } catch (e) {
+      TLog.w('ImagePipeline', 'thumb recompress skipped: $e');
+      return null;
+    }
   }
 
   /// Sniff media type from path extension first; fall back to magic
@@ -324,6 +351,7 @@ class _PipelineRunResult {
   const _PipelineRunResult({
     required this.uploadBytes,
     required this.thumbnailBytes,
+    required this.thumbnailIsJpeg,
     required this.width,
     required this.height,
     required this.totalMs,
@@ -331,6 +359,10 @@ class _PipelineRunResult {
 
   final Uint8List uploadBytes;
   final Uint8List thumbnailBytes;
+
+  /// False when the pure-Dart codec could not decode the source and the
+  /// original bytes were passed through untouched.
+  final bool thumbnailIsJpeg;
   final int width;
   final int height;
   final int totalMs;

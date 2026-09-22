@@ -1,7 +1,7 @@
 name: ai_nexus
 description: Nexus AI - Next Generation AI Finance Companion
 publish_to: 'none'
-version: 1.0.50+51
+version: 1.0.51+52
 
 environment:
   sdk: '>=3.4.0 <4.0.0'
@@ -107,6 +107,51 @@ flutter:
     - assets/lottie/
     - assets/icons/
     - assets/icon/
+    - google_fonts/
+
+  # Registered so fontFamilyFallback: PlusJakartaSans (etc.) can resolve
+  # without a network fetch. GoogleFonts.* still loads the matching
+  # google_fonts/*.ttf asset by filename.
+  fonts:
+    - family: PlusJakartaSans
+      fonts:
+        - asset: google_fonts/PlusJakartaSans-Regular.ttf
+          weight: 400
+        - asset: google_fonts/PlusJakartaSans-Medium.ttf
+          weight: 500
+        - asset: google_fonts/PlusJakartaSans-SemiBold.ttf
+          weight: 600
+        - asset: google_fonts/PlusJakartaSans-Bold.ttf
+          weight: 700
+        - asset: google_fonts/PlusJakartaSans-ExtraBold.ttf
+          weight: 800
+        - asset: google_fonts/PlusJakartaSans-Italic.ttf
+          weight: 400
+          style: italic
+        - asset: google_fonts/PlusJakartaSans-MediumItalic.ttf
+          weight: 500
+          style: italic
+    - family: JetBrainsMono
+      fonts:
+        - asset: google_fonts/JetBrainsMono-Regular.ttf
+          weight: 400
+        - asset: google_fonts/JetBrainsMono-Bold.ttf
+          weight: 700
+    - family: Lora
+      fonts:
+        - asset: google_fonts/Lora-Regular.ttf
+          weight: 400
+        - asset: google_fonts/Lora-Bold.ttf
+          weight: 700
+        - asset: google_fonts/Lora-Italic.ttf
+          weight: 400
+          style: italic
+    - family: DMSans
+      fonts:
+        - asset: google_fonts/DMSans-Regular.ttf
+          weight: 400
+        - asset: google_fonts/DMSans-Bold.ttf
+          weight: 700
 
 # Provided PNGs are already padded to the Android 66dp safe zone — do not
 # let the generator add a second inset or the glyph shrinks into a blob.
