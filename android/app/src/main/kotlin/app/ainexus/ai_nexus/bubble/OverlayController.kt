@@ -399,6 +399,10 @@ class OverlayController(private val context: Context) {
             settleAtDrop()
         }
 
+        override fun onDragCancel() {
+            dragScreen = null
+        }
+
         override fun onTap() {
             dragScreen = null
             gestureListener?.onTap()

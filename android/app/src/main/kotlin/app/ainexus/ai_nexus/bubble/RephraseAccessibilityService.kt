@@ -59,7 +59,17 @@ class RephraseAccessibilityService : AccessibilityService() {
             // Native detected a tap on the collapsed bubble; Dart runs the same
             // expand flow it used to trigger from its own gesture detector.
             override fun onTap() {
-                safe { bridge?.notifyTap() }
+                safe {
+                    // Grow the window before we return from the touch. Dart used
+                    // to call back into expand(), which re-walked the accessibility
+                    // tree (getWindows + node.refresh) on this same thread. That
+                    // stalls the click, and the field's focus-loss event then
+                    // hides the bubble before the panel can paint.
+                    ensureBridge()
+                    lastOverlayChangeAt = SystemClock.uptimeMillis()
+                    overlay?.expand()
+                    bridge?.notifyTap()
+                }
             }
 
             override fun onLongPress() {
@@ -317,23 +327,15 @@ class RephraseAccessibilityService : AccessibilityService() {
     }
 
     /**
-     * Grow the window for the panel and take one last live read of the field.
-     * Doing it here — before the "Own" input can steal focus — is what keeps the
-     * snapshot trustworthy for the rest of the interaction.
+     * Grow the window for the panel. The text is the snapshot taken when the
+     * bubble appeared (refreshed on each typing pause). Re-reading the node
+     * here deadlocks the click.
      */
     fun onPanelExpanded() {
         safe {
-            refreshSnapshot()
             lastOverlayChangeAt = SystemClock.uptimeMillis()
             overlay?.expand()
         }
-    }
-
-    private fun refreshSnapshot() {
-        val ref = target ?: return
-        val node = TargetRef.resolve(this, ref) ?: return
-        val live = NodeTextIO.readText(node) ?: return
-        if (live.isNotBlank()) target = ref.copy(snapshot = live)
     }
 
     fun collapsePanel() = safe {

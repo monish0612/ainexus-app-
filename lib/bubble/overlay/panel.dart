@@ -242,7 +242,18 @@ class _RephrasePanelState extends State<RephrasePanel> {
       // so the panel doesn't jump between sizes.
       if (!fresh) _result = null;
     });
-    final result = await widget.onRun(platform, intent, fresh: fresh);
+    PanelResult result;
+    try {
+      result = await widget
+          .onRun(platform, intent, fresh: fresh)
+          .timeout(
+            const Duration(seconds: 16),
+            onTimeout: () =>
+                const PanelResult.failure('Timed out — tap to retry'),
+          );
+    } catch (_) {
+      result = const PanelResult.failure('Rephrase failed — tap to retry');
+    }
     if (!mounted) return;
     setState(() {
       _loading = false;
@@ -399,7 +410,9 @@ class _RephrasePanelState extends State<RephrasePanel> {
           maxPanelHeight: widget.target.maxHeight,
         ),
         child: GestureDetector(
-          behavior: HitTestBehavior.deferToChild,
+          // opaque so a tap on the panel never falls through to the scrim
+          // (that was closing the panel on the same click that opened it).
+          behavior: HitTestBehavior.opaque,
           onVerticalDragUpdate: _onVerticalDragUpdate,
           onVerticalDragEnd: _onVerticalDragEnd,
           child: AnimatedContainer(

@@ -105,22 +105,22 @@ class _BubbleOverlayAppState extends State<BubbleOverlayApp> {
       if (!mounted) return;
       setState(() => _hostPaused = false);
     };
-    // Bubble gestures are native; a tap arrives here as a notification.
+    // Native already grew the window on the touch, before this notification.
+    // Paint the panel immediately — waiting on expand() was the stuck click.
     _bridge.onTap = () {
       if (!mounted || _expanded) return;
-      _expand();
+      setState(() => _expanded = true);
+      unawaited(_syncTarget());
     };
   }
 
-  Future<void> _expand() async {
-    // Native re-reads the field before growing the window, so this is the
-    // authoritative text for the whole interaction.
-    final target = await _bridge.expand();
-    if (!mounted) return;
-    setState(() {
-      if (target.text.isNotEmpty) _target = target;
-      _expanded = true;
-    });
+  /// Best-effort text refresh. Never gates the panel on it.
+  Future<void> _syncTarget() async {
+    final target = await _bridge
+        .expand()
+        .timeout(const Duration(milliseconds: 350), onTimeout: () => _target);
+    if (!mounted || target.text.isEmpty) return;
+    setState(() => _target = target);
   }
 
   Future<void> _collapse() async {

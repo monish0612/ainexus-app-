@@ -30,6 +30,9 @@ class BubbleTouchContainer(
 
         fun onDragEnd()
 
+        /** Finger-down was cancelled before a drag. Must not save a new position. */
+        fun onDragCancel()
+
         fun onTap()
 
         fun onLongPress()
@@ -92,6 +95,11 @@ class BubbleTouchContainer(
                 if (finished?.dragging == true) {
                     performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
                     host.onDragEnd()
+                } else if (finished != null) {
+                    // Finger-down armed a drag. A cancel that is not a drag must
+                    // still clear that, or the next showBubble() bails out and
+                    // the bubble stops accepting taps.
+                    host.onDragCancel()
                 }
             }
         }

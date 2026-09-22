@@ -43,7 +43,11 @@ class BubbleRephraseClient {
 
     // Lite model is part of the cache key so a Settings change is not served
     // a rewrite produced by the previous Gemini id.
-    final liteModel = await _liteModel();
+    // Settings live in the main isolate. This overlay must not wait on that
+    // plugin channel — a hung read used to leave the panel on "Rephrasing…"
+    // forever. A missing model id still rephrases with the server default.
+    final liteModel = await _liteModel()
+        .timeout(const Duration(milliseconds: 400), onTimeout: () => null);
     final key = '$platform::${cleanIntent ?? ''}::$trimmed::${liteModel ?? ''}';
     if (!fresh) {
       final cached = _cache.get(key);
