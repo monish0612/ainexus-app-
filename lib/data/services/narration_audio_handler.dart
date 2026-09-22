@@ -21,7 +21,14 @@ class NarrationAudioHandler extends BaseAudioHandler with SeekHandler {
     _player.playbackEventStream.listen(_emitState);
     _player.positionStream.listen(_onPosition);
     _player.processingStateStream.listen((state) {
-      if (state == ProcessingState.completed) {
+      final name = switch (state) {
+        ProcessingState.idle => 'idle',
+        ProcessingState.loading => 'loading',
+        ProcessingState.buffering => 'buffering',
+        ProcessingState.ready => 'ready',
+        ProcessingState.completed => 'completed',
+      };
+      if (_advance.onState(name)) {
         unawaited(_onTrackEnded());
       }
     });
@@ -33,6 +40,7 @@ class NarrationAudioHandler extends BaseAudioHandler with SeekHandler {
   int _index = 0;
   bool _completedSent = false;
   bool _loadedFromLocal = false;
+  final NarrationAdvanceGate _advance = NarrationAdvanceGate();
   VoidCallback? onFallbackRequested;
 
   AudioPlayer get player => _player;

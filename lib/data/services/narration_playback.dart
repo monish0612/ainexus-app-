@@ -52,9 +52,35 @@ bool isTerminalNarrationFailure(NarrationJob job) {
 
 bool shouldEnsureOnBoot(NarrationJob job) {
   if (job.isReady || job.isPreparing) return false;
+  // A slow /status must not start a second synthesis. The phone's ensure
+  // body is the summary; ingest already hashed the full article. Timing out
+  // and then ensuring used to overwrite a finished track with "Preparing…".
+  if (job.reason == 'timeout' ||
+      job.reason == 'unreachable' ||
+      job.reason == 'ensure_timeout') {
+    return false;
+  }
   if (job.status == NarrationJobStatus.deleted) return true;
   if (isTerminalNarrationFailure(job) && !job.configured) return false;
   return true;
+}
+
+/// Completed is sticky in just_audio. Arm only after the new source has
+/// actually become ready, so a leftover completed event cannot skip a track.
+class NarrationAdvanceGate {
+  bool armed = false;
+
+  bool onState(String state) {
+    if (state == 'ready' || state == 'buffering') {
+      armed = true;
+      return false;
+    }
+    if (state == 'completed' && armed) {
+      armed = false;
+      return true;
+    }
+    return false;
+  }
 }
 
 bool shouldKeepPollingNarration(NarrationJob job) {

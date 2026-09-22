@@ -5,6 +5,17 @@ import 'package:ai_nexus/data/services/narration_playback.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('a leftover completed event cannot skip the next track', () {
+    final gate = NarrationAdvanceGate();
+    expect(gate.onState('completed'), isFalse);
+    expect(gate.onState('loading'), isFalse);
+    expect(gate.onState('ready'), isFalse);
+    expect(gate.onState('completed'), isTrue);
+    expect(gate.onState('completed'), isFalse);
+    expect(gate.onState('buffering'), isFalse);
+    expect(gate.onState('completed'), isTrue);
+  });
+
   test('play tap after completed restarts instead of no-op play()', () {
     expect(
       narrationPlayTap(isThisArticle: false, completed: false),
@@ -321,7 +332,7 @@ void main() {
     expect(isTerminalNarrationFailure(exhausted), isTrue);
     expect(isTerminalNarrationFailure(stickyTimeout), isFalse);
 
-    expect(shouldEnsureOnBoot(timeout), isTrue);
+    expect(shouldEnsureOnBoot(timeout), isFalse);
     expect(shouldEnsureOnBoot(unknown), isTrue);
     expect(shouldEnsureOnBoot(ready), isFalse);
     expect(shouldEnsureOnBoot(queued), isFalse);
