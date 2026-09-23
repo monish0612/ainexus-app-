@@ -82,11 +82,14 @@ class _BubbleOverlayAppState extends State<BubbleOverlayApp> {
       if (!mounted) return;
       setState(() {
         _target = target;
-        _expanded = false;
-        _hostPaused = false;
-        if (!_collapsedOnScreen) {
-          _generation++;
-          _collapsedOnScreen = true;
+        // A text refresh while the dialog is open must not close it.
+        // A new field (bubble still collapsed) still starts a fresh panel.
+        if (!_expanded) {
+          _hostPaused = false;
+          if (!_collapsedOnScreen) {
+            _generation++;
+            _collapsedOnScreen = true;
+          }
         }
       });
     };
@@ -105,22 +108,24 @@ class _BubbleOverlayAppState extends State<BubbleOverlayApp> {
       if (!mounted) return;
       setState(() => _hostPaused = false);
     };
-    // Native already grew the window on the touch, before this notification.
-    // Paint the panel immediately — waiting on expand() was the stuck click.
+    // Native tap. Expand the window, then paint the dialog. If native is
+    // slow the panel still opens with the text we already have.
     _bridge.onTap = () {
       if (!mounted || _expanded) return;
-      setState(() => _expanded = true);
-      unawaited(_syncTarget());
+      unawaited(_expand());
     };
   }
 
-  /// Best-effort text refresh. Never gates the panel on it.
-  Future<void> _syncTarget() async {
-    final target = await _bridge
-        .expand()
-        .timeout(const Duration(milliseconds: 350), onTimeout: () => _target);
-    if (!mounted || target.text.isEmpty) return;
-    setState(() => _target = target);
+  Future<void> _expand() async {
+    final target = await _bridge.expand().timeout(
+      const Duration(milliseconds: 700),
+      onTimeout: () => _target,
+    );
+    if (!mounted) return;
+    setState(() {
+      if (target.text.isNotEmpty) _target = target;
+      _expanded = true;
+    });
   }
 
   Future<void> _collapse() async {

@@ -59,17 +59,10 @@ class RephraseAccessibilityService : AccessibilityService() {
             // Native detected a tap on the collapsed bubble; Dart runs the same
             // expand flow it used to trigger from its own gesture detector.
             override fun onTap() {
-                safe {
-                    // Grow the window before we return from the touch. Dart used
-                    // to call back into expand(), which re-walked the accessibility
-                    // tree (getWindows + node.refresh) on this same thread. That
-                    // stalls the click, and the field's focus-loss event then
-                    // hides the bubble before the panel can paint.
-                    ensureBridge()
-                    lastOverlayChangeAt = SystemClock.uptimeMillis()
-                    overlay?.expand()
-                    bridge?.notifyTap()
-                }
+                // Dart owns the expand. Growing the window here, before Dart
+                // paints the panel, left a full-screen overlay that swallowed
+                // the tap and never opened the dialog.
+                safe { bridge?.notifyTap() }
             }
 
             override fun onLongPress() {
@@ -327,14 +320,27 @@ class RephraseAccessibilityService : AccessibilityService() {
     }
 
     /**
-     * Grow the window for the panel. The text is the snapshot taken when the
-     * bubble appeared (refreshed on each typing pause). Re-reading the node
-     * here deadlocks the click.
+     * Grow the window first and return. The text snapshot was taken when the
+     * bubble appeared. A live node read (getWindows + refresh) on this call
+     * stalls the click, so it runs after the panel is already open.
      */
     fun onPanelExpanded() {
         safe {
             lastOverlayChangeAt = SystemClock.uptimeMillis()
             overlay?.expand()
+        }
+    }
+
+    /** Best-effort newer text. Never called on the tap that opens the panel. */
+    fun refreshSnapshot() {
+        safe {
+            val ref = target ?: return@safe
+            val node = TargetRef.resolve(this, ref) ?: return@safe
+            val live = NodeTextIO.readText(node) ?: return@safe
+            if (live.isNotBlank() && live != ref.snapshot) {
+                target = ref.copy(snapshot = live)
+                bridge?.notifyTarget(targetPayload())
+            }
         }
     }
 

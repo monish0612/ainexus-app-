@@ -1,5 +1,7 @@
 package app.ainexus.ai_nexus.bubble
 
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -79,6 +81,9 @@ class OverlayBridgeHost(private val service: RephraseAccessibilityService) {
                 "expand" -> {
                     service.onPanelExpanded()
                     result.success(service.targetPayload())
+                    // After the panel is open, pick up keystrokes typed since
+                    // the bubble appeared. Posted so it cannot block this tap.
+                    Handler(Looper.getMainLooper()).post { service.refreshSnapshot() }
                 }
 
                 "collapse" -> {
