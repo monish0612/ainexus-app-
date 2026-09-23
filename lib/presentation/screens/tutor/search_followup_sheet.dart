@@ -1096,14 +1096,21 @@ class _SearchFollowUpChatState extends ConsumerState<_SearchFollowUpChat>
       if (m.text.isEmpty) continue;
       if (_mirroredIds.contains(m.id)) continue;
       _mirroredIds.add(m.id);
-      unawaited(store.appendMessage(
-        searchId: id,
-        messageId: m.id,
-        role: m.role,
-        text: m.text,
-        model: m.model,
-        sources: m.sources,
-      ));
+      unawaited(() async {
+        // A follow-up is a real conversation. Promote the local draft so
+        // the web Saved searches list can show this search and its chat.
+        if (!await store.isSaved(id)) {
+          await store.promoteToSaved(id);
+        }
+        await store.appendMessage(
+          searchId: id,
+          messageId: m.id,
+          role: m.role,
+          text: m.text,
+          model: m.model,
+          sources: m.sources,
+        );
+      }());
     }
   }
 

@@ -4,14 +4,12 @@ import 'package:flutter/widgets.dart';
 
 import 'tokens.dart';
 
-/// The collapsed bubble: a small brand-blue disc with a white wand glyph, a
-/// separation ring and a live cyan rim arc.
+/// The collapsed bubble: a milky liquid-glass bead with a dark wand.
 ///
-/// It sits over arbitrary third-party apps, so it carries its own contrast
-/// rather than tinting the backdrop — a translucent glass blob disappeared
-/// against light chat surfaces. White on [kBrandAccent] is ~7:1, and the
-/// white ring plus the tight shadow keep the silhouette readable on both
-/// black and white backgrounds.
+/// It floats over other apps, and those apps can be white or black, so the
+/// bead carries its own edge: a bright rim, a dark hairline, and a tight
+/// shadow. The fill stays translucent enough to read as glass, and dense
+/// enough that it does not vanish on a light chat.
 ///
 /// Purely visual. Taps, drags and long-presses are handled natively by
 /// `BubbleTouchContainer`, which moves the overlay window directly under the
@@ -20,7 +18,7 @@ import 'tokens.dart';
 class RephraseBubble extends StatefulWidget {
   const RephraseBubble({super.key, this.animate = true});
 
-  /// Breath + rim sweep. Off while the overlay is hidden or the host is paused.
+  /// Breath + rim glint. Off while the overlay is hidden or the host is paused.
   final bool animate;
 
   @override
@@ -33,29 +31,29 @@ class _RephraseBubbleState extends State<RephraseBubble>
     vsync: this,
     duration: kBreath,
     lowerBound: 1.0,
-    upperBound: 1.03,
+    upperBound: 1.025,
   );
 
-  /// The cyan rim arc drifting once around the disc. Slow on purpose: this
-  /// runs over other apps, so it must read as "alive", not as a spinner.
+  /// A highlight walking the rim. Slow so it reads as glass catching light,
+  /// not as a spinner.
   late final AnimationController _rim = AnimationController(
     vsync: this,
-    duration: kSheen,
+    duration: const Duration(milliseconds: 3400),
   );
 
-  /// Liquid pop-in: the bubble swells from a droplet with a soft overshoot.
-  /// Replays each time the bubble is remounted for a new target.
+  /// A short pop, not a slow swell. Replays whenever the bubble is remounted
+  /// for a new field.
   late final AnimationController _entrance = AnimationController(
     vsync: this,
-    duration: kBubbleEntrance,
+    duration: const Duration(milliseconds: 180),
   );
   late final Animation<double> _entranceScale = CurvedAnimation(
     parent: _entrance,
     curve: Curves.easeOutBack,
-  ).drive(Tween(begin: 0.55, end: 1.0));
+  ).drive(Tween(begin: 0.78, end: 1.0));
   late final Animation<double> _entranceFade = CurvedAnimation(
     parent: _entrance,
-    curve: const Interval(0, 0.6, curve: Curves.easeOut),
+    curve: const Interval(0, 0.45, curve: Curves.easeOut),
   );
 
   @override
@@ -104,8 +102,6 @@ class _RephraseBubbleState extends State<RephraseBubble>
   Widget build(BuildContext context) {
     final size = bubbleSize(context);
     final still = reducedMotion(context) || !widget.animate;
-    final onDarkBackdrop =
-        MediaQuery.platformBrightnessOf(context) == Brightness.dark;
 
     return Center(
       child: FadeTransition(
@@ -121,17 +117,13 @@ class _RephraseBubbleState extends State<RephraseBubble>
                 child: AnimatedBuilder(
                   animation: _rim,
                   builder: (context, child) => CustomPaint(
-                    painter: _BubbleSurface(
-                      phase: still ? 0 : _rim.value,
-                      still: still,
-                      onDarkBackdrop: onDarkBackdrop,
-                    ),
+                    painter: _GlassOrb(phase: still ? 0.08 : _rim.value),
                     child: child,
                   ),
                   child: Center(
                     child: CustomPaint(
-                      size: Size(size * 0.46, size * 0.46),
-                      painter: _WandGlyph(),
+                      size: Size(size * 0.50, size * 0.50),
+                      painter: const _WandGlyph(),
                     ),
                   ),
                 ),
@@ -144,38 +136,29 @@ class _RephraseBubbleState extends State<RephraseBubble>
   }
 }
 
-/// Opaque disc + separation ring + live rim arc.
-class _BubbleSurface extends CustomPainter {
-  const _BubbleSurface({
-    required this.phase,
-    required this.still,
-    required this.onDarkBackdrop,
-  });
+/// Frosted bead. Inset so the contact shadow stays inside the 76dp overlay
+/// window instead of clipping into a square plate.
+class _GlassOrb extends CustomPainter {
+  const _GlassOrb({required this.phase});
 
-  /// 0–1 sweep position of the cyan rim arc.
+  /// 0–1 position of the rim glint.
   final double phase;
-  final bool still;
-  final bool onDarkBackdrop;
 
   @override
   void paint(Canvas canvas, Size size) {
     final centre = Offset(size.width / 2, size.height / 2);
-    // Leave room for the ring stroke and the shadow inside the window.
-    final ring = size.width * 0.055;
-    final radius = size.width / 2 - ring;
-    final rect = Rect.fromCircle(center: centre, radius: radius);
+    final margin = size.width * 0.08;
+    final radius = size.width / 2 - margin;
+    final disc = Rect.fromCircle(center: centre, radius: radius);
 
-    // Contact shadow. Kept tight — the overlay window is only 76dp, and a
-    // large blur clips to a visible square plate behind the round bubble.
     canvas.drawCircle(
-      centre.translate(0, size.height * 0.045),
-      radius,
+      centre.translate(0, size.width * 0.035),
+      radius * 0.94,
       Paint()
         ..color = kBubbleShadow
-        ..maskFilter = MaskFilter.blur(BlurStyle.normal, size.width * 0.11),
+        ..maskFilter = MaskFilter.blur(BlurStyle.normal, size.width * 0.055),
     );
 
-    // Opaque brand core with a top-left light source.
     canvas.drawCircle(
       centre,
       radius,
@@ -183,135 +166,152 @@ class _BubbleSurface extends CustomPainter {
         ..shader = const LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [kBrandAccentLift, kBrandAccent, kBrandAccentDeep],
-          stops: [0.0, 0.52, 1.0],
-        ).createShader(rect),
+          colors: [
+            Color(0xF2FFFFFF),
+            Color(0xD4E4ECF8),
+            Color(0xC2C5D4E8),
+          ],
+          stops: [0.0, 0.48, 1.0],
+        ).createShader(disc),
     );
 
-    // Specular cap — a soft highlight across the upper third so the disc
-    // reads as a physical object rather than a flat dot.
     canvas.save();
-    canvas.clipPath(Path()..addOval(rect));
+    canvas.clipPath(Path()..addOval(disc));
+
+    // Cool shade along the bottom so the bead has volume.
     canvas.drawOval(
       Rect.fromCenter(
-        center: centre.translate(0, -radius * 0.72),
-        width: radius * 2.1,
-        height: radius * 1.05,
+        center: centre.translate(radius * 0.15, radius * 0.72),
+        width: radius * 2.4,
+        height: radius * 1.15,
       ),
       Paint()
         ..shader = RadialGradient(
           colors: [
-            const Color(0xFFFFFFFF).withValues(alpha: 0.34),
+            const Color(0xFF6EA8FF).withValues(alpha: 0.28),
+            const Color(0xFFB98CFF).withValues(alpha: 0.0),
+          ],
+        ).createShader(
+          Rect.fromCenter(
+            center: centre.translate(radius * 0.15, radius * 0.72),
+            width: radius * 2.4,
+            height: radius * 1.15,
+          ),
+        ),
+    );
+
+    // Specular cap — the top of the glass catching a light.
+    canvas.drawOval(
+      Rect.fromCenter(
+        center: centre.translate(-radius * 0.12, -radius * 0.46),
+        width: radius * 1.45,
+        height: radius * 0.78,
+      ),
+      Paint()
+        ..shader = RadialGradient(
+          colors: [
+            const Color(0xFFFFFFFF).withValues(alpha: 0.95),
             const Color(0xFFFFFFFF).withValues(alpha: 0.0),
           ],
         ).createShader(
           Rect.fromCenter(
-            center: centre.translate(0, -radius * 0.72),
-            width: radius * 2.1,
-            height: radius * 1.05,
+            center: centre.translate(-radius * 0.12, -radius * 0.46),
+            width: radius * 1.45,
+            height: radius * 0.78,
           ),
         ),
     );
     canvas.restore();
 
-    // Separation ring. White carries the silhouette on dark backdrops; the
-    // hairline adds an edge on light ones. Both are drawn so the bubble
-    // never depends on knowing what is behind it.
+    final ring = size.width * 0.028;
     canvas.drawCircle(
       centre,
-      radius + ring * 0.5,
+      radius,
       Paint()
         ..style = PaintingStyle.stroke
         ..strokeWidth = ring
-        ..color = onDarkBackdrop
-            ? kBubbleRingLight
-            : kBubbleRingLight.withValues(
-                alpha: kBubbleRingLight.a * 0.82,
-              ),
+        ..color = const Color(0x66101828),
     );
     canvas.drawCircle(
       centre,
-      radius + ring,
+      radius - ring * 0.35,
       Paint()
         ..style = PaintingStyle.stroke
-        ..strokeWidth = ring * 0.45
-        ..color = kBubbleRingDark,
+        ..strokeWidth = ring * 0.7
+        ..shader = const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Color(0xF5FFFFFF),
+            Color(0x88FFFFFF),
+            Color(0x22FFFFFF),
+          ],
+          stops: [0.0, 0.42, 1.0],
+        ).createShader(disc),
     );
 
-    // Live cyan rim arc. Static at the 10-o'clock highlight under reduced
-    // motion, so the same mark is present without the travel.
-    const sweep = math.pi * 0.55;
-    final start = still ? -math.pi * 0.95 : (phase * 2 * math.pi) - math.pi / 2;
+    const sweep = math.pi * 0.38;
+    final start = (phase * 2 * math.pi) - math.pi * 0.85;
     canvas.drawArc(
-      Rect.fromCircle(center: centre, radius: radius - ring * 0.35),
+      Rect.fromCircle(center: centre, radius: radius - ring * 0.15),
       start,
       sweep,
       false,
       Paint()
         ..style = PaintingStyle.stroke
         ..strokeCap = StrokeCap.round
-        ..strokeWidth = ring * 0.85
-        ..shader = SweepGradient(
-          startAngle: start,
-          endAngle: start + sweep,
-          colors: [
-            kBrandCyan.withValues(alpha: 0.0),
-            kBrandCyan.withValues(alpha: 0.85),
-            kBrandCyan.withValues(alpha: 0.0),
-          ],
-          stops: const [0.0, 0.5, 1.0],
-          transform: GradientRotation(start),
-        ).createShader(Rect.fromCircle(center: centre, radius: radius)),
+        ..strokeWidth = ring * 1.35
+        ..shader = const LinearGradient(
+          colors: [Color(0xFF7DD3FC), Color(0xF2FFFFFF), Color(0xFFC4B5FD)],
+        ).createShader(disc),
     );
   }
 
   @override
-  bool shouldRepaint(covariant _BubbleSurface old) =>
-      old.phase != phase ||
-      old.still != still ||
-      old.onDarkBackdrop != onDarkBackdrop;
+  bool shouldRepaint(covariant _GlassOrb old) => old.phase != phase;
 }
 
-/// A wand-and-sparkle glyph — reads as "rewrite this". White on the brand
-/// core (~7:1), with a cyan spark for the AI cue.
+/// Dark wand and two sparkles. The mark has to stay readable on the bright
+/// glass cap, so it is ink, not white.
 class _WandGlyph extends CustomPainter {
+  const _WandGlyph();
+
   @override
   void paint(Canvas canvas, Size s) {
     final wand = Paint()
-      ..color = const Color(0xFFFFFFFF)
-      ..strokeWidth = s.width * 0.155
+      ..color = const Color(0xFF102044)
+      ..strokeWidth = s.width * 0.10
       ..strokeCap = StrokeCap.round
       ..style = PaintingStyle.stroke;
 
     canvas.drawLine(
-      Offset(s.width * 0.16, s.height * 0.84),
-      Offset(s.width * 0.64, s.height * 0.36),
+      Offset(s.width * 0.14, s.height * 0.86),
+      Offset(s.width * 0.58, s.height * 0.42),
       wand,
     );
 
     _star(
       canvas,
-      Offset(s.width * 0.79, s.height * 0.21),
-      s.width * 0.21,
-      const Color(0xFFFFFFFF),
+      Offset(s.width * 0.76, s.height * 0.24),
+      s.width * 0.24,
+      const Color(0xFF102044),
     );
     _star(
       canvas,
-      Offset(s.width * 0.26, s.height * 0.27),
-      s.width * 0.11,
-      kBrandCyan,
+      Offset(s.width * 0.34, s.height * 0.28),
+      s.width * 0.12,
+      const Color(0xFF0891B2),
     );
   }
 
-  /// Four-point sparkle with concave sides — the 2026 "AI" mark, not a plus.
   void _star(Canvas canvas, Offset c, double r, Color color) {
-    final waist = r * 0.30;
+    final waist = r * 0.22;
     final path = Path()
       ..moveTo(c.dx, c.dy - r)
-      ..quadraticBezierTo(c.dx + waist * 0.4, c.dy - waist * 0.4, c.dx + r, c.dy)
-      ..quadraticBezierTo(c.dx + waist * 0.4, c.dy + waist * 0.4, c.dx, c.dy + r)
-      ..quadraticBezierTo(c.dx - waist * 0.4, c.dy + waist * 0.4, c.dx - r, c.dy)
-      ..quadraticBezierTo(c.dx - waist * 0.4, c.dy - waist * 0.4, c.dx, c.dy - r)
+      ..quadraticBezierTo(c.dx + waist * 0.2, c.dy - waist * 0.2, c.dx + r, c.dy)
+      ..quadraticBezierTo(c.dx + waist * 0.2, c.dy + waist * 0.2, c.dx, c.dy + r)
+      ..quadraticBezierTo(c.dx - waist * 0.2, c.dy + waist * 0.2, c.dx - r, c.dy)
+      ..quadraticBezierTo(c.dx - waist * 0.2, c.dy - waist * 0.2, c.dx, c.dy - r)
       ..close();
     canvas.drawPath(path, Paint()..color = color);
   }

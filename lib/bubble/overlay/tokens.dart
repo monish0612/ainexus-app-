@@ -67,10 +67,8 @@ const Color kAccent2 = Color(0xFFB98CFF);
 
 // ── Collapsed-bubble identity ───────────────────────────────────────────────
 //
-// The bubble floats over arbitrary third-party apps, so it carries its own
-// contrast instead of tinting whatever is behind it: an opaque brand-blue
-// core, a white separation ring for dark backdrops, and a tight shadow for
-// light ones. White on `kBrandAccent` is ~7:1.
+// The collapsed mark is liquid glass (see GlassContainer). These brand colours
+// stay for the panel accent and any solid CTA that needs them.
 
 /// Product accent — the primary CTA blue.
 const Color kBrandAccent = Color(0xFF0D59F2);

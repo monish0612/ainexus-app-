@@ -13,10 +13,11 @@ import '../../core/utils/reduced_motion.dart';
 /// The six wait signatures. One widget, six looks — never a bare
 /// [CircularProgressIndicator], and never a seventh bespoke spinner.
 enum NexusLoaderVariant {
-  /// Fast grounded web search. Particle flow field with firing links.
+  /// Fast grounded web search. Status copy only — the node graphic
+  /// carried no information and ran a ticker for the whole search.
   research,
 
-  /// Deep / thinking. The same field retuned, plus a breathing ring.
+  /// Deep / thinking. Same status line, longer stage copy.
   think,
 
   /// Image understanding. Thumbnail with a liquid progress ring.
@@ -179,11 +180,7 @@ class NexusLoader extends StatefulWidget {
 const double _loopSeconds = 20;
 const double _omega = 2 * math.pi / _loopSeconds;
 
-/// Fires per second along a link. 1.5 × 20s = 30, so firing is loop-periodic.
-const double _fireRate = 1.5;
-
 const Duration _breathPeriod = Duration(milliseconds: 2400);
-const Duration _completePeriod = Duration(milliseconds: 900);
 const Duration _shimmerPeriod = Duration(milliseconds: 1400);
 const Duration _listCrossFade = Duration(milliseconds: 400);
 const Duration _errorHold = Duration(seconds: 3);
@@ -213,7 +210,6 @@ class _NexusLoaderState extends State<NexusLoader>
   /// [_complete], delayed and eased, for the success check path-draw.
   Animation<double>? _checkDraw;
 
-  List<_Particle> _particles = const <_Particle>[];
 
   int _stage = 0;
   Timer? _stageTimer;
@@ -271,17 +267,10 @@ class _NexusLoaderState extends State<NexusLoader>
 
     switch (widget.variant) {
       case NexusLoaderVariant.research:
-        _particles = _seedParticles(46, 0.10);
-        _startField();
-        _complete = AnimationController(vsync: this, duration: _completePeriod);
       case NexusLoaderVariant.think:
-        // Roughly half the density and a slower drift: thinking should read
-        // as deliberate where research reads as busy.
-        _particles = _seedParticles(22, 0.06);
-        _startField();
-        _breath = AnimationController(vsync: this, duration: _breathPeriod)
-          ..repeat(reverse: true);
-        _complete = AnimationController(vsync: this, duration: _completePeriod);
+        // Status copy only. The particle constellation was a decorative
+        // canvas with no information, and it ran a ticker for the whole
+        // search. The stage line below is the wait state.
       case NexusLoaderVariant.vision:
         _startField();
         _breath = AnimationController(vsync: this, duration: _breathPeriod)
@@ -460,8 +449,8 @@ class _NexusLoaderState extends State<NexusLoader>
     final tone = _toneColor(colors);
 
     final body = switch (widget.variant) {
-      NexusLoaderVariant.research => _buildField(colors, tone, still),
-      NexusLoaderVariant.think => _buildField(colors, tone, still),
+      NexusLoaderVariant.research => _buildField(colors, still),
+      NexusLoaderVariant.think => _buildField(colors, still),
       NexusLoaderVariant.vision => _buildVision(colors, tone, still),
       NexusLoaderVariant.list => _buildList(colors, still),
       NexusLoaderVariant.sync => _buildSync(colors, tone, still),
@@ -488,47 +477,8 @@ class _NexusLoaderState extends State<NexusLoader>
 
   // ── research / think ──────────────────────────────────────────────────
 
-  Widget _buildField(AppColors colors, Color tone, bool still) {
-    final isThink = widget.variant == NexusLoaderVariant.think;
-
-    final field = RepaintBoundary(
-      child: SizedBox(
-        width: widget.size,
-        height: widget.size,
-        child: AnimatedBuilder(
-          animation: Listenable.merge(<Listenable?>[
-            _field,
-            _breath,
-            _complete,
-          ]),
-          builder: (context, _) {
-            final breath = _breath?.value ?? 0;
-            return CustomPaint(
-              painter: _FlowFieldPainter(
-                t: still ? 0 : (_field?.value ?? 0),
-                particles: _particles,
-                color: tone,
-                coreColor: colors.text,
-                linkDistance: isThink ? 0.46 : 0.30,
-                activity: still ? 0 : (isThink ? 0.35 : 1.0),
-                baseAlpha: still ? 0.4 : 1.0,
-                completion: _complete?.value ?? 0,
-                // Reduced motion pins the ring radius and breathes opacity
-                // 0.2 → 0.3 instead, on the same 2400ms clock.
-                ringScale: isThink && !still ? 1 + 0.06 * breath : 1,
-                ringOpacity: isThink ? 0.2 + 0.1 * breath : 0,
-                still: still,
-              ),
-            );
-          },
-        ),
-      ),
-    );
-
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: <Widget>[field, AppSpacing.gapMd, _statusLine(colors, still)],
-    );
+  Widget _buildField(AppColors colors, bool still) {
+    return _statusLine(colors, still);
   }
 
   /// Fixed-width status line. The box is measured off the LONGEST stage with
@@ -965,221 +915,8 @@ class _NexusLoaderState extends State<NexusLoader>
     ]).animate(c);
   }
 
-  static List<_Particle> _seedParticles(int count, double drift) {
-    // Fixed seed: the reduced-motion static field is the exact frame the
-    // animated field starts from.
-    final rng = math.Random(0x4E58);
-    return <_Particle>[
-      for (var i = 0; i < count; i++)
-        _Particle(
-          x0: 0.10 + rng.nextDouble() * 0.80,
-          y0: 0.10 + rng.nextDouble() * 0.80,
-          sx: (2 + rng.nextInt(6)) * _omega,
-          sy: (2 + rng.nextInt(6)) * _omega,
-          px: rng.nextDouble() * math.pi * 2,
-          py: rng.nextDouble() * math.pi * 2,
-          r: 0.9 + rng.nextDouble() * 1.5,
-          drift: drift,
-        ),
-    ];
-  }
 }
 
-// ── Particle field ───────────────────────────────────────────────────────
-
-@immutable
-class _Particle {
-  const _Particle({
-    required this.x0,
-    required this.y0,
-    required this.sx,
-    required this.sy,
-    required this.px,
-    required this.py,
-    required this.r,
-    required this.drift,
-  });
-
-  final double x0;
-  final double y0;
-  final double sx;
-  final double sy;
-  final double px;
-  final double py;
-  final double r;
-  final double drift;
-}
-
-class _FlowFieldPainter extends CustomPainter {
-  _FlowFieldPainter({
-    required this.t,
-    required this.particles,
-    required this.color,
-    required this.coreColor,
-    required this.linkDistance,
-    required this.activity,
-    required this.baseAlpha,
-    required this.completion,
-    required this.ringScale,
-    required this.ringOpacity,
-    required this.still,
-  });
-
-  /// Seconds, looping at [_loopSeconds]. Frozen at 0 under reduced motion.
-  final double t;
-  final List<_Particle> particles;
-  final Color color;
-  final Color coreColor;
-
-  /// Normalized link threshold (fraction of the square edge).
-  final double linkDistance;
-
-  /// 0 disables firing links entirely.
-  final double activity;
-  final double baseAlpha;
-
-  /// 0..1 completion sequence: links flash, particles spiral in, core ignites.
-  final double completion;
-
-  final double ringScale;
-  final double ringOpacity;
-  final bool still;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final s = math.min(size.width, size.height);
-    final center = Offset(size.width / 2, size.height / 2);
-
-    if (ringOpacity > 0) {
-      canvas.drawCircle(
-        center,
-        s * 0.42 * ringScale,
-        Paint()
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 1.2
-          ..color = color.withValues(alpha: ringOpacity * baseAlpha),
-      );
-    }
-
-    final spiral = completion <= 0
-        ? 0.0
-        : Curves.easeInCubic.transform(completion.clamp(0.0, 1.0));
-
-    final points = <Offset>[];
-    for (final p in particles) {
-      var x = p.x0 +
-          p.drift *
-              0.5 *
-              (math.sin(p.sx * t + p.px) +
-                  math.sin(p.y0 * math.pi * 2 + 3 * _omega * t));
-      var y = p.y0 +
-          p.drift *
-              0.5 *
-              (math.cos(p.sy * t + p.py) +
-                  math.cos(p.x0 * math.pi * 2 - 2 * _omega * t));
-      x = x.clamp(0.06, 0.94);
-      y = y.clamp(0.06, 0.94);
-
-      if (spiral > 0) {
-        final dx = x - 0.5;
-        final dy = y - 0.5;
-        final rad = math.sqrt(dx * dx + dy * dy) * (1 - spiral);
-        final ang = math.atan2(dy, dx) + spiral * 2.6;
-        x = 0.5 + rad * math.cos(ang);
-        y = 0.5 + rad * math.sin(ang);
-      }
-      points.add(Offset(x * size.width, y * size.height));
-    }
-
-    // Links. All of them flash at the front of the completion sequence.
-    final flash = completion <= 0
-        ? 0.0
-        : (1 - (completion / 0.35)).clamp(0.0, 1.0);
-    final threshold = linkDistance * s;
-    final linkPaint = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 0.8;
-
-    final near = <(int, int)>[];
-    for (var i = 0; i < points.length; i++) {
-      for (var j = i + 1; j < points.length; j++) {
-        final d = (points[i] - points[j]).distance;
-        if (d >= threshold) continue;
-        near.add((i, j));
-        final closeness = 1 - d / threshold;
-        final alpha =
-            (closeness * 0.28 + flash * 0.55).clamp(0.0, 1.0) * baseAlpha;
-        canvas.drawLine(
-          points[i],
-          points[j],
-          linkPaint..color = color.withValues(alpha: alpha),
-        );
-      }
-    }
-
-    // Occasionally one link fires: a bright head travels along it.
-    if (activity > 0 && near.isNotEmpty && completion <= 0) {
-      final tick = t * _fireRate * activity;
-      final link = near[tick.floor().abs() % near.length];
-      final u = tick - tick.floorToDouble();
-      final head = Offset.lerp(points[link.$1], points[link.$2], u)!;
-      canvas.drawLine(
-        points[link.$1],
-        points[link.$2],
-        linkPaint..color = color.withValues(alpha: 0.42 * baseAlpha),
-      );
-      canvas.drawCircle(
-        head,
-        2.4,
-        Paint()
-          ..color = coreColor.withValues(alpha: 0.9 * baseAlpha)
-          // One blurred Paint for the whole frame beats building a radial
-          // gradient shader per particle per frame.
-          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 2),
-      );
-    }
-
-    final dotGlow = Paint()
-      ..color = color.withValues(alpha: 0.55 * baseAlpha)
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 2);
-    final dotCore = Paint()..color = color.withValues(alpha: 0.95 * baseAlpha);
-    for (var i = 0; i < points.length; i++) {
-      final r = particles[i].r * (1 + flash * 0.6);
-      canvas.drawCircle(points[i], r * 2.1, dotGlow);
-      canvas.drawCircle(points[i], r, dotCore);
-    }
-
-    // White-hot core plus one expanding ring.
-    if (completion > 0.45) {
-      final k = ((completion - 0.45) / 0.55).clamp(0.0, 1.0);
-      canvas.drawCircle(
-        center,
-        s * 0.05 * (1 - k * 0.3),
-        Paint()
-          ..color = coreColor.withValues(alpha: 1 - k * 0.2)
-          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4),
-      );
-      canvas.drawCircle(
-        center,
-        s * (0.06 + 0.40 * Curves.easeOutCubic.transform(k)),
-        Paint()
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 2 * (1 - k)
-          ..color = color.withValues(alpha: (1 - k) * 0.85),
-      );
-    }
-  }
-
-  @override
-  bool shouldRepaint(_FlowFieldPainter old) =>
-      old.t != t ||
-      old.completion != completion ||
-      old.ringScale != ringScale ||
-      old.ringOpacity != ringOpacity ||
-      old.color != color ||
-      old.baseAlpha != baseAlpha ||
-      old.still != still;
-}
 
 // ── Liquid progress ring ─────────────────────────────────────────────────
 

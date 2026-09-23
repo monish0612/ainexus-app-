@@ -87,19 +87,16 @@ void main() {
     }
   });
 
-  test('collapsed bubble icon is the brand disc + wand, not the panel', () {
+  test('collapsed bubble icon is liquid glass + wand, not the panel', () {
     final src = File('lib/bubble/overlay/bubble.dart').readAsStringSync();
     expect(src, contains('class RephraseBubble'));
+    expect(src, contains('class _GlassOrb'));
     expect(src, contains('class _WandGlyph'));
-    expect(src, contains('class _BubbleSurface'));
-    expect(src, contains('painter: _WandGlyph()'));
-    // The bubble floats over arbitrary third-party apps, so it must carry
-    // its own contrast: opaque brand core + separation ring. The old
-    // translucent glass shell vanished against light chat surfaces.
-    expect(src, contains('kBrandAccent'));
-    expect(src, contains('kBubbleRingLight'));
-    expect(src, contains('kBubbleShadow'));
+    expect(src, contains('painter: _GlassOrb('));
+    expect(src, contains('painter: const _WandGlyph()'));
+    expect(src, isNot(contains('_BubbleSurface')));
     expect(src, isNot(contains('GlassContainer')));
+    expect(src, isNot(contains('kBrandAccent')));
     expect(src, isNot(contains('RephrasePanel')));
     expect(src, isNot(contains('Icons.auto_fix')));
   });
