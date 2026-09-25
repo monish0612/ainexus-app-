@@ -366,7 +366,7 @@ class SettingsController extends StateNotifier<SettingsState> {
 
   Future<void> _syncFromServer() async {
     _syncing = true;
-    await AppTokenStore.instance.waitUntilReady();
+    await AppTokenStore.instance.startupReady;
     final sw = Stopwatch()..start();
     try {
       final remote = await _remote.fetchAll();

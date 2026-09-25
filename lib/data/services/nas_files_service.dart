@@ -111,8 +111,9 @@ class NasFilesService {
     void Function(int sent, int total)? onProgress,
     CancelToken? cancelToken,
   }) async {
-    final name = file.uri.pathSegments.isNotEmpty
-        ? file.uri.pathSegments.last
+    final segments = file.path.split(RegExp(r'[/\\]'));
+    final name = segments.isNotEmpty && segments.last.isNotEmpty
+        ? segments.last
         : 'upload-${DateTime.now().millisecondsSinceEpoch}';
     final size = await file.length();
     if (size > maxUploadBytes) {
