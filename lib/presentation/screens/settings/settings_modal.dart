@@ -164,6 +164,26 @@ class _SettingsSheet extends StatelessWidget {
                       const SizedBox(height: 24),
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 18),
+                        child: DropdownButtonFormField<String>(
+                          value: kNarrationModels.contains(settings.narrationModel)
+                              ? settings.narrationModel
+                              : kDefaultNarrationModel,
+                          decoration: const InputDecoration(
+                            labelText: 'Narration model',
+                            helperText: 'Article listen. Flash and Flash-Lite only.',
+                          ),
+                          items: [
+                            for (final id in kNarrationModels)
+                              DropdownMenuItem(value: id, child: Text(id)),
+                          ],
+                          onChanged: (id) {
+                            if (id != null) notifier.setNarrationModel(id);
+                          },
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 18),
                         child: _XGrokSection(
                           colors: colors,
                           enabled: settings.xgrokEnabled,
