@@ -78,6 +78,8 @@ abstract final class ApiEndpoints {
       '$_base/api/v1/narration/${Uri.encodeComponent(id)}/complete';
   static String narrationAudio(String id) =>
       '$_base/api/v1/narration/${Uri.encodeComponent(id)}/audio';
+  static String narrationChunk(String id, int index) =>
+      '$_base/api/v1/narration/${Uri.encodeComponent(id)}/chunks/$index';
 
   // Cloud
   static String get cloudFiles => '$_base/api/v1/cloud/files';

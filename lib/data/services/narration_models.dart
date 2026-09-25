@@ -19,6 +19,9 @@ class NarrationJob {
     this.reason,
     this.configured = true,
     this.cacheHit = false,
+    this.chunks = const [],
+    this.complete = false,
+    this.chunkError,
   });
 
   final NarrationJobStatus status;
@@ -27,6 +30,9 @@ class NarrationJob {
   final String? reason;
   final bool configured;
   final bool cacheHit;
+  final List<int> chunks;
+  final bool complete;
+  final String? chunkError;
 
   bool get isReady => status == NarrationJobStatus.ready;
   bool get isPreparing =>
@@ -58,6 +64,9 @@ class NarrationJob {
       reason: json['reason'] as String?,
       configured: json['configured'] != false,
       cacheHit: json['cache_hit'] == true,
+      chunks: ((json['chunks'] as List?) ?? const []).map((e) => (e as num).toInt()).toList(),
+      complete: json['complete'] == true,
+      chunkError: json['chunk_error'] as String?,
     );
   }
 }

@@ -36,6 +36,9 @@ class NarrationAudioHandler extends BaseAudioHandler with SeekHandler {
 
   final NarrationApi _api;
   final AudioPlayer _player = AudioPlayer();
+  ConcatenatingAudioSource? _chunks;
+  Timer? _chunkPoll;
+  int _loadedChunks = 0;
   final List<Article> _queue = <Article>[];
   int _index = 0;
   bool _completedSent = false;
@@ -120,11 +123,43 @@ class NarrationAudioHandler extends BaseAudioHandler with SeekHandler {
       return;
     }
     _loadedFromLocal = false;
-    final url = ApiEndpoints.narrationAudio(article.id);
+    _chunkPoll?.cancel();
+    _loadedChunks = 0;
+    _chunks = ConcatenatingAudioSource(children: []);
+    await _player.setAudioSource(_chunks!);
+    _chunkPoll = Timer.periodic(const Duration(seconds: 2), (_) {
+      _pullChunks(article.id);
+    });
+    await _pullChunks(article.id);
+  }
+
+  Future<void> _pullChunks(String articleId) async {
+    final playlist = _chunks;
+    if (playlist == null) return;
+    final job = await _api.status(articleId);
+    if (job.chunkError != null || job.status == NarrationJobStatus.failed) {
+      _chunkPoll?.cancel();
+      await _player.pause();
+      return;
+    }
     final headers = _api.audioHeaders();
-    await _player.setAudioSource(
-      AudioSource.uri(Uri.parse(url), headers: headers),
-    );
+    for (final index in job.chunks) {
+      if (index < _loadedChunks) continue;
+      await playlist.add(
+        AudioSource.uri(
+          Uri.parse(ApiEndpoints.narrationChunk(articleId, index)),
+          headers: headers,
+        ),
+      );
+      _loadedChunks = index + 1;
+    }
+    final atEnd = _player.processingState == ProcessingState.completed;
+    if (atEnd && !job.complete && playlist.length > (_player.currentIndex ?? 0) + 1) {
+      await _player.play();
+    }
+    if (job.complete && _loadedChunks >= job.chunks.length) {
+      _chunkPoll?.cancel();
+    }
   }
 
   Future<void> setPlaybackSpeed(double speed) async {
@@ -149,6 +184,7 @@ class NarrationAudioHandler extends BaseAudioHandler with SeekHandler {
 
   @override
   Future<void> stop() async {
+    _chunkPoll?.cancel();
     await _player.stop();
     await super.stop();
   }
