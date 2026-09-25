@@ -10,6 +10,7 @@ import '../../core/platform/platform_capabilities.dart';
 import '../../core/services/telegram_logger.dart';
 import '../../domain/entities/news_entities.dart';
 import 'narration_api.dart';
+import 'narration_models.dart';
 import 'narration_completion_store.dart';
 import 'narration_download.dart';
 import 'narration_download_store.dart';
