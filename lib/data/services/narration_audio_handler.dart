@@ -129,7 +129,7 @@ class NarrationAudioHandler extends BaseAudioHandler with SeekHandler {
     _loadedChunks = 0;
     _chunks = ConcatenatingAudioSource(children: []);
     await _player.setAudioSource(_chunks!);
-    _chunkPoll = Timer.periodic(const Duration(seconds: 1), (_) {
+    _chunkPoll = Timer.periodic(const Duration(milliseconds: 175), (_) {
       _pullChunks(article.id);
     });
     await _pullChunks(article.id);

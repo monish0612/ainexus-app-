@@ -349,8 +349,8 @@ void main() {
     expect(shouldKeepPollingNarration(ready), isFalse);
     expect(shouldKeepPollingNarration(breaker), isFalse);
 
-    expect(narrationPollInterval(0), const Duration(seconds: 2));
-    expect(narrationPollInterval(1), const Duration(seconds: 2));
+    expect(narrationPollInterval(0), const Duration(milliseconds: 175));
+    expect(narrationPollInterval(1), const Duration(milliseconds: 175));
     expect(narrationPollInterval(2), const Duration(seconds: 5));
     expect(narrationPollInterval(3), const Duration(seconds: 5));
     expect(narrationPollInterval(4), const Duration(seconds: 10));

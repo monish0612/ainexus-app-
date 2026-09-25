@@ -93,7 +93,7 @@ bool shouldKeepPollingNarration(NarrationJob job) {
 Duration narrationPollInterval(int transientTries) {
   if (transientTries >= 4) return const Duration(seconds: 10);
   if (transientTries >= 2) return const Duration(seconds: 5);
-  return const Duration(seconds: 2);
+  return const Duration(milliseconds: 175);
 }
 
 /// Same ~45s unreachable window as the old 22 × 2s poll, independent of backoff.
