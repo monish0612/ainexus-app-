@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../../core/auth/app_token_store.dart';
 import '../../../core/services/telegram_logger.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../data/services/user_preferences_service.dart';
@@ -114,6 +115,13 @@ class Bank {
 
 const kDefaultDeepModel = 'gemini-3.1-pro-preview';
 const kDefaultLiteModel = 'gemini-3.1-flash-lite-preview';
+const kDefaultNarrationModel = 'gemini-2.5-flash-lite';
+const kNarrationModels = [
+  'gemini-2.5-flash-lite',
+  'gemini-2.5-flash',
+  'gemini-3.1-flash-lite',
+  'gemini-3.5-flash-lite',
+];
 const kDefaultXGrokLiteModel = 'grok-4-1-fast-non-reasoning';
 const kDefaultXGrokDeepModel = 'grok-4-0709';
 const kDefaultXGrokThinkingModel = 'grok-4-1-fast-reasoning';
@@ -128,6 +136,7 @@ class SettingsState {
     this.settingsOpen = false,
     this.deepModel = kDefaultDeepModel,
     this.liteModel = kDefaultLiteModel,
+    this.narrationModel = kDefaultNarrationModel,
     this.xgrokEnabled = false,
     this.xgrokLiteModel = kDefaultXGrokLiteModel,
     this.xgrokDeepModel = kDefaultXGrokDeepModel,
@@ -142,6 +151,7 @@ class SettingsState {
   final bool settingsOpen;
   final String deepModel;
   final String liteModel;
+  final String narrationModel;
   final bool xgrokEnabled;
   final String xgrokLiteModel;
   final String xgrokDeepModel;
@@ -164,6 +174,7 @@ class SettingsState {
     bool? settingsOpen,
     String? deepModel,
     String? liteModel,
+    String? narrationModel,
     bool? xgrokEnabled,
     String? xgrokLiteModel,
     String? xgrokDeepModel,
@@ -178,6 +189,7 @@ class SettingsState {
       settingsOpen: settingsOpen ?? this.settingsOpen,
       deepModel: deepModel ?? this.deepModel,
       liteModel: liteModel ?? this.liteModel,
+      narrationModel: narrationModel ?? this.narrationModel,
       xgrokEnabled: xgrokEnabled ?? this.xgrokEnabled,
       xgrokLiteModel: xgrokLiteModel ?? this.xgrokLiteModel,
       xgrokDeepModel: xgrokDeepModel ?? this.xgrokDeepModel,
@@ -197,6 +209,7 @@ abstract final class _PK {
   static const theme = 'app_theme';
   static const deepModel = 'deep_model';
   static const liteModel = 'lite_model';
+  static const narrationModel = 'narration_model';
   static const xgrokEnabled = 'xgrok_enabled';
   static const xgrokLiteModel = 'xgrok_lite_model';
   static const xgrokDeepModel = 'xgrok_deep_model';
@@ -296,6 +309,8 @@ class SettingsController extends StateNotifier<SettingsState> {
     final theme = _prefs.getString(_PK.theme) ?? 'dark';
     final deepModel = _prefs.getString(_PK.deepModel) ?? kDefaultDeepModel;
     final liteModel = _prefs.getString(_PK.liteModel) ?? kDefaultLiteModel;
+    final narrationModel =
+        _prefs.getString(_PK.narrationModel) ?? kDefaultNarrationModel;
     final xgrokEnabled = _prefs.getBool(_PK.xgrokEnabled) ?? false;
     final xgrokLiteModel =
         _prefs.getString(_PK.xgrokLiteModel) ?? kDefaultXGrokLiteModel;
@@ -317,6 +332,7 @@ class SettingsController extends StateNotifier<SettingsState> {
       banks: banks,
       deepModel: deepModel,
       liteModel: liteModel,
+      narrationModel: narrationModel,
       xgrokEnabled: xgrokEnabled,
       xgrokLiteModel: xgrokLiteModel,
       xgrokDeepModel: xgrokDeepModel,
@@ -350,6 +366,7 @@ class SettingsController extends StateNotifier<SettingsState> {
 
   Future<void> _syncFromServer() async {
     _syncing = true;
+    await AppTokenStore.instance.waitUntilReady();
     final sw = Stopwatch()..start();
     try {
       final remote = await _remote.fetchAll();
@@ -382,6 +399,8 @@ class SettingsController extends StateNotifier<SettingsState> {
       final theme = safeRemote[_PK.theme] ?? state.theme;
       final deepModel = safeRemote[_PK.deepModel] ?? state.deepModel;
       final liteModel = safeRemote[_PK.liteModel] ?? state.liteModel;
+      final narrationModel =
+          safeRemote[_PK.narrationModel] ?? state.narrationModel;
       final xgrokEnabled = safeRemote.containsKey(_PK.xgrokEnabled)
           ? safeRemote[_PK.xgrokEnabled] == 'true'
           : state.xgrokEnabled;
@@ -408,6 +427,7 @@ class SettingsController extends StateNotifier<SettingsState> {
         banks: banks,
         deepModel: deepModel,
         liteModel: liteModel,
+      narrationModel: narrationModel,
         xgrokEnabled: xgrokEnabled,
         xgrokLiteModel: xgrokLiteModel,
         xgrokDeepModel: xgrokDeepModel,
@@ -463,6 +483,13 @@ class SettingsController extends StateNotifier<SettingsState> {
     state = state.copyWith(deepModel: trimmed);
     _prefs.setString(_PK.deepModel, trimmed);
     _queuePush(_PK.deepModel, trimmed);
+  }
+
+  void setNarrationModel(String model) {
+    if (!kNarrationModels.contains(model)) return;
+    state = state.copyWith(narrationModel: model);
+    _prefs.setString(_PK.narrationModel, model);
+    _queuePush(_PK.narrationModel, model);
   }
 
   void setLiteModel(String model) {
@@ -743,6 +770,7 @@ class SettingsController extends StateNotifier<SettingsState> {
     _prefs.setString(_PK.theme, s.theme);
     _prefs.setString(_PK.deepModel, s.deepModel);
     _prefs.setString(_PK.liteModel, s.liteModel);
+    _prefs.setString(_PK.narrationModel, s.narrationModel);
     _prefs.setBool(_PK.xgrokEnabled, s.xgrokEnabled);
     _prefs.setString(_PK.xgrokLiteModel, s.xgrokLiteModel);
     _prefs.setString(_PK.xgrokDeepModel, s.xgrokDeepModel);
@@ -760,6 +788,7 @@ class SettingsController extends StateNotifier<SettingsState> {
       _PK.theme: s.theme,
       _PK.deepModel: s.deepModel,
       _PK.liteModel: s.liteModel,
+      _PK.narrationModel: s.narrationModel,
       _PK.xgrokEnabled: s.xgrokEnabled.toString(),
       _PK.xgrokLiteModel: s.xgrokLiteModel,
       _PK.xgrokDeepModel: s.xgrokDeepModel,
