@@ -181,6 +181,27 @@ class _SettingsSheet extends StatelessWidget {
                           },
                         ),
                       ),
+                      const SizedBox(height: 12),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 18),
+                        child: DropdownButtonFormField<String>(
+                          value: kNarrationTtsModels.contains(settings.narrationTtsModel)
+                              ? settings.narrationTtsModel
+                              : kDefaultNarrationTtsModel,
+                          decoration: const InputDecoration(
+                            labelText: 'Narration voice model',
+                            helperText: 'Chirp ~\$0.02 after free tier. Gemini TTS ~\$0.05. On-device is free.',
+                          ),
+                          items: const [
+                            DropdownMenuItem(value: 'chirp3-hd', child: Text('Chirp 3 HD')),
+                            DropdownMenuItem(value: 'gemini-2.5-flash-preview-tts', child: Text('Gemini Flash TTS')),
+                            DropdownMenuItem(value: 'on-device', child: Text('On-device (free)')),
+                          ],
+                          onChanged: (id) {
+                            if (id != null) notifier.setNarrationTtsModel(id);
+                          },
+                        ),
+                      ),
                       const SizedBox(height: 24),
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 18),

@@ -22,6 +22,7 @@ class NarrationJob {
     this.chunks = const [],
     this.complete = false,
     this.chunkError,
+    this.onDeviceText,
   });
 
   final NarrationJobStatus status;
@@ -33,6 +34,7 @@ class NarrationJob {
   final List<int> chunks;
   final bool complete;
   final String? chunkError;
+  final String? onDeviceText;
 
   bool get isReady => status == NarrationJobStatus.ready;
   bool get isPreparing =>
@@ -67,6 +69,7 @@ class NarrationJob {
       chunks: ((json['chunks'] as List?) ?? const []).map((e) => (e as num).toInt()).toList(),
       complete: json['complete'] == true,
       chunkError: json['chunk_error'] as String?,
+      onDeviceText: json['on_device_text'] as String?,
     );
   }
 }

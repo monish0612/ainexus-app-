@@ -22,6 +22,7 @@ import '../../../../data/services/narration_download_store.dart';
 import '../../../../data/services/narration_models.dart';
 import '../../../../data/services/narration_playback.dart';
 import '../../../../domain/entities/news_entities.dart';
+import '../../settings/settings_controller.dart';
 
 /// Server narration first; on-device [ArticleTtsService] if the pipeline
 /// is down, timed out, or the breaker is open.
@@ -63,6 +64,8 @@ class _NarrationListenBarState extends ConsumerState<NarrationListenBar> {
   int _bootGen = 0;
   int _transientTries = 0;
   DateTime? _pollStartedAt;
+  DateTime? _stallSince;
+  int _stallChunks = -1;
   bool _offeredUnreachableFallback = false;
   ListenSurface? _surface;
 
@@ -152,6 +155,17 @@ class _NarrationListenBarState extends ConsumerState<NarrationListenBar> {
       });
       return;
     }
+    if (ref.read(settingsProvider).narrationTtsModel == 'on-device') {
+      setState(() {
+        _job = const NarrationJob(
+          status: NarrationJobStatus.fallback,
+          reason: 'on_device',
+        );
+        _booted = true;
+        _surface = ListenSurface.onDevice;
+      });
+      return;
+    }
     await _waitForAuthToken();
     if (!mounted || gen != _bootGen) return;
     await NarrationDownloadStore.instance.hydrate();
@@ -234,7 +248,28 @@ class _NarrationListenBarState extends ConsumerState<NarrationListenBar> {
         _giveUp?.cancel();
         return;
       }
-      if (job.isPreparing) _transientTries = 0;
+      if (job.isPreparing) {
+      _transientTries = 0;
+      final n = job.chunks.length;
+      if (n != _stallChunks) {
+        _stallChunks = n;
+        _stallSince = DateTime.now();
+      } else if (_stallSince != null &&
+          DateTime.now().difference(_stallSince!) > const Duration(seconds: 15)) {
+        _applyJob(
+          NarrationJob(
+            status: NarrationJobStatus.fallback,
+            reason: 'on_device',
+            onDeviceText: job.onDeviceText,
+            chunks: job.chunks,
+          ),
+          gen: gen,
+          allowTerminalFallback: true,
+        );
+        _poll?.cancel();
+        return;
+      }
+    }
       if (mounted) _armPoll();
       return;
     }

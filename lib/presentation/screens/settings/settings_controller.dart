@@ -116,6 +116,13 @@ class Bank {
 const kDefaultDeepModel = 'gemini-3.1-pro-preview';
 const kDefaultLiteModel = 'gemini-3.1-flash-lite-preview';
 const kDefaultNarrationModel = 'gemini-2.5-flash-lite';
+const kDefaultNarrationTtsModel = 'chirp3-hd';
+const kDefaultNarrationVoice = 'en-US-Chirp3-HD-Charon';
+const kNarrationTtsModels = [
+  'chirp3-hd',
+  'gemini-2.5-flash-preview-tts',
+  'on-device',
+];
 const kNarrationModels = [
   'gemini-2.5-flash-lite',
   'gemini-2.5-flash',
@@ -137,6 +144,8 @@ class SettingsState {
     this.deepModel = kDefaultDeepModel,
     this.liteModel = kDefaultLiteModel,
     this.narrationModel = kDefaultNarrationModel,
+    this.narrationTtsModel = kDefaultNarrationTtsModel,
+    this.narrationVoice = kDefaultNarrationVoice,
     this.xgrokEnabled = false,
     this.xgrokLiteModel = kDefaultXGrokLiteModel,
     this.xgrokDeepModel = kDefaultXGrokDeepModel,
@@ -152,6 +161,8 @@ class SettingsState {
   final String deepModel;
   final String liteModel;
   final String narrationModel;
+  final String narrationTtsModel;
+  final String narrationVoice;
   final bool xgrokEnabled;
   final String xgrokLiteModel;
   final String xgrokDeepModel;
@@ -175,6 +186,8 @@ class SettingsState {
     String? deepModel,
     String? liteModel,
     String? narrationModel,
+    String? narrationTtsModel,
+    String? narrationVoice,
     bool? xgrokEnabled,
     String? xgrokLiteModel,
     String? xgrokDeepModel,
@@ -190,6 +203,8 @@ class SettingsState {
       deepModel: deepModel ?? this.deepModel,
       liteModel: liteModel ?? this.liteModel,
       narrationModel: narrationModel ?? this.narrationModel,
+      narrationTtsModel: narrationTtsModel ?? this.narrationTtsModel,
+      narrationVoice: narrationVoice ?? this.narrationVoice,
       xgrokEnabled: xgrokEnabled ?? this.xgrokEnabled,
       xgrokLiteModel: xgrokLiteModel ?? this.xgrokLiteModel,
       xgrokDeepModel: xgrokDeepModel ?? this.xgrokDeepModel,
@@ -210,6 +225,8 @@ abstract final class _PK {
   static const deepModel = 'deep_model';
   static const liteModel = 'lite_model';
   static const narrationModel = 'narration_model';
+  static const narrationTtsModel = 'narration_tts_model';
+  static const narrationVoice = 'narration_voice';
   static const xgrokEnabled = 'xgrok_enabled';
   static const xgrokLiteModel = 'xgrok_lite_model';
   static const xgrokDeepModel = 'xgrok_deep_model';
@@ -311,6 +328,10 @@ class SettingsController extends StateNotifier<SettingsState> {
     final liteModel = _prefs.getString(_PK.liteModel) ?? kDefaultLiteModel;
     final narrationModel =
         _prefs.getString(_PK.narrationModel) ?? kDefaultNarrationModel;
+    final narrationTtsModel =
+        _prefs.getString(_PK.narrationTtsModel) ?? kDefaultNarrationTtsModel;
+    final narrationVoice =
+        _prefs.getString(_PK.narrationVoice) ?? kDefaultNarrationVoice;
     final xgrokEnabled = _prefs.getBool(_PK.xgrokEnabled) ?? false;
     final xgrokLiteModel =
         _prefs.getString(_PK.xgrokLiteModel) ?? kDefaultXGrokLiteModel;
@@ -333,6 +354,8 @@ class SettingsController extends StateNotifier<SettingsState> {
       deepModel: deepModel,
       liteModel: liteModel,
       narrationModel: narrationModel,
+      narrationTtsModel: narrationTtsModel,
+      narrationVoice: narrationVoice,
       xgrokEnabled: xgrokEnabled,
       xgrokLiteModel: xgrokLiteModel,
       xgrokDeepModel: xgrokDeepModel,
@@ -401,6 +424,10 @@ class SettingsController extends StateNotifier<SettingsState> {
       final liteModel = safeRemote[_PK.liteModel] ?? state.liteModel;
       final narrationModel =
           safeRemote[_PK.narrationModel] ?? state.narrationModel;
+      final narrationTtsModel =
+          safeRemote[_PK.narrationTtsModel] ?? state.narrationTtsModel;
+      final narrationVoice =
+          safeRemote[_PK.narrationVoice] ?? state.narrationVoice;
       final xgrokEnabled = safeRemote.containsKey(_PK.xgrokEnabled)
           ? safeRemote[_PK.xgrokEnabled] == 'true'
           : state.xgrokEnabled;
@@ -428,6 +455,8 @@ class SettingsController extends StateNotifier<SettingsState> {
         deepModel: deepModel,
         liteModel: liteModel,
       narrationModel: narrationModel,
+        narrationTtsModel: narrationTtsModel,
+        narrationVoice: narrationVoice,
         xgrokEnabled: xgrokEnabled,
         xgrokLiteModel: xgrokLiteModel,
         xgrokDeepModel: xgrokDeepModel,
@@ -490,6 +519,26 @@ class SettingsController extends StateNotifier<SettingsState> {
     state = state.copyWith(narrationModel: model);
     _prefs.setString(_PK.narrationModel, model);
     _queuePush(_PK.narrationModel, model);
+  }
+
+  void setNarrationTtsModel(String model) {
+    if (!kNarrationTtsModels.contains(model)) return;
+    final voice = model == 'gemini-2.5-flash-preview-tts'
+        ? 'Charon'
+        : model == 'chirp3-hd'
+            ? kDefaultNarrationVoice
+            : state.narrationVoice;
+    state = state.copyWith(narrationTtsModel: model, narrationVoice: voice);
+    _prefs.setString(_PK.narrationTtsModel, model);
+    _prefs.setString(_PK.narrationVoice, voice);
+    _queuePush(_PK.narrationTtsModel, model);
+    _queuePush(_PK.narrationVoice, voice);
+  }
+
+  void setNarrationVoice(String voice) {
+    state = state.copyWith(narrationVoice: voice);
+    _prefs.setString(_PK.narrationVoice, voice);
+    _queuePush(_PK.narrationVoice, voice);
   }
 
   void setLiteModel(String model) {
@@ -771,6 +820,8 @@ class SettingsController extends StateNotifier<SettingsState> {
     _prefs.setString(_PK.deepModel, s.deepModel);
     _prefs.setString(_PK.liteModel, s.liteModel);
     _prefs.setString(_PK.narrationModel, s.narrationModel);
+    _prefs.setString(_PK.narrationTtsModel, s.narrationTtsModel);
+    _prefs.setString(_PK.narrationVoice, s.narrationVoice);
     _prefs.setBool(_PK.xgrokEnabled, s.xgrokEnabled);
     _prefs.setString(_PK.xgrokLiteModel, s.xgrokLiteModel);
     _prefs.setString(_PK.xgrokDeepModel, s.xgrokDeepModel);
@@ -789,6 +840,8 @@ class SettingsController extends StateNotifier<SettingsState> {
       _PK.deepModel: s.deepModel,
       _PK.liteModel: s.liteModel,
       _PK.narrationModel: s.narrationModel,
+      _PK.narrationTtsModel: s.narrationTtsModel,
+      _PK.narrationVoice: s.narrationVoice,
       _PK.xgrokEnabled: s.xgrokEnabled.toString(),
       _PK.xgrokLiteModel: s.xgrokLiteModel,
       _PK.xgrokDeepModel: s.xgrokDeepModel,
