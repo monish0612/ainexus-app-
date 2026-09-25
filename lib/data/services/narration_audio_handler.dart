@@ -95,6 +95,7 @@ class NarrationAudioHandler extends BaseAudioHandler with SeekHandler {
       await stop();
       return;
     }
+    if (_chunks != null && _loadedChunks == 0) return;
     await play();
   }
 
@@ -127,7 +128,7 @@ class NarrationAudioHandler extends BaseAudioHandler with SeekHandler {
     _loadedChunks = 0;
     _chunks = ConcatenatingAudioSource(children: []);
     await _player.setAudioSource(_chunks!);
-    _chunkPoll = Timer.periodic(const Duration(seconds: 2), (_) {
+    _chunkPoll = Timer.periodic(const Duration(seconds: 1), (_) {
       _pullChunks(article.id);
     });
     await _pullChunks(article.id);
@@ -153,9 +154,18 @@ class NarrationAudioHandler extends BaseAudioHandler with SeekHandler {
       );
       _loadedChunks = index + 1;
     }
-    final atEnd = _player.processingState == ProcessingState.completed;
-    if (atEnd && !job.complete && playlist.length > (_player.currentIndex ?? 0) + 1) {
+    if (playlist.length == 0) return;
+    final ended = _player.processingState == ProcessingState.completed;
+    if (!_player.playing && !ended) {
       await _player.play();
+      return;
+    }
+    if (ended) {
+      final next = (_player.currentIndex ?? -1) + 1;
+      if (next < playlist.length) {
+        await _player.seek(Duration.zero, index: next);
+        await _player.play();
+      }
     }
     if (job.complete && _loadedChunks >= job.chunks.length) {
       _chunkPoll?.cancel();
